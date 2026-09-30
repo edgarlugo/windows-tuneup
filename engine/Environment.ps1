@@ -10,6 +10,18 @@ function ConvertTo-TuneupEdition {
     }
 }
 
+# Enterprise multi-session reports a Server-looking EditionID on a client OS, so the installation
+# type decides whether the machine is a server.
+function Resolve-TuneupEdition {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$EditionId,
+        [AllowEmptyString()][string]$InstallationType = ''
+    )
+    if ($InstallationType -like 'Server*') { return 'Server' }
+    if ($InstallationType -eq 'Client' -and $EditionId -match '^Server') { return 'Enterprise' }
+    ConvertTo-TuneupEdition -EditionId $EditionId
+}
+
 function Get-TuneupFamily {
     param([Parameter(Mandatory)][int]$Build)
     if ($Build -ge 22000) { '11' } else { '10' }
@@ -41,8 +53,7 @@ function Test-TuneupPendingReboot {
 function Get-TuneupEnvironment {
     $currentVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $build = [int]$currentVersion.CurrentBuild
-    $edition = ConvertTo-TuneupEdition -EditionId ([string]$currentVersion.EditionID)
-    if ($currentVersion.InstallationType -eq 'Server') { $edition = 'Server' }
+    $edition = Resolve-TuneupEdition -EditionId ([string]$currentVersion.EditionID) -InstallationType ([string]$currentVersion.InstallationType)
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
     [pscustomobject]@{
         Build         = $build

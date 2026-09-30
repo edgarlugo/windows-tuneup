@@ -20,6 +20,20 @@ Describe 'ConvertTo-TuneupEdition' {
     }
 }
 
+Describe 'Resolve-TuneupEdition' {
+    It 'maps <EditionId> on <InstallationType> to <Expected>' -TestCases @(
+        @{ EditionId = 'ServerDatacenter'; InstallationType = 'Server'; Expected = 'Server' }
+        @{ EditionId = 'ServerStandard'; InstallationType = 'Server Core'; Expected = 'Server' }
+        @{ EditionId = 'ServerRdsh'; InstallationType = 'Client'; Expected = 'Enterprise' }
+        @{ EditionId = 'Professional'; InstallationType = 'Client'; Expected = 'Pro' }
+        @{ EditionId = 'Core'; InstallationType = ''; Expected = 'Home' }
+        @{ EditionId = 'Enterprise'; InstallationType = 'Server'; Expected = 'Server' }
+        @{ EditionId = 'Mystery'; InstallationType = 'Client'; Expected = 'Unknown' }
+    ) {
+        Resolve-TuneupEdition -EditionId $EditionId -InstallationType $InstallationType | Should -Be $Expected
+    }
+}
+
 Describe 'Get-TuneupFamily' {
     It 'returns <Expected> for build <Build>' -TestCases @(
         @{ Build = 19045; Expected = '10' }

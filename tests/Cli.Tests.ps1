@@ -4,6 +4,7 @@ BeforeDiscovery {
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
+    . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $script:Repo = Split-Path $PSScriptRoot -Parent
     $script:Fixtures = Join-Path $PSScriptRoot 'fixtures'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
@@ -296,5 +297,16 @@ Describe 'tuneup.ps1' {
         $result = Invoke-Tuneup @('-Status')
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'incomplete last journal line'
+    }
+
+    It 'refuses to undo a run with a machine-scope entry when not elevated' -Skip:$Elevated {
+        $run = New-TuneupRun -StateRoot $script:Root -WarningAction SilentlyContinue
+        Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak (New-TestMachineTweak) -State $null -Root 'custom'
+        $result = Invoke-Tuneup @('-Undo', $run.Id, '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.message | Should -Match 'administrator'
+        Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test' | Should -BeFalse
     }
 }

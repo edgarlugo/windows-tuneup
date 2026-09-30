@@ -11,6 +11,18 @@ Describe 'i18n' {
         (Compare-Object -ReferenceObject $es -DifferenceObject $en | ForEach-Object { $_.InputObject }) -join ', ' | Should -BeNullOrEmpty
     }
 
+    It 'uses the same {n} placeholders in es and en for every key' {
+        $es = Get-Content -LiteralPath (Join-Path $I18nRoot 'es.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $en = Get-Content -LiteralPath (Join-Path $I18nRoot 'en.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $placeholders = { param($text) (([regex]::Matches([string]$text, '\{\d+\}') | ForEach-Object { $_.Value } | Sort-Object -Unique) -join ',') }
+        $mismatches = foreach ($key in $es.PSObject.Properties.Name) {
+            $spanish = & $placeholders $es.$key
+            $english = & $placeholders $en.$key
+            if ($spanish -ne $english) { "${key}: es=[$spanish] en=[$english]" }
+        }
+        $mismatches -join '; ' | Should -BeNullOrEmpty
+    }
+
     It 'formats texts with arguments' {
         Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
         Get-TuneupText -Key 'plan.header' -Format 3, 1 | Should -Be 'Plan: 3 to apply, 1 skipped'
