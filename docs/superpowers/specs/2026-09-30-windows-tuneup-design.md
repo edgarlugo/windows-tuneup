@@ -254,7 +254,9 @@ las dos carpetas y ordenan las corridas por id; una corrida con el diario vacío
 
 `-StateRoot <carpeta>` es solo para pruebas y desarrollo (los runners de CI son
 administradores y las pruebas lo usan): usa esa carpeta sin ACL ni ninguna revisión de
-confianza, así que **no debe usarse en un equipo real**.
+confianza, así que **no debe usarse en un equipo real**. En un proceso elevado lo recuerda con
+una advertencia. Con `-Json` las advertencias se omiten, porque `powershell.exe` las escribe
+en la salida estándar y romperían el JSON.
 
 **Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
 registro, servicio o tarea), así que el diario decide qué se toca con permisos de
@@ -274,6 +276,12 @@ herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
   aunque la directiva "Propietario predeterminado de objetos creados por miembros del grupo
   Administradores" esté en "Creador del objeto". Si `windows-tuneup` o `runs` ya existían y
   son confiables, un proceso elevado vuelve a aplicarles la ACL.
+- **Carpeta base confiable.** Antes de confiar en `windows-tuneup` se revisa la carpeta que
+  la contiene (`C:\ProgramData`): no puede ser un punto de reanálisis, su dueño tiene que ser
+  SYSTEM, TrustedInstaller o Administradores, y ninguna entrada que permite (salvo las solo de
+  herencia, como CREATOR OWNER) puede dar a otro SID borrar, borrar hijos, cambiar permisos,
+  tomar posesión o control genérico. Que Usuarios pueda crear carpetas y anexar, como en
+  `C:\ProgramData`, es aceptable. Si falla, no se crea nada y no se lee la carpeta de máquina.
 - **Nada ajeno.** Si la carpeta no es confiable (incluso recién creada, por si otro la creó
   primero), se detiene con "State folder … is not trusted. Delete it as administrator and run
   again." No se adueña de carpetas ajenas: su dueño podría cambiarlas por una unión justo
@@ -283,8 +291,10 @@ herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
   borrar, cambiar permisos, tomar posesión, escribir atributos o escritura/control genéricos
   (las que deniegan no cuentan), no es un punto de reanálisis y, si es archivo, no tiene otro
   enlace físico. Los archivos de la carpeta de máquina se abren una sola vez: dueño, DACL y
-  cantidad de enlaces se validan sobre ese mismo identificador, que se lee o se anexa sin
-  permitir otros escritores mientras está abierto.
+  cantidad de enlaces se validan sobre ese mismo identificador, que se lee o se anexa. Quien
+  escribe no deja entrar a otros escritores; quien lee comparte con un escritor, así que
+  `-Status` funciona durante una corrida. Un archivo bloqueado se informa como "en uso", no
+  como no confiable.
 - **Solo corridas confiables.** Al leer la carpeta de máquina se ignora, con advertencia,
   toda corrida cuya carpeta o diario no sea confiable, y también `run.json`, `result.json`,
   `undone.json` y `undone-tweaks.txt` que no lo sean; si `windows-tuneup` o `runs` no son
@@ -295,12 +305,17 @@ herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
   proceso sin elevar deja ahí no puede tocar el equipo cuando un administrador deshace.
 - **Cada usuario deshace lo suyo.** Las entradas de usuario guardan valores de `HKCU` de quien
   creó la corrida; `-Undo` y `-Status` ignoran, con advertencia, las de una corrida cuyo
-  `userSid` no es el del usuario actual (o que no lo dice). Sin elevar, `-Undo last` solo
-  considera corridas que puede completar: las de la carpeta de usuario y las de máquina sin
-  ajustes de máquina creadas por el mismo usuario.
-- **Deshacer sin registro no es deshacer limpio.** Si después de restaurar no se puede
-  escribir `undone.json` o `undone-tweaks.txt`, el resultado incluye un fallo y el código de
-  salida es `2`.
+  `userSid` no es el del usuario actual (o que no lo dice). En la carpeta de usuario, una
+  corrida sin `run.json` legible se considera del usuario actual.
+- **Qué elige `-Undo`.** Deshacer cualquier corrida de la carpeta de máquina, también con un id
+  explícito, exige elevación. Sin elevar, `-Undo last` solo considera corridas de la carpeta de
+  usuario. Elevado, considera las de máquina creadas por el mismo usuario o sin entradas de
+  usuario, y las de la carpeta de usuario del usuario actual.
+- **Marcas de deshacer.** `undone.json` se escribe solo si se tomaron todas las entradas de la
+  corrida. Si hubo entradas de otro usuario, en `undone-tweaks.txt` se anotan solo las
+  restauradas y la corrida sigue pendiente para su dueño; un deshacer completo posterior salta
+  lo ya anotado. Si después de restaurar no se puede escribir la marca, el resultado incluye un
+  fallo y el código de salida es `2`.
 - **Qué pueden ver otros.** Usuarios puede leer diarios y resultados de la carpeta de
   máquina; solo contienen los valores anteriores de los ajustes, no datos personales.
 - **Bloqueo posible.** Un usuario puede crear `windows-tuneup` en `ProgramData` antes que la
@@ -366,7 +381,8 @@ reporte de medición adjunto.
   Sin elevar solo se aplican ajustes de usuario y el diario va a la carpeta de usuario.
 - Windows Server o build no soportado (salvo `-Force`).
 - La carpeta de estado de máquina no es confiable (ver "Estado en disco"): pide borrarla como
-  administrador.
+  administrador. Si la que no es confiable es la carpeta que la contiene, no se crea nada.
+- `-Undo` de una corrida de la carpeta de máquina sin ser administrador.
 - No se puede escribir el diario: sin datos para deshacer no se aplica nada.
 
 ### Avisa y pide confirmación
