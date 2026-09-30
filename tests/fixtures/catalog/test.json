@@ -1,0 +1,37 @@
+{
+  "tweaks": [
+    {
+      "id": "test.one",
+      "title": { "es": "Prueba uno", "en": "Test one" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test", "name": "One", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.two",
+      "title": { "es": "Prueba dos", "en": "Test two" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test", "name": "Two", "kind": "String", "value": "x" },
+      "rebootRequired": true,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.three",
+      "title": { "es": "Prueba tres", "en": "Test three" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test", "name": "Three", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    }
+  ]
+}

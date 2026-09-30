@@ -255,8 +255,9 @@ las dos carpetas y ordenan las corridas por id; una corrida con el diario vacío
 `-StateRoot <carpeta>` es solo para pruebas y desarrollo (los runners de CI son
 administradores y las pruebas lo usan): usa esa carpeta sin ACL ni ninguna revisión de
 confianza, así que **no debe usarse en un equipo real**. En un proceso elevado lo recuerda con
-una advertencia. Con `-Json` las advertencias se omiten, porque `powershell.exe` las escribe
-en la salida estándar y romperían el JSON.
+una advertencia. Con `-Json` las advertencias no se escriben sueltas, porque `powershell.exe` las
+escribe en la salida estándar y romperían el JSON: van dentro del documento, en el arreglo
+`warnings` que llevan todas las salidas JSON (plan, aplicar, estado, deshacer y error).
 
 **Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
 registro, servicio o tarea), así que el diario decide qué se toca con permisos de

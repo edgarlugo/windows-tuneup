@@ -3162,6 +3162,12 @@ BeforeAll {
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
     function Get-Ids($Items) { ($Items | ForEach-Object { $_.id }) -join ',' }
+    function Get-RunDir { @(Get-ChildItem -LiteralPath (Join-Path $script:Root 'runs') -Directory | Sort-Object Name)[-1].FullName }
+    # The whole standard output has to be one JSON document, with nothing printed around it.
+    function ConvertFrom-PureJson([string]$Text) {
+        $Text.Trim() | Should -Match '^\{[\s\S]*\}$'
+        $Text | ConvertFrom-Json
+    }
 }
 
 Describe 'ConvertTo-TuneupList' {
@@ -3183,7 +3189,7 @@ Describe 'tuneup.ps1' {
     It 'shows the plan as JSON without changing anything' {
         $result = Invoke-Tuneup @('-WhatIf', '-Json')
         $result.ExitCode | Should -Be 0
-        $json = $result.Output | ConvertFrom-Json
+        $json = ConvertFrom-PureJson $result.Output
         $json.schemaVersion | Should -Be 1
         $json.command | Should -Be 'plan'
         Get-Ids $json.items | Should -Be 'test.one,test.two'
@@ -3193,7 +3199,7 @@ Describe 'tuneup.ps1' {
     It 'applies, reports and is idempotent' {
         $result = Invoke-Tuneup @('-Yes', '-Json')
         $result.ExitCode | Should -Be 0
-        $json = $result.Output | ConvertFrom-Json
+        $json = ConvertFrom-PureJson $result.Output
         $json.command | Should -Be 'apply'
         $json.summary.applied | Should -Be 2
         $json.rebootRequired | Should -BeTrue
@@ -3206,7 +3212,7 @@ Describe 'tuneup.ps1' {
     It 'reports drift in -Status' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
-        $json = (Invoke-Tuneup @('-Status', '-Json')).Output | ConvertFrom-Json
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-Status', '-Json')).Output
         ($json.items | Where-Object { $_.id -eq 'test.one' }).status | Should -Be 'drift'
         ($json.items | Where-Object { $_.id -eq 'test.two' }).status | Should -Be 'ok'
     }
@@ -3215,8 +3221,24 @@ Describe 'tuneup.ps1' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
         $result.ExitCode | Should -Be 0
-        ($result.Output | ConvertFrom-Json).summary.restored | Should -Be 2
+        (ConvertFrom-PureJson $result.Output).summary.restored | Should -Be 2
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'skips a tweak that was already undone and refuses to undo a run twice' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        $runId = Split-Path (Get-RunDir) -Leaf
+        (Invoke-Tuneup @('-Undo', $runId, '-Tweak', 'test.two', '-Json')).ExitCode | Should -Be 0
+        $again = Invoke-Tuneup @('-Undo', $runId, '-Tweak', 'test.two', '-Json')
+        $again.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $again.Output
+        $json.results[0].status | Should -Be 'skipped'
+        $json.results[0].reason | Should -Be 'already-undone'
+        $json.summary.skipped | Should -Be 1
+        (Invoke-Tuneup @('-Undo', $runId, '-Json')).ExitCode | Should -Be 0
+        $twice = Invoke-Tuneup @('-Undo', $runId, '-Json')
+        $twice.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $twice.Output).message | Should -Match 'already undone'
     }
 
     It 'accepts comma separated profiles and aliases' {
@@ -3227,12 +3249,63 @@ Describe 'tuneup.ps1' {
     It 'exits with 1 on an unknown profile' {
         $result = Invoke-Tuneup @('-Profile', 'nope', '-WhatIf', '-Json')
         $result.ExitCode | Should -Be 1
-        ($result.Output | ConvertFrom-Json).message | Should -Match 'nope'
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.message | Should -Match 'nope'
     }
 
     It 'refuses to apply with -Json but without -Yes' {
         (Invoke-Tuneup @('-Json')).ExitCode | Should -Be 1
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'carries every JSON document a warnings array' {
+        foreach ($arguments in @(@('-WhatIf', '-Json'), @('-Yes', '-Json'), @('-Status', '-Json'), @('-Undo', 'last', '-Json'), @('-Profile', 'nope', '-Json'))) {
+            $json = ConvertFrom-PureJson (Invoke-Tuneup $arguments).Output
+            $json.PSObject.Properties.Name | Should -Contain 'warnings' -Because ($arguments -join ' ')
+        }
+    }
+
+    It 'puts -Status warnings inside the JSON document' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        [System.IO.File]::AppendAllText((Join-Path (Get-RunDir) 'snapshot.jsonl'), '{"id":"test.bro')
+        $result = Invoke-Tuneup @('-Status', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        @($json.warnings | Where-Object { $_ -match 'incomplete last journal line' }).Count | Should -Be 1
+        Get-Ids $json.items | Should -Be 'test.one,test.two'
+    }
+
+    It 'puts -Undo warnings inside the JSON document' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        $runDir = Get-RunDir
+        $info = Get-Content -LiteralPath (Join-Path $runDir 'run.json') -Raw | ConvertFrom-Json
+        $info.userSid = 'S-1-5-21-1-2-3-1001'
+        [System.IO.File]::WriteAllText((Join-Path $runDir 'run.json'), ($info | ConvertTo-Json))
+        $result = Invoke-Tuneup @('-Undo', (Split-Path $runDir -Leaf), '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.summary.restored | Should -Be 0
+        @($json.warnings | Where-Object { $_ -match 'belongs to another user' }).Count | Should -Be 2
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
+    It 'puts warnings inside the JSON error document' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path (Get-RunDir) 'run.json'), '{ broken')
+        $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        @($json.warnings | Where-Object { $_ -match 'unreadable state file' }).Count | Should -Be 1
+    }
+
+    It 'prints warnings normally without -Json' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        [System.IO.File]::AppendAllText((Join-Path (Get-RunDir) 'snapshot.jsonl'), '{"id":"test.bro')
+        $result = Invoke-Tuneup @('-Status')
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'incomplete last journal line'
     }
 }
 ```
@@ -3271,22 +3344,31 @@ function Write-TuneupJson {
     Write-Output (ConvertTo-Json -InputObject $Object -Depth 10)
 }
 
+function Add-TuneupJsonWarning {
+    param([Parameter(Mandatory)]$Document, [AllowEmptyCollection()][string[]]$Warnings = @())
+    # A copy, so the report saved in the run folder does not change.
+    $copy = $Document | Select-Object -Property *
+    $copy | Add-Member -NotePropertyName warnings -NotePropertyValue ([string[]]@($Warnings)) -Force
+    $copy
+}
+
 function Write-TuneupPlanReport {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
         [Parameter(Mandatory)]$Environment,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
         [switch]$Json
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
     if ($Json) {
-        Write-TuneupJson ([pscustomobject]@{
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'plan'
             environment   = $Environment
             items         = $items
             summary       = [pscustomobject]@{ apply = $toApply; skip = $items.Count - $toApply }
-        })
+        }))
         return
     }
     Write-Host (Get-TuneupText -Key 'plan.header' -Format $toApply, ($items.Count - $toApply))
@@ -3328,8 +3410,12 @@ function New-TuneupApplyReport {
 }
 
 function Write-TuneupApplyReport {
-    param([Parameter(Mandatory)]$Report, [switch]$Json)
-    if ($Json) { Write-TuneupJson $Report; return }
+    param(
+        [Parameter(Mandatory)]$Report,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
+    if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
     $colors = @{ 'applied' = 'Green'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Report.results) {
         if ($result.status -eq 'skipped') { continue }
@@ -3345,9 +3431,13 @@ function Write-TuneupApplyReport {
 }
 
 function Write-TuneupStatusReport {
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$Json)
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
     if ($Json) {
-        Write-TuneupJson ([pscustomobject]@{ schemaVersion = 1; command = 'status'; items = $Items })
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{ schemaVersion = 1; command = 'status'; items = $Items }))
         return
     }
     if (-not $Items.Count) { Write-Host (Get-TuneupText -Key 'status.empty'); return }
@@ -3362,31 +3452,57 @@ function Write-TuneupUndoReport {
     param(
         [Parameter(Mandatory)][string]$RunId,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
         [switch]$Json
     )
     $restored = @($Results | Where-Object { $_.status -eq 'restored' }).Count
     $failed = @($Results | Where-Object { $_.status -eq 'failed' }).Count
+    $skipped = @($Results | Where-Object { $_.status -eq 'skipped' }).Count
     if ($Json) {
-        Write-TuneupJson ([pscustomobject]@{
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'undo'
             runId         = $RunId
             results       = $Results
-            summary       = [pscustomobject]@{ restored = $restored; failed = $failed }
-        })
+            summary       = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
+        }))
         return
     }
     Write-Host (Get-TuneupText -Key 'undo.header' -Format $RunId)
+    $colors = @{ 'restored' = 'Green'; 'skipped' = 'DarkGray'; 'failed' = 'Red' }
     foreach ($result in $Results) {
-        $color = $(if ($result.status -eq 'restored') { 'Green' } else { 'Red' })
-        Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $color
+        $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
+        if ($result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
+        Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
     Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed)
 }
+
+function Write-TuneupErrorReport {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [AllowEmptyCollection()][string[]]$Details = @(),
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
+    if ($Json) {
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
+            schemaVersion = 1
+            command       = 'error'
+            message       = $Message
+            details       = [string[]]@($Details)
+        }))
+        return
+    }
+    Write-Host $Message -ForegroundColor Red
+    foreach ($detail in $Details) { Write-Host "  - $detail" -ForegroundColor Red }
+}
 ```
 
 - [ ] **Step 5: CLI**
+
+Con `-Json` la salida estándar es un único documento JSON. `powershell.exe -File` escribe las advertencias en la salida estándar, así que cada llamada al motor pasa por `Invoke-TuneupStep`, que con `-Json` redirige el flujo de advertencias (`3>&1`) y las guarda, sin repetir, para el arreglo `warnings` que llevan todos los documentos (plan, apply, status, undo y error). Sin `-Json` se muestran como siempre. Se descartó `$WarningPreference = 'SilentlyContinue'`: una herramienta pública no debe callar advertencias de seguridad del estado.
 
 `tuneup.ps1`:
 ```powershell
@@ -3433,33 +3549,42 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
 
 Import-Module (Join-Path $PSScriptRoot 'engine\Tuneup.psm1') -Force
 Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
-# powershell.exe writes warnings to stdout, where they would break the JSON document.
-if ($Json) { $WarningPreference = 'SilentlyContinue' }
+
+$script:Warnings = New-Object System.Collections.Generic.List[string]
+
+# powershell.exe writes warnings to standard output, where they would break the JSON document,
+# so with -Json they are collected and reported inside it instead.
+function Invoke-TuneupStep {
+    param([Parameter(Mandatory)][scriptblock]$Step)
+    if (-not $Json) { return (& $Step) }
+    & $Step 3>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.WarningRecord]) {
+            if (-not $script:Warnings.Contains($_.Message)) { $script:Warnings.Add($_.Message) }
+        } else {
+            $_
+        }
+    }
+}
 
 function Stop-Tuneup {
     param([Parameter(Mandatory)][string]$Message, [string[]]$Details = @())
-    if ($Json) {
-        Write-TuneupJson ([pscustomobject]@{ schemaVersion = 1; command = 'error'; message = $Message; details = $Details })
-    } else {
-        Write-Host $Message -ForegroundColor Red
-        foreach ($detail in $Details) { Write-Host "  - $detail" -ForegroundColor Red }
-    }
+    Write-TuneupErrorReport -Message $Message -Details $Details -Warnings $script:Warnings.ToArray() -Json:$Json
     exit 1
 }
 
-$ProfileName = ConvertTo-TuneupList -Value $ProfileName
-$Include = ConvertTo-TuneupList -Value $Include
-$Exclude = ConvertTo-TuneupList -Value $Exclude
+$ProfileName = @(ConvertTo-TuneupList -Value $ProfileName)
+$Include = @(ConvertTo-TuneupList -Value $Include)
+$Exclude = @(ConvertTo-TuneupList -Value $Exclude)
 if (-not $CatalogPath) { $CatalogPath = Join-Path $PSScriptRoot 'catalog' }
 if (-not $ProfilesPath) { $ProfilesPath = Join-Path $PSScriptRoot 'profiles' }
 
 try {
-    $catalog = @(Import-TuneupCatalog -Path $CatalogPath)
-    $profileSet = @(Import-TuneupProfileSet -Path $ProfilesPath)
+    $catalog = @(Invoke-TuneupStep { Import-TuneupCatalog -Path $CatalogPath })
+    $profileSet = @(Invoke-TuneupStep { Import-TuneupProfileSet -Path $ProfilesPath })
     $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
     if ($problems.Count) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.catalog') -Details $problems }
 
-    $environment = Get-TuneupEnvironment
+    $environment = Invoke-TuneupStep { Get-TuneupEnvironment }
     if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
     if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {
         Stop-Tuneup -Message (Get-TuneupText -Key 'err.unsupported')
@@ -3468,32 +3593,35 @@ try {
     if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
 
     if ($Status) {
-        Write-TuneupStatusReport -Items @(Get-TuneupStatus -StateRoot $StateRoot) -Json:$Json
+        $items = @(Invoke-TuneupStep { Get-TuneupStatus -StateRoot $StateRoot })
+        Write-TuneupStatusReport -Items $items -Warnings $script:Warnings.ToArray() -Json:$Json
         exit 0
     }
 
     if ($Undo) {
-        $run = Resolve-TuneupRun -StateRoot $StateRoot -RunId $Undo
+        $run = Invoke-TuneupStep { Resolve-TuneupRun -StateRoot $StateRoot -RunId $Undo }
         if (-not $run) { Stop-Tuneup -Message (Get-TuneupText -Key 'undo.none') }
         # Machine-folder runs always need elevation; a -StateRoot run only for its machine tweaks.
         $needsAdmin = ($run.Root -eq 'machine')
         if (-not $needsAdmin) {
-            $needsAdmin = @(Read-TuneupRunJournal -Run $run | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
+            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
         }
         if ($needsAdmin -and -not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin') }
-        $undoResults = @(Invoke-TuneupUndo -Run $run -TweakId $Tweak)
-        Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Json:$Json
+        $undoResults = @(Invoke-TuneupStep { Invoke-TuneupUndo -Run $run -TweakId $Tweak })
+        Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Warnings $script:Warnings.ToArray() -Json:$Json
         if (@($undoResults | Where-Object { $_.status -eq 'failed' }).Count) { exit 2 }
         exit 0
     }
 
-    $plan = @(New-TuneupPlan -Catalog $catalog -Profiles $profileSet -ProfileIds $ProfileName `
-        -Include $Include -Exclude $Exclude -Environment $environment `
-        -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+    $plan = @(Invoke-TuneupStep {
+        New-TuneupPlan -Catalog $catalog -Profiles $profileSet -ProfileIds $ProfileName `
+            -Include $Include -Exclude $Exclude -Environment $environment `
+            -TestState { param($tweak) Test-TuneupState -Tweak $tweak }
+    })
     $toApply = @($plan | Where-Object { $_.Action -eq 'apply' })
 
     if ($WhatIf -or -not $toApply.Count) {
-        Write-TuneupPlanReport -Plan $plan -Environment $environment -Json:$Json
+        Write-TuneupPlanReport -Plan $plan -Environment $environment -Warnings $script:Warnings.ToArray() -Json:$Json
         exit 0
     }
     $machineChanges = @($toApply | Where-Object { $_.Tweak.scope -eq 'machine' }).Count
@@ -3509,14 +3637,14 @@ try {
     }
 
     # Elevated runs go to the protected machine folder; the rest to the user folder (user-scope tweaks only).
-    $run = New-TuneupRun -StateRoot $StateRoot -Machine:$environment.IsAdmin
-    Save-TuneupJson -Path (Join-Path $run.Dir 'plan.json') -Object @(ConvertTo-TuneupPlanView -Plan $plan)
+    $run = Invoke-TuneupStep { New-TuneupRun -StateRoot $StateRoot -Machine:$environment.IsAdmin }
+    Invoke-TuneupStep { Save-TuneupJson -Path (Join-Path $run.Dir 'plan.json') -Root $run.Root -Object @(ConvertTo-TuneupPlanView -Plan $plan) }
     $restorePoint = 'not-needed'
-    if ($machineChanges) { $restorePoint = New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" }
-    $results = @(Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir)
+    if ($machineChanges) { $restorePoint = Invoke-TuneupStep { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
+    $results = @(Invoke-TuneupStep { Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir })
     $report = New-TuneupApplyReport -Run $run -Results $results -RestorePoint $restorePoint -Environment $environment
-    Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object $report
-    Write-TuneupApplyReport -Report $report -Json:$Json
+    Invoke-TuneupStep { Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Root $run.Root -Object $report }
+    Write-TuneupApplyReport -Report $report -Warnings $script:Warnings.ToArray() -Json:$Json
     if ($report.summary.notApplied -or $report.summary.failed) { exit 2 }
     exit 0
 } catch {
@@ -3527,7 +3655,7 @@ try {
 - [ ] **Step 6: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Cli.Tests.ps1`
-Expected: 8 passed.
+Expected: 14 passed.
 
 - [ ] **Step 7: Prueba manual en español**
 
@@ -3560,7 +3688,7 @@ Expected: `PSScriptAnalyzer: no findings`. Si aparece un hallazgo, corregir el c
 - [ ] **Step 2: Suite completa**
 
 Run: `powershell -NoProfile -File build/test.ps1`
-Expected: todas las pruebas pasan (alrededor de 95), 0 fallidas.
+Expected: todas las pruebas pasan (263), 0 fallidas.
 
 - [ ] **Step 3: Prueba real, solo lectura, en este PC**
 
