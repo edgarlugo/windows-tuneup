@@ -2122,7 +2122,8 @@ BeforeAll {
         (New-TestTweak -Id 'ui.home-only' -Editions @('Home')),
         (New-TestTweak -Id 'ui.future' -MinBuild 30000),
         (New-TestTweak -Id 'ui.edge-build' -MinBuild 26100),
-        (New-TestTweak -Id 'ui.only-11' -Families @('11'))
+        (New-TestTweak -Id 'ui.only-11' -Families @('11')),
+        (New-TestTweak -Id 'svc.policy-path' -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\Policies\Microsoft\Example'; name = 'Spooler'; startup = 'Disabled' }))
     )
     $script:Profiles = @(
         (New-TestProfile -Id 'base' -Include @('ui.a')),
@@ -2251,6 +2252,21 @@ Describe 'New-TuneupPlan' {
         $absent = { param($tweak) 'not-present' }
         Get-Reason (Invoke-Plan -ProfileIds 'lite' -TestState $absent) 'apps.onedrive' | Should -Be 'not-present'
     }
+    It 'lists a tweak that only arrives through -Include' {
+        $plan = Invoke-Plan -Include 'UI.B'
+        ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'
+        Get-Action $plan 'ui.b' | Should -Be 'apply'
+    }
+
+    It 'trims spaces around -Include entries' {
+        $plan = Invoke-Plan -Include ' ui.b '
+        ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'
+    }
+
+    It 'does not treat non-registry tweaks as policies on managed devices' {
+        $plan = Invoke-Plan -Include 'svc.policy-path' -Environment (New-TestEnvironment -IsManaged $true)
+        Get-Action $plan 'svc.policy-path' | Should -Be 'apply'
+    }
 }
 ```
 
@@ -2367,7 +2383,7 @@ function New-TuneupPlan {
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Planner.Tests.ps1`
-Expected: 21 passed.
+Expected: 24 passed.
 
 - [ ] **Step 5: Commit**
 
