@@ -118,6 +118,8 @@ function Save-TuneupApplyReport {
     }
 }
 
+# 0: everything done. 2: not everything was completed (some changes may have been made; read the
+# summary). 1: nothing was changed because the backups could not be written.
 function Get-TuneupApplyExitCode {
     param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
     $summary = $Report.summary
@@ -127,6 +129,7 @@ function Get-TuneupApplyExitCode {
     0
 }
 
+# 0: everything restored. 2: partly restored. 1: nothing restored.
 function Get-TuneupUndoExitCode {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results)
     $restored = @($Results | Where-Object { $_.status -eq 'restored' }).Count

@@ -160,10 +160,13 @@ Cada manejador implementa el mismo contrato:
 
 | Función | Qué hace |
 |---|---|
-| `Get-Current` | Lee el estado actual (para el snapshot y para `-Status`) |
-| `Test-Applied` | ¿Ya está en el valor deseado? |
-| `Set-Desired` | Aplica |
-| `Restore-Previous` | Devuelve el valor guardado en el snapshot |
+| `Get-<Tipo>TweakState` | Lee el estado actual (para el snapshot y para `-Status`) |
+| `Test-<Tipo>TweakState` | ¿Ya está en el valor deseado? Devuelve `applied`, `not-applied` o `not-present` |
+| `Set-<Tipo>TweakDesired` | Aplica |
+| `Restore-<Tipo>TweakState` | Devuelve el valor guardado en el snapshot |
+
+`<Tipo>` es el nombre del manejador (`Registry`, `Service`, `Task`); `engine/Dispatch.ps1` elige
+la función según el `type` del ajuste.
 
 | Tipo | Estado que guarda | Reversa |
 |---|---|---|
@@ -244,7 +247,7 @@ Dentro de cada una, la corrida vive en `runs\<yyyyMMdd-HHmmss>\`:
 | `snapshot.jsonl` | Diario: una línea por ajuste, escrita **antes** de tocarlo |
 | `result.json` | Resultado por ajuste y conteos (esquema versionado) |
 | `undone.json`, `undone-tweaks.txt` | Marcas de lo que ya se deshizo |
-| `transcript.log` | Salida completa |
+| `transcript.log` | Salida completa (Plan 4: todavía no se escribe) |
 
 Las rutas salen de `GetFolderPath('CommonApplicationData')` y
 `GetFolderPath('LocalApplicationData')`, no de variables de entorno. Queda fuera de la carpeta
@@ -391,8 +394,10 @@ reporte de medición adjunto.
 
 ### Antes de cambiar nada (se detiene)
 
-- Hay ajustes de máquina y no es administrador (con `pwsh` se relanza con `powershell.exe`).
-  Sin elevar solo se aplican ajustes de usuario y el diario va a la carpeta de usuario.
+- Hay ajustes de máquina en el plan y no es administrador (con `pwsh` se relanza con
+  `powershell.exe`). Un plan con cualquier cambio de sistema se rechaza entero: hay que elevar o
+  dejar esos ajustes fuera con `-Exclude`. Un plan solo de usuario corre sin elevar y su diario va
+  a la carpeta de usuario.
 - Windows Server o build no soportado (salvo `-Force`).
 - La carpeta de estado de máquina no es confiable (ver "Estado en disco"): pide borrarla como
   administrador. Si la que no es confiable es la carpeta que la contiene, no se crea nada.
@@ -416,13 +421,17 @@ reporte de medición adjunto.
 
 ### Después
 
-- Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar. Un ajuste que
-  no se aplicó porque no se pudo escribir su diario cuenta como no hecho: si no se cambió nada es
-  `1`, si algo sí, `2`; también es `2` si no se pudo guardar `result.json` después de aplicar. En
-  `-Undo`: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (quedan fallos o ajustes de
-  otro usuario), `1` nada restaurado.
-- `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar.
-- `-Undo` sigue ante errores y lista lo que no pudo restaurar con la instrucción manual.
+- Códigos de salida: `0` todo hecho; `2` no todo se completó, puede haberse cambiado algo: hay que
+  leer el resumen (algún ajuste falló, no tuvo efecto o no se pudo guardar su diario, o no se pudo
+  guardar `result.json`); `1` abortado antes de cambiar nada. Un ajuste que no se aplicó porque no
+  se pudo escribir su diario cuenta como no hecho: si no se cambió nada es `1`, si algo sí, `2`.
+  Si se intentó aplicar y todo falló (o no tuvo efecto), también es `2`, aunque no haya cambiado
+  nada. En `-Undo`: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (quedan fallos o
+  ajustes de otro usuario), `1` nada restaurado.
+- `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar
+  (Plan 4: hoy solo informa la deriva).
+- `-Undo` sigue ante errores y lista lo que no pudo restaurar (Plan 4: la instrucción manual
+  para cada uno todavía no se da).
 - `-Undo` y `-Status` ignoran, con advertencia, las corridas y marcas no confiables de la
   carpeta de máquina, las entradas de máquina de la carpeta de usuario y las entradas de
   usuario de corridas de otro usuario.

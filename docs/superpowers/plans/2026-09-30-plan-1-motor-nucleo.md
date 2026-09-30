@@ -10,6 +10,8 @@
 
 **Especificación:** `docs/superpowers/specs/2026-09-30-windows-tuneup-design.md`
 
+> **Nota sobre los bloques de código:** los bloques de este plan registran lo ejecutado hasta la revisión de cada tarea. Después de los arreglos posteriores, **los archivos del repositorio son la fuente de verdad**; no se sincronizó cada bloque. Bloques que se sabe desactualizados: `ci.yml`, `Environment.ps1` y sus pruebas, `I18n.Tests.ps1`, `Cli.Tests.ps1` y el README.
+
 ---
 
 ## Hoja de ruta (5 planes)
