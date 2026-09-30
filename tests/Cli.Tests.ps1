@@ -143,8 +143,6 @@ Describe 'tuneup.ps1' {
     }
 
     It 'exits with 2 when an undo restores only part of the run' {
-        New-Item -Path $SubKey -Force | Out-Null
-        New-ItemProperty -LiteralPath $SubKey -Name 'Four' -PropertyType DWord -Value 0 | Out-Null
         (Invoke-Tuneup @('-Profile', 'nested', '-Yes', '-Json')).ExitCode | Should -Be 0
         Set-TestSetValueDeny
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')

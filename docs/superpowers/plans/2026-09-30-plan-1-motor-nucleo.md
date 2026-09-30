@@ -1308,11 +1308,30 @@ BeforeAll {
     function New-RegTweak([string]$Path, [string]$Name, $Kind, $Value) {
         New-TestTweak -Set ([pscustomobject]@{ path = $Path; name = $Name; kind = $Kind; value = $Value })
     }
+    # Denies the current user writing values in the test key only. The key is opened for its ACL
+    # alone: Set-Acl would ask for write access, which the deny itself blocks.
+    function Set-TestSetValueDeny([switch]$Remove) {
+        $item = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\windows-tuneup-test',
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            [System.Security.AccessControl.RegistryRights]'ReadPermissions, ChangePermissions')
+        try {
+            $acl = $item.GetAccessControl()
+            $rule = New-Object System.Security.AccessControl.RegistryAccessRule -ArgumentList `
+                ([Security.Principal.WindowsIdentity]::GetCurrent().User), 'SetValue', 'None', 'None', 'Deny'
+            if ($Remove) { [void]$acl.RemoveAccessRule($rule) } else { $acl.AddAccessRule($rule) }
+            $item.SetAccessControl($acl)
+        } finally {
+            $item.Close()
+        }
+    }
 }
 
 Describe 'Registry handler' {
     AfterEach {
-        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        if (Test-Path -LiteralPath $Key) {
+            Set-TestSetValueDeny -Remove
+            Remove-Item -LiteralPath $Key -Recurse -Force
+        }
     }
 
     It 'captures a missing value and the nearest existing ancestor' {
@@ -1384,6 +1403,32 @@ Describe 'Registry handler' {
         Test-RegistryTweakState -Tweak $tweak | Should -Be 'applied'
         Restore-RegistryTweakState -Tweak $tweak -State $state
         (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
+    }
+
+    It 'fails when a value it created cannot be removed on restore' {
+        $tweak = New-RegTweak $Key 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        Set-RegistryTweakDesired -Tweak $tweak
+        Set-TestSetValueDeny
+        { Restore-RegistryTweakState -Tweak $tweak -State $state } | Should -Throw
+        (Get-ItemProperty -LiteralPath $Key).A | Should -Be 1
+    }
+
+    It 'fails when a value cannot be removed for a null desired value' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'A' -PropertyType DWord -Value 7 | Out-Null
+        Set-TestSetValueDeny
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null) } | Should -Throw
+        (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
+    }
+
+    It 'treats removing an absent value or key as done' {
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak "$Key\Missing" 'A' $null $null) } | Should -Not -Throw
+        New-Item -Path $Key -Force | Out-Null
+        Set-TestSetValueDeny
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null) } | Should -Not -Throw
+        $state = [pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $false; kind = $null; value = $null }
+        { Restore-RegistryTweakState -Tweak (New-RegTweak $Key 'A' 'DWord' 1) -State $state } | Should -Not -Throw
     }
 
     It 'does not equate a MultiString element that contains a space with two elements' {
@@ -1507,6 +1552,16 @@ function Write-TuneupRegistryValue {
     New-ItemProperty -LiteralPath $Path -Name $Name -PropertyType $Kind -Value $data -Force -ErrorAction Stop | Out-Null
 }
 
+function Remove-TuneupRegistryValue {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Name)
+    # An absent value is already gone; any other failure (access denied) must surface.
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $key = Get-Item -LiteralPath $Path
+    $present = $key.GetValueNames() -contains $Name
+    $key.Close()
+    if ($present) { Remove-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop }
+}
+
 function Get-RegistryTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $path = [string]$Tweak.set.path
@@ -1551,9 +1606,7 @@ function Set-RegistryTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
     $desired = $Tweak.set
     if ($null -eq $desired.value) {
-        if (Test-Path -LiteralPath $desired.path) {
-            Remove-ItemProperty -LiteralPath $desired.path -Name $desired.name -ErrorAction SilentlyContinue
-        }
+        Remove-TuneupRegistryValue -Path $desired.path -Name $desired.name
         return
     }
     Write-TuneupRegistryValue -Path $desired.path -Name $desired.name -Kind $desired.kind -Value $desired.value
@@ -1567,9 +1620,7 @@ function Restore-RegistryTweakState {
         Write-TuneupRegistryValue -Path $path -Name $name -Kind $State.kind -Value $State.value
         return
     }
-    if (Test-Path -LiteralPath $path) {
-        Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction SilentlyContinue
-    }
+    Remove-TuneupRegistryValue -Path $path -Name $name
     $current = $path
     while ($current -and $current -ne $State.existingAncestor -and (Test-Path -LiteralPath $current)) {
         $key = Get-Item -LiteralPath $current
@@ -1585,7 +1636,7 @@ function Restore-RegistryTweakState {
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Registry.Tests.ps1`
-Expected: 11 passed.
+Expected: 14 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -3376,8 +3427,6 @@ Describe 'tuneup.ps1' {
     }
 
     It 'exits with 2 when an undo restores only part of the run' {
-        New-Item -Path $SubKey -Force | Out-Null
-        New-ItemProperty -LiteralPath $SubKey -Name 'Four' -PropertyType DWord -Value 0 | Out-Null
         (Invoke-Tuneup @('-Profile', 'nested', '-Yes', '-Json')).ExitCode | Should -Be 0
         Set-TestSetValueDeny
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
@@ -4154,7 +4203,7 @@ Expected: `PSScriptAnalyzer: no findings`. Si aparece un hallazgo, corregir el c
 - [ ] **Step 2: Suite completa**
 
 Run: `powershell -NoProfile -File build/test.ps1`
-Expected: todas las pruebas pasan (306), 0 fallidas.
+Expected: todas las pruebas pasan (309), 0 fallidas.
 
 - [ ] **Step 3: Prueba real, solo lectura, en este PC**
 

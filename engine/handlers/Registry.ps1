@@ -78,6 +78,16 @@ function Write-TuneupRegistryValue {
     New-ItemProperty -LiteralPath $Path -Name $Name -PropertyType $Kind -Value $data -Force -ErrorAction Stop | Out-Null
 }
 
+function Remove-TuneupRegistryValue {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Name)
+    # An absent value is already gone; any other failure (access denied) must surface.
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $key = Get-Item -LiteralPath $Path
+    $present = $key.GetValueNames() -contains $Name
+    $key.Close()
+    if ($present) { Remove-ItemProperty -LiteralPath $Path -Name $Name -ErrorAction Stop }
+}
+
 function Get-RegistryTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $path = [string]$Tweak.set.path
@@ -122,9 +132,7 @@ function Set-RegistryTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
     $desired = $Tweak.set
     if ($null -eq $desired.value) {
-        if (Test-Path -LiteralPath $desired.path) {
-            Remove-ItemProperty -LiteralPath $desired.path -Name $desired.name -ErrorAction SilentlyContinue
-        }
+        Remove-TuneupRegistryValue -Path $desired.path -Name $desired.name
         return
     }
     Write-TuneupRegistryValue -Path $desired.path -Name $desired.name -Kind $desired.kind -Value $desired.value
@@ -138,9 +146,7 @@ function Restore-RegistryTweakState {
         Write-TuneupRegistryValue -Path $path -Name $name -Kind $State.kind -Value $State.value
         return
     }
-    if (Test-Path -LiteralPath $path) {
-        Remove-ItemProperty -LiteralPath $path -Name $name -ErrorAction SilentlyContinue
-    }
+    Remove-TuneupRegistryValue -Path $path -Name $name
     $current = $path
     while ($current -and $current -ne $State.existingAncestor -and (Test-Path -LiteralPath $current)) {
         $key = Get-Item -LiteralPath $current

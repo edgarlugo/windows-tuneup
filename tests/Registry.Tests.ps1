@@ -5,11 +5,30 @@ BeforeAll {
     function New-RegTweak([string]$Path, [string]$Name, $Kind, $Value) {
         New-TestTweak -Set ([pscustomobject]@{ path = $Path; name = $Name; kind = $Kind; value = $Value })
     }
+    # Denies the current user writing values in the test key only. The key is opened for its ACL
+    # alone: Set-Acl would ask for write access, which the deny itself blocks.
+    function Set-TestSetValueDeny([switch]$Remove) {
+        $item = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\windows-tuneup-test',
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            [System.Security.AccessControl.RegistryRights]'ReadPermissions, ChangePermissions')
+        try {
+            $acl = $item.GetAccessControl()
+            $rule = New-Object System.Security.AccessControl.RegistryAccessRule -ArgumentList `
+                ([Security.Principal.WindowsIdentity]::GetCurrent().User), 'SetValue', 'None', 'None', 'Deny'
+            if ($Remove) { [void]$acl.RemoveAccessRule($rule) } else { $acl.AddAccessRule($rule) }
+            $item.SetAccessControl($acl)
+        } finally {
+            $item.Close()
+        }
+    }
 }
 
 Describe 'Registry handler' {
     AfterEach {
-        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        if (Test-Path -LiteralPath $Key) {
+            Set-TestSetValueDeny -Remove
+            Remove-Item -LiteralPath $Key -Recurse -Force
+        }
     }
 
     It 'captures a missing value and the nearest existing ancestor' {
@@ -81,6 +100,32 @@ Describe 'Registry handler' {
         Test-RegistryTweakState -Tweak $tweak | Should -Be 'applied'
         Restore-RegistryTweakState -Tweak $tweak -State $state
         (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
+    }
+
+    It 'fails when a value it created cannot be removed on restore' {
+        $tweak = New-RegTweak $Key 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        Set-RegistryTweakDesired -Tweak $tweak
+        Set-TestSetValueDeny
+        { Restore-RegistryTweakState -Tweak $tweak -State $state } | Should -Throw
+        (Get-ItemProperty -LiteralPath $Key).A | Should -Be 1
+    }
+
+    It 'fails when a value cannot be removed for a null desired value' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'A' -PropertyType DWord -Value 7 | Out-Null
+        Set-TestSetValueDeny
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null) } | Should -Throw
+        (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
+    }
+
+    It 'treats removing an absent value or key as done' {
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak "$Key\Missing" 'A' $null $null) } | Should -Not -Throw
+        New-Item -Path $Key -Force | Out-Null
+        Set-TestSetValueDeny
+        { Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null) } | Should -Not -Throw
+        $state = [pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $false; kind = $null; value = $null }
+        { Restore-RegistryTweakState -Tweak (New-RegTweak $Key 'A' 'DWord' 1) -State $state } | Should -Not -Throw
     }
 
     It 'does not equate a MultiString element that contains a space with two elements' {
