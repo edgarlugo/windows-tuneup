@@ -7,6 +7,7 @@
   "err.unknownProfile": "Perfil desconocido: {0}",
   "err.unknownTweak": "Ajuste desconocido: {0}",
   "err.tweakNotInRun": "El ajuste {0} no está en esa corrida.",
+  "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
   "undo.none": "No hay corridas para deshacer.",
   "plan.header": "Plan: {0} para aplicar, {1} omitidos",
   "plan.apply": "  + {0} [{1}]",

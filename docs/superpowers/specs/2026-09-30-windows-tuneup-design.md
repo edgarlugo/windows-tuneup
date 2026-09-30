@@ -414,6 +414,8 @@ reporte de medición adjunto.
 - Deshacer una corrida que se volvió a aplicar restaura el valor que había antes de *esa* corrida
   (que puede ser un valor ya desviado); las corridas anteriores siguen pendientes hasta que se
   deshagan.
+- Deshacer ajustes sueltos fuera de orden puede dejar una clave de registro vacía que creó la
+  corrida; solo deshacer en orden inverso la elimina. Una corrida ya deshecha no se deshace otra vez.
 - Todo queda local; no se envía nada a ningún servidor.
 
 ## 8. Skill de Claude

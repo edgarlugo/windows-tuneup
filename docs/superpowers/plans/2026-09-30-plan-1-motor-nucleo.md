@@ -485,6 +485,7 @@ function Get-TuneupTitle {
   "err.unknownProfile": "Perfil desconocido: {0}",
   "err.unknownTweak": "Ajuste desconocido: {0}",
   "err.tweakNotInRun": "El ajuste {0} no está en esa corrida.",
+  "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
   "undo.none": "No hay corridas para deshacer.",
   "plan.header": "Plan: {0} para aplicar, {1} omitidos",
   "plan.apply": "  + {0} [{1}]",
@@ -543,6 +544,7 @@ function Get-TuneupTitle {
   "err.unknownProfile": "Unknown profile: {0}",
   "err.unknownTweak": "Unknown tweak: {0}",
   "err.tweakNotInRun": "Tweak {0} is not part of that run.",
+  "err.runAlreadyUndone": "Run {0} was already undone.",
   "undo.none": "There are no runs to undo.",
   "plan.header": "Plan: {0} to apply, {1} skipped",
   "plan.apply": "  + {0} [{1}]",
@@ -2651,6 +2653,7 @@ git commit -m "feat: ejecutor con diario previo y verificación"
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:One = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'One'; kind = 'DWord'; value = 1 })
     $script:Two = New-TestTweak -Id 'test.two' -Set ([pscustomobject]@{ path = $Key; name = 'Two'; kind = 'String'; value = 'x' })
@@ -2854,6 +2857,19 @@ Describe 'Undo and status' {
         Mock -ModuleName Tuneup Test-TuneupState { 'not-present' }
         (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'not-present'
     }
+
+    It 'refuses to undo a run that was already undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run | Out-Null
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'One' -PropertyType DWord -Value 9 | Out-Null
+        { Invoke-TuneupUndo -Run $run } | Should -Throw '*already undone*'
+        $resolved = Resolve-TuneupRun -StateRoot $Root -RunId $run.Id
+        $resolved.Undone | Should -BeTrue
+        { Invoke-TuneupUndo -Run $resolved } | Should -Throw '*already undone*'
+        { Invoke-TuneupUndo -Run $resolved -TweakId 'test.one' } | Should -Throw '*already undone*'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 9
+    }
 }
 ```
 
@@ -2869,6 +2885,10 @@ Expected: FAIL, `Invoke-TuneupUndo` no se reconoce.
 function Invoke-TuneupUndo {
     param([Parameter(Mandatory)]$Run, [string]$TweakId)
     Assert-TuneupRunUndoable -Run $Run
+    # A run object built before the undo carries no Undone flag, so the marker itself decides.
+    if ($Run.Undone -or (Test-TuneupRunMarker -Dir $Run.Dir -Name 'undone.json' -Root $Run.Root)) {
+        throw (Get-TuneupText -Key 'err.runAlreadyUndone' -Format $Run.Id)
+    }
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
@@ -2947,12 +2967,12 @@ Nota: si una corrida se cortó antes de escribir `result.json`, `$touchedIds` qu
 
 Nota: todo lo que se lee de una corrida pasa por los lectores de la Task 9: `Get-TuneupRunJournal` (confianza de la carpeta de máquina, sin entradas de máquina en la de usuario; las entradas de usuario de otra persona quedan en `Skipped`), `Read-TuneupTrustedJson` para `result.json`, `Get-TuneupUndoneTweakId` para `undone-tweaks.txt` y `Undone` del listado para `undone.json`. Las marcas se escriben con `Save-TuneupJson`/`Write-TuneupStateFile`, que en la carpeta de máquina crean el archivo ya protegido. `Assert-TuneupRunUndoable` exige elevación para cualquier corrida de la carpeta de máquina.
 
-Nota: `undone.json` se escribe solo cuando todos los ajustes de la corrida quedaron restaurados (ya anotados antes o restaurados ahora). Si alguno falló o es de otro usuario, se anotan en `undone-tweaks.txt` solo los restaurados y la corrida sigue pendiente: `-Undo last` reintenta lo que falta y un deshacer completo posterior salta los ya anotados. `-TweakId` sobre un ajuste ya deshecho no restaura de nuevo: devuelve `skipped` con `reason = 'already-undone'`. Al deshacer ajuste por ajuste, cuando el último queda anotado también se escribe `undone.json`.
+Nota: `undone.json` se escribe solo cuando todos los ajustes de la corrida quedaron restaurados (ya anotados antes o restaurados ahora). Si alguno falló o es de otro usuario, se anotan en `undone-tweaks.txt` solo los restaurados y la corrida sigue pendiente: `-Undo last` reintenta lo que falta y un deshacer completo posterior salta los ya anotados. `-TweakId` sobre un ajuste ya deshecho no restaura de nuevo: devuelve `skipped` con `reason = 'already-undone'`. Al deshacer ajuste por ajuste, cuando el último queda anotado también se escribe `undone.json`. Una corrida ya deshecha (`undone.json` confiable) no se deshace de nuevo: `Invoke-TuneupUndo` falla con `err.runAlreadyUndone`; se consulta la marca y no solo `$Run.Undone`, porque un objeto de corrida armado antes del deshacer no la trae.
 
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: 20 passed.
+Expected: 21 passed.
 
 - [ ] **Step 5: Commit**
 

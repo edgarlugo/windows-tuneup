@@ -1,6 +1,7 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:One = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'One'; kind = 'DWord'; value = 1 })
     $script:Two = New-TestTweak -Id 'test.two' -Set ([pscustomobject]@{ path = $Key; name = 'Two'; kind = 'String'; value = 'x' })
@@ -203,5 +204,18 @@ Describe 'Undo and status' {
         Invoke-TestApply $Root | Out-Null
         Mock -ModuleName Tuneup Test-TuneupState { 'not-present' }
         (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'not-present'
+    }
+
+    It 'refuses to undo a run that was already undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run | Out-Null
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'One' -PropertyType DWord -Value 9 | Out-Null
+        { Invoke-TuneupUndo -Run $run } | Should -Throw '*already undone*'
+        $resolved = Resolve-TuneupRun -StateRoot $Root -RunId $run.Id
+        $resolved.Undone | Should -BeTrue
+        { Invoke-TuneupUndo -Run $resolved } | Should -Throw '*already undone*'
+        { Invoke-TuneupUndo -Run $resolved -TweakId 'test.one' } | Should -Throw '*already undone*'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 9
     }
 }

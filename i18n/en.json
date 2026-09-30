@@ -7,6 +7,7 @@
   "err.unknownProfile": "Unknown profile: {0}",
   "err.unknownTweak": "Unknown tweak: {0}",
   "err.tweakNotInRun": "Tweak {0} is not part of that run.",
+  "err.runAlreadyUndone": "Run {0} was already undone.",
   "undo.none": "There are no runs to undo.",
   "plan.header": "Plan: {0} to apply, {1} skipped",
   "plan.apply": "  + {0} [{1}]",

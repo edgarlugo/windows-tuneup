@@ -1,6 +1,10 @@
 function Invoke-TuneupUndo {
     param([Parameter(Mandatory)]$Run, [string]$TweakId)
     Assert-TuneupRunUndoable -Run $Run
+    # A run object built before the undo carries no Undone flag, so the marker itself decides.
+    if ($Run.Undone -or (Test-TuneupRunMarker -Dir $Run.Dir -Name 'undone.json' -Root $Run.Root)) {
+        throw (Get-TuneupText -Key 'err.runAlreadyUndone' -Format $Run.Id)
+    }
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
