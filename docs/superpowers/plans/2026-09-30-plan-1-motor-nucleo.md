@@ -845,6 +845,13 @@ Describe 'Test-TuneupTweak' {
 }
 
 Describe 'Test-TuneupCatalog' {
+    It 'does not report duplicate ids for load errors' {
+        $first = [pscustomobject]@{ id = $null; sourceFile = 'a.json'; loadError = 'file a.json has no tweaks array' }
+        $second = [pscustomobject]@{ id = $null; sourceFile = 'b.json'; loadError = 'file b.json has no tweaks array' }
+        $errors = @(Test-TuneupCatalog -Catalog @($first, $second))
+        $errors.Count | Should -Be 2
+        $errors -join '; ' | Should -Not -Match 'duplicate'
+    }
     It 'reports duplicated ids' {
         $catalog = @((New-TestTweak -Id 'test.a'), (New-TestTweak -Id 'test.a'))
         (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -Match 'duplicate id test.a'
@@ -873,6 +880,15 @@ Describe 'Import-TuneupCatalog' {
         foreach ($name in 'a.json', 'b.json', 'c.json', 'd.json') {
             $errors -join '; ' | Should -Match "file $([regex]::Escape($name)) has no tweaks array"
         }
+    }
+    It 'reports an empty file as a load error without throwing' {
+        $dir = Join-Path $TestDrive 'blank-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'ui.json') -Value '' -Encoding UTF8
+        $ErrorActionPreference = 'Stop'
+        $catalog = @(Import-TuneupCatalog -Path $dir)
+        $catalog.Count | Should -Be 1
+        (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -Be 'file ui.json has no tweaks array'
     }
     It 'accepts a file with an empty tweaks array' {
         $dir = Join-Path $TestDrive 'empty-catalog'
@@ -939,7 +955,8 @@ function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.json' | Sort-Object Name) {
         $data = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        $tweaksProperty = $data.PSObject.Properties['tweaks']
+        $tweaksProperty = $null
+        if ($null -ne $data) { $tweaksProperty = $data.PSObject.Properties['tweaks'] }
         if ($null -eq $tweaksProperty -or $tweaksProperty.Value -isnot [array]) {
             [pscustomobject]@{ id = $null; sourceFile = $file.Name; loadError = "file $($file.Name) has no tweaks array" }
             continue
@@ -1053,6 +1070,7 @@ function Test-TuneupCatalog {
     $seen = @{}
     foreach ($tweak in $Catalog) {
         Test-TuneupTweak -Tweak $tweak
+        if ($tweak.loadError) { continue }
         $id = [string]$tweak.id
         if ($seen.ContainsKey($id)) { "duplicate id $id" } else { $seen[$id] = $true }
     }
@@ -1234,7 +1252,7 @@ Solo cinco ajustes para ejercitar los tres manejadores; el Plan 3 revisa cada un
 - [ ] **Step 5: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Catalog.Tests.ps1`
-Expected: 29 passed.
+Expected: 31 passed.
 
 - [ ] **Step 6: Commit**
 

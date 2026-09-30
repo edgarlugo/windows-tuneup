@@ -10,7 +10,8 @@ function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.json' | Sort-Object Name) {
         $data = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        $tweaksProperty = $data.PSObject.Properties['tweaks']
+        $tweaksProperty = $null
+        if ($null -ne $data) { $tweaksProperty = $data.PSObject.Properties['tweaks'] }
         if ($null -eq $tweaksProperty -or $tweaksProperty.Value -isnot [array]) {
             [pscustomobject]@{ id = $null; sourceFile = $file.Name; loadError = "file $($file.Name) has no tweaks array" }
             continue
@@ -124,6 +125,7 @@ function Test-TuneupCatalog {
     $seen = @{}
     foreach ($tweak in $Catalog) {
         Test-TuneupTweak -Tweak $tweak
+        if ($tweak.loadError) { continue }
         $id = [string]$tweak.id
         if ($seen.ContainsKey($id)) { "duplicate id $id" } else { $seen[$id] = $true }
     }

@@ -96,6 +96,13 @@ Describe 'Test-TuneupTweak' {
 }
 
 Describe 'Test-TuneupCatalog' {
+    It 'does not report duplicate ids for load errors' {
+        $first = [pscustomobject]@{ id = $null; sourceFile = 'a.json'; loadError = 'file a.json has no tweaks array' }
+        $second = [pscustomobject]@{ id = $null; sourceFile = 'b.json'; loadError = 'file b.json has no tweaks array' }
+        $errors = @(Test-TuneupCatalog -Catalog @($first, $second))
+        $errors.Count | Should -Be 2
+        $errors -join '; ' | Should -Not -Match 'duplicate'
+    }
     It 'reports duplicated ids' {
         $catalog = @((New-TestTweak -Id 'test.a'), (New-TestTweak -Id 'test.a'))
         (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -Match 'duplicate id test.a'
@@ -124,6 +131,15 @@ Describe 'Import-TuneupCatalog' {
         foreach ($name in 'a.json', 'b.json', 'c.json', 'd.json') {
             $errors -join '; ' | Should -Match "file $([regex]::Escape($name)) has no tweaks array"
         }
+    }
+    It 'reports an empty file as a load error without throwing' {
+        $dir = Join-Path $TestDrive 'blank-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'ui.json') -Value '' -Encoding UTF8
+        $ErrorActionPreference = 'Stop'
+        $catalog = @(Import-TuneupCatalog -Path $dir)
+        $catalog.Count | Should -Be 1
+        (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -Be 'file ui.json has no tweaks array'
     }
     It 'accepts a file with an empty tweaks array' {
         $dir = Join-Path $TestDrive 'empty-catalog'
