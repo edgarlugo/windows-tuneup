@@ -88,6 +88,7 @@ Un perfil **Base** siempre activo, más **objetivos combinables**, por ejemplo
    juegos, a cambio de menos protección contra drivers maliciosos).
 2. **Conflictos:** un perfil declara `keep` (mantener) y `remove`/`apply`. `keep` gana siempre.
    Gaming + Liviano deja Xbox instalado.
+   Un `-Include` explícito anula `keep` (el usuario lo pidió por nombre).
 3. **Compatibilidad:** cada ajuste declara build mínimo, sistema (10/11) y ediciones. Una
    política que Home ignora no se aplica en Home y el plan lo dice; no se finge éxito.
 4. **Preguntas en el menú:** los ajustes marcados `ask: true` (OneDrive, Store, Teams, Outlook,

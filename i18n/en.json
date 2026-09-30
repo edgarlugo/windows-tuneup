@@ -26,6 +26,7 @@
   "reason.needs-confirmation": "needs confirmation: ask for it with -Include",
   "reason.already-applied": "already applied",
   "reason.not-present": "not present on this machine",
+  "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",

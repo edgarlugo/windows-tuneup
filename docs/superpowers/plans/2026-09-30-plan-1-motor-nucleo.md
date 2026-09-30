@@ -501,6 +501,7 @@ function Get-TuneupTitle {
   "reason.needs-confirmation": "requiere confirmación: pídelo con -Include",
   "reason.already-applied": "ya estaba aplicado",
   "reason.not-present": "no existe en este equipo",
+  "reason.state-unreadable": "no se pudo leer su estado actual",
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
   "status.applied": "aplicado",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
@@ -557,6 +558,7 @@ function Get-TuneupTitle {
   "reason.needs-confirmation": "needs confirmation: ask for it with -Include",
   "reason.already-applied": "already applied",
   "reason.not-present": "not present on this machine",
+  "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",
@@ -2118,7 +2120,9 @@ BeforeAll {
         (New-TestTweak -Id 'apps.onedrive' -Ask $true),
         (New-TestTweak -Id 'policy.example' -Scope 'machine' -Set $policySet),
         (New-TestTweak -Id 'ui.home-only' -Editions @('Home')),
-        (New-TestTweak -Id 'ui.future' -MinBuild 30000)
+        (New-TestTweak -Id 'ui.future' -MinBuild 30000),
+        (New-TestTweak -Id 'ui.edge-build' -MinBuild 26100),
+        (New-TestTweak -Id 'ui.only-11' -Families @('11'))
     )
     $script:Profiles = @(
         (New-TestProfile -Id 'base' -Include @('ui.a')),
@@ -2200,6 +2204,53 @@ Describe 'New-TuneupPlan' {
         $plan = Invoke-Plan -ProfileIds 'lite', 'liviano' -Include 'apps.xbox'
         @($plan | Where-Object { $_.Id -eq 'apps.xbox' }).Count | Should -Be 1
     }
+    It 'applies a tweak whose minBuild equals the current build' {
+        Get-Action (Invoke-Plan -Include 'ui.edge-build' -Environment (New-TestEnvironment -Build 26100)) 'ui.edge-build' | Should -Be 'apply'
+        Get-Reason (Invoke-Plan -Include 'ui.edge-build' -Environment (New-TestEnvironment -Build 26099)) 'ui.edge-build' | Should -Be 'incompatible'
+    }
+
+    It 'skips a tweak whose OS family does not match' {
+        Get-Reason (Invoke-Plan -Include 'ui.only-11' -Environment (New-TestEnvironment -Family '10' -Build 19045)) 'ui.only-11' | Should -Be 'incompatible'
+        Get-Action (Invoke-Plan -Include 'ui.only-11') 'ui.only-11' | Should -Be 'apply'
+    }
+
+    It 'resolves a profile name with surrounding spaces' {
+        ((Invoke-Plan -ProfileIds ' gaming ') | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'
+    }
+
+    It 'reports excluded when a tweak is both excluded and kept' {
+        Get-Reason (Invoke-Plan -ProfileIds 'gaming', 'lite' -Exclude 'apps.xbox') 'apps.xbox' | Should -Be 'excluded'
+    }
+
+    It 'treats ids case-insensitively and lists each tweak once' {
+        $plan = Invoke-Plan -Include 'UI.A'
+        @($plan).Count | Should -Be 1
+        $plan[0].Id | Should -Be 'ui.a'
+        Get-Reason (Invoke-Plan -Exclude 'UI.A') 'ui.a' | Should -Be 'excluded'
+        Get-Action (Invoke-Plan -ProfileIds 'gaming', 'lite' -Include 'APPS.XBOX') 'apps.xbox' | Should -Be 'apply'
+        $plan = Invoke-Plan -ProfileIds 'gaming' -Include 'Ui.B'
+        @($plan | Where-Object { $_.Id -eq 'ui.b' }).Count | Should -Be 1
+    }
+
+    It 'ignores blank entries' {
+        $plan = Invoke-Plan -ProfileIds '', ' ' -Include '', '  ' -Exclude ''
+        ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a'
+    }
+
+    It 'skips a tweak whose state cannot be read instead of aborting the plan' {
+        $state = { param($tweak) if ($tweak.id -eq 'ui.b') { throw 'boom' } else { 'not-applied' } }
+        $plan = Invoke-Plan -ProfileIds 'gaming' -TestState $state
+        Get-Action $plan 'ui.b' | Should -Be 'skip'
+        Get-Reason $plan 'ui.b' | Should -Be 'state-unreadable'
+        Get-Action $plan 'ui.a' | Should -Be 'apply'
+    }
+
+    It 'reports the current state before high-risk and confirmation reasons' {
+        $applied = { param($tweak) 'applied' }
+        Get-Reason (Invoke-Plan -ProfileIds 'unsafe' -TestState $applied) 'gaming.vbs-off' | Should -Be 'already-applied'
+        $absent = { param($tweak) 'not-present' }
+        Get-Reason (Invoke-Plan -ProfileIds 'lite' -TestState $absent) 'apps.onedrive' | Should -Be 'not-present'
+    }
 }
 ```
 
@@ -2236,54 +2287,72 @@ function Test-TuneupPolicyTweak {
     ($Tweak.type -eq 'registry') -and ([string]$Tweak.set.path -match '\\Policies\\')
 }
 
+function Get-TuneupCleanList {
+    param([AllowEmptyCollection()][AllowNull()][string[]]$Values)
+    @($Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+}
+
 function New-TuneupPlan {
     param(
         [Parameter(Mandatory)][object[]]$Catalog,
         [Parameter(Mandatory)][object[]]$Profiles,
-        [AllowEmptyCollection()][string[]]$ProfileIds = @(),
-        [AllowEmptyCollection()][string[]]$Include = @(),
-        [AllowEmptyCollection()][string[]]$Exclude = @(),
+        [AllowEmptyCollection()][AllowNull()][string[]]$ProfileIds = @(),
+        [AllowEmptyCollection()][AllowNull()][string[]]$Include = @(),
+        [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
         [Parameter(Mandatory)]$Environment,
         [Parameter(Mandatory)][scriptblock]$TestState,
         [switch]$Interactive
     )
+    $ProfileIds = @(Get-TuneupCleanList $ProfileIds)
+    $Include = @(Get-TuneupCleanList $Include)
+    $Exclude = @(Get-TuneupCleanList $Exclude)
+
+    # Hashtable lookups are case-insensitive; every id is canonicalized to the catalog's own spelling.
     $byId = @{}
     foreach ($tweak in $Catalog) { $byId[[string]$tweak.id] = $tweak }
+    $canonical = {
+        param([string]$TweakId)
+        if ($byId.ContainsKey($TweakId)) { [string]$byId[$TweakId].id } else { $TweakId }
+    }
     foreach ($tweakId in @($Include) + @($Exclude)) {
         if (-not $byId.ContainsKey($tweakId)) { throw (Get-TuneupText -Key 'err.unknownTweak' -Format $tweakId) }
     }
+    $Include = @($Include | ForEach-Object { & $canonical $_ })
+    $Exclude = @($Exclude | ForEach-Object { & $canonical $_ })
     $profilesById = @{}
     foreach ($profileData in $Profiles) { $profilesById[[string]$profileData.id] = $profileData }
 
     $selected = New-Object System.Collections.Generic.List[string]
     foreach ($name in @('base') + @($ProfileIds)) {
         $profileId = Resolve-TuneupProfileId -Profiles $Profiles -Name $name
-        if (-not $selected.Contains($profileId)) { $selected.Add($profileId) }
+        if ($selected -notcontains $profileId) { $selected.Add($profileId) }
     }
 
     $wanted = New-Object System.Collections.Generic.List[string]
     $keep = New-Object System.Collections.Generic.List[string]
     foreach ($profileId in $selected) {
         $profileData = $profilesById[$profileId]
-        foreach ($tweakId in @($profileData.include | Where-Object { $_ })) { if (-not $wanted.Contains($tweakId)) { $wanted.Add($tweakId) } }
-        foreach ($tweakId in @($profileData.keep | Where-Object { $_ })) { if (-not $keep.Contains($tweakId)) { $keep.Add($tweakId) } }
+        foreach ($tweakId in @($profileData.include | Where-Object { $_ } | ForEach-Object { & $canonical $_ })) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
+        foreach ($tweakId in @($profileData.keep | Where-Object { $_ } | ForEach-Object { & $canonical $_ })) { if ($keep -notcontains $tweakId) { $keep.Add($tweakId) } }
     }
-    foreach ($tweakId in $Include) { if (-not $wanted.Contains($tweakId)) { $wanted.Add($tweakId) } }
+    foreach ($tweakId in $Include) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
 
     foreach ($tweakId in $wanted) {
         $tweak = $byId[$tweakId]
         if ($null -eq $tweak) { throw (Get-TuneupText -Key 'err.unknownTweak' -Format $tweakId) }
+        $requested = $Include -contains $tweakId
         $reason = $null
         if ($Exclude -contains $tweakId) { $reason = 'excluded' }
-        elseif ($keep.Contains($tweakId) -and $Include -notcontains $tweakId) { $reason = 'kept-by-profile' }
+        elseif (($keep -contains $tweakId) -and -not $requested) { $reason = 'kept-by-profile' }
         elseif (-not (Test-TuneupCompatible -Tweak $tweak -Environment $Environment)) { $reason = 'incompatible' }
         elseif ($Environment.IsManaged -and (Test-TuneupPolicyTweak -Tweak $tweak)) { $reason = 'managed-device' }
-        elseif ($tweak.risk -eq 'high' -and $Include -notcontains $tweakId) { $reason = 'high-risk-not-requested' }
-        elseif ($tweak.ask -and -not $Interactive -and $Include -notcontains $tweakId) { $reason = 'needs-confirmation' }
         else {
-            $state = & $TestState $tweak
+            try { $state = & $TestState $tweak } catch { $state = 'unreadable' }
             if ($state -eq 'applied') { $reason = 'already-applied' }
             elseif ($state -eq 'not-present') { $reason = 'not-present' }
+            elseif ($state -eq 'unreadable') { $reason = 'state-unreadable' }
+            elseif ($tweak.risk -eq 'high' -and -not $requested) { $reason = 'high-risk-not-requested' }
+            elseif ($tweak.ask -and -not $Interactive -and -not $requested) { $reason = 'needs-confirmation' }
         }
         [pscustomobject]@{
             Id     = $tweakId
@@ -2298,7 +2367,7 @@ function New-TuneupPlan {
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Planner.Tests.ps1`
-Expected: 13 passed.
+Expected: 21 passed.
 
 - [ ] **Step 5: Commit**
 

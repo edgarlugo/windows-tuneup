@@ -11,7 +11,9 @@ BeforeAll {
         (New-TestTweak -Id 'apps.onedrive' -Ask $true),
         (New-TestTweak -Id 'policy.example' -Scope 'machine' -Set $policySet),
         (New-TestTweak -Id 'ui.home-only' -Editions @('Home')),
-        (New-TestTweak -Id 'ui.future' -MinBuild 30000)
+        (New-TestTweak -Id 'ui.future' -MinBuild 30000),
+        (New-TestTweak -Id 'ui.edge-build' -MinBuild 26100),
+        (New-TestTweak -Id 'ui.only-11' -Families @('11'))
     )
     $script:Profiles = @(
         (New-TestProfile -Id 'base' -Include @('ui.a')),
@@ -92,5 +94,52 @@ Describe 'New-TuneupPlan' {
     It 'lists each tweak once' {
         $plan = Invoke-Plan -ProfileIds 'lite', 'liviano' -Include 'apps.xbox'
         @($plan | Where-Object { $_.Id -eq 'apps.xbox' }).Count | Should -Be 1
+    }
+    It 'applies a tweak whose minBuild equals the current build' {
+        Get-Action (Invoke-Plan -Include 'ui.edge-build' -Environment (New-TestEnvironment -Build 26100)) 'ui.edge-build' | Should -Be 'apply'
+        Get-Reason (Invoke-Plan -Include 'ui.edge-build' -Environment (New-TestEnvironment -Build 26099)) 'ui.edge-build' | Should -Be 'incompatible'
+    }
+
+    It 'skips a tweak whose OS family does not match' {
+        Get-Reason (Invoke-Plan -Include 'ui.only-11' -Environment (New-TestEnvironment -Family '10' -Build 19045)) 'ui.only-11' | Should -Be 'incompatible'
+        Get-Action (Invoke-Plan -Include 'ui.only-11') 'ui.only-11' | Should -Be 'apply'
+    }
+
+    It 'resolves a profile name with surrounding spaces' {
+        ((Invoke-Plan -ProfileIds ' gaming ') | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'
+    }
+
+    It 'reports excluded when a tweak is both excluded and kept' {
+        Get-Reason (Invoke-Plan -ProfileIds 'gaming', 'lite' -Exclude 'apps.xbox') 'apps.xbox' | Should -Be 'excluded'
+    }
+
+    It 'treats ids case-insensitively and lists each tweak once' {
+        $plan = Invoke-Plan -Include 'UI.A'
+        @($plan).Count | Should -Be 1
+        $plan[0].Id | Should -Be 'ui.a'
+        Get-Reason (Invoke-Plan -Exclude 'UI.A') 'ui.a' | Should -Be 'excluded'
+        Get-Action (Invoke-Plan -ProfileIds 'gaming', 'lite' -Include 'APPS.XBOX') 'apps.xbox' | Should -Be 'apply'
+        $plan = Invoke-Plan -ProfileIds 'gaming' -Include 'Ui.B'
+        @($plan | Where-Object { $_.Id -eq 'ui.b' }).Count | Should -Be 1
+    }
+
+    It 'ignores blank entries' {
+        $plan = Invoke-Plan -ProfileIds '', ' ' -Include '', '  ' -Exclude ''
+        ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a'
+    }
+
+    It 'skips a tweak whose state cannot be read instead of aborting the plan' {
+        $state = { param($tweak) if ($tweak.id -eq 'ui.b') { throw 'boom' } else { 'not-applied' } }
+        $plan = Invoke-Plan -ProfileIds 'gaming' -TestState $state
+        Get-Action $plan 'ui.b' | Should -Be 'skip'
+        Get-Reason $plan 'ui.b' | Should -Be 'state-unreadable'
+        Get-Action $plan 'ui.a' | Should -Be 'apply'
+    }
+
+    It 'reports the current state before high-risk and confirmation reasons' {
+        $applied = { param($tweak) 'applied' }
+        Get-Reason (Invoke-Plan -ProfileIds 'unsafe' -TestState $applied) 'gaming.vbs-off' | Should -Be 'already-applied'
+        $absent = { param($tweak) 'not-present' }
+        Get-Reason (Invoke-Plan -ProfileIds 'lite' -TestState $absent) 'apps.onedrive' | Should -Be 'not-present'
     }
 }
