@@ -228,7 +228,14 @@ Cada manejador implementa el mismo contrato:
 
 ### Estado en disco
 
-`%ProgramData%\windows-tuneup\runs\<yyyyMMdd-HHmmss>\`
+Hay dos carpetas de estado y cada corrida usa una según cómo se ejecute:
+
+| Carpeta | Cuándo | Qué guarda |
+|---|---|---|
+| `%ProgramData%\windows-tuneup\` (máquina) | Proceso elevado | Cualquier ajuste |
+| `%LOCALAPPDATA%\windows-tuneup\` (usuario) | Sin elevar | Solo ajustes `scope: user` (registro en `HKCU:`) |
+
+Dentro de cada una, la corrida vive en `runs\<yyyyMMdd-HHmmss>\`:
 
 | Archivo | Contenido |
 |---|---|
@@ -238,6 +245,36 @@ Cada manejador implementa el mismo contrato:
 | `transcript.log` | Salida completa |
 
 Queda fuera de la carpeta del script, así que deshacer funciona aunque se borre la descarga.
+`-Status` y `-Undo` leen las dos carpetas y ordenan las corridas por id; una corrida con el
+diario vacío no cuenta para `-Undo last`. `-StateRoot <carpeta>` (pruebas y desarrollo) usa
+solo esa carpeta, sin ACL ni revisión de dueño.
+
+**Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
+registro, servicio o tarea), así que el diario decide qué se toca con permisos de
+administrador. En `C:\ProgramData` cualquier usuario puede crear carpetas y archivos: un
+usuario estándar podría plantar un diario, o crear `windows-tuneup` antes que la
+herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
+
+- **ACL de la carpeta de máquina.** Cada vez que un proceso elevado la inicializa (la crea o
+  ya existe) se fija, en `windows-tuneup` y en `runs`: dueño Administradores, sin herencia de
+  `ProgramData`, SYSTEM y Administradores con control total y Usuarios con lectura y
+  ejecución, heredable a carpetas y archivos. Se usan SID (`S-1-5-18`, `S-1-5-32-544`,
+  `S-1-5-32-545`), no nombres, porque cambian con el idioma de Windows.
+- **Nada ajeno.** Si la carpeta ya existe y no es de Administradores ni de SYSTEM, es una
+  unión (junction) o no acepta la ACL, se detiene con "State folder … is not trusted. Delete
+  it as administrator and run again." No se adueña de carpetas ajenas: su dueño podría
+  cambiarlas por una unión justo antes y la ACL caería en otra carpeta.
+- **Dueño explícito.** Cada corrida nueva y su `snapshot.jsonl` (creado vacío al abrirla)
+  quedan con dueño Administradores aunque la directiva "Propietario predeterminado de objetos
+  creados por miembros del grupo Administradores" esté en "Creador del objeto".
+- **Solo corridas confiables.** Al leer la carpeta de máquina se ignora, con advertencia,
+  toda corrida cuya carpeta o diario no sea de Administradores o SYSTEM, o sea un punto de
+  reanálisis; si `windows-tuneup` o `runs` no son confiables se ignora la carpeta entera. Un
+  usuario estándar no puede crear archivos con esos dueños.
+- **La carpeta de usuario no toca la máquina.** No se escribe en ella un ajuste que no sea de
+  usuario, y al leerla se descarta, con advertencia, toda entrada que no sea `scope: user` de
+  tipo `registry` con ruta `HKCU:\` (la misma regla que valida el catálogo). Así, lo que un
+  proceso sin elevar deja ahí no puede tocar el equipo cuando un administrador deshace.
 
 ### Parámetros
 
@@ -295,8 +332,11 @@ reporte de medición adjunto.
 
 ### Antes de cambiar nada (se detiene)
 
-- No es administrador (con `pwsh` se relanza con `powershell.exe`).
+- Hay ajustes de máquina y no es administrador (con `pwsh` se relanza con `powershell.exe`).
+  Sin elevar solo se aplican ajustes de usuario y el diario va a la carpeta de usuario.
 - Windows Server o build no soportado (salvo `-Force`).
+- La carpeta de estado de máquina no es confiable (ver "Estado en disco"): pide borrarla como
+  administrador.
 - No se puede escribir el diario: sin datos para deshacer no se aplica nada.
 
 ### Avisa y pide confirmación
@@ -319,6 +359,8 @@ reporte de medición adjunto.
 - Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar.
 - `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar.
 - `-Undo` sigue ante errores y lista lo que no pudo restaurar con la instrucción manual.
+- `-Undo` y `-Status` ignoran, con advertencia, las corridas no confiables de la carpeta de
+  máquina y las entradas de máquina de la carpeta de usuario.
 - Todo queda local; no se envía nada a ningún servidor.
 
 ## 8. Skill de Claude
