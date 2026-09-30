@@ -796,6 +796,52 @@ Describe 'Test-TuneupTweak' {
     It 'rejects an unsupported type' {
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'magic')) -join '; ' | Should -Match "unsupported type 'magic'"
     }
+    It 'accepts DWord values in the unsigned and signed Int32 range' {
+        foreach ($value in 0, 1, 4294967295, -1, -2147483648) {
+            $set = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'DWord'; value = $value }
+            (Test-TuneupTweak -Tweak (New-TestTweak -Set $set)) -join '; ' | Should -BeNullOrEmpty
+        }
+    }
+    It 'rejects a DWord value out of range' {
+        foreach ($value in 4294967296, -2147483649) {
+            $set = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'DWord'; value = $value }
+            (Test-TuneupTweak -Tweak (New-TestTweak -Set $set)) -join '; ' | Should -Match 'value that does not match kind DWord'
+        }
+    }
+    It 'rejects a DWord value that is a string, a boolean, a fraction or an array' {
+        foreach ($value in '1', $true, 1.5, @(1, 2)) {
+            $set = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'DWord'; value = $value }
+            (Test-TuneupTweak -Tweak (New-TestTweak -Set $set)) -join '; ' | Should -Match 'value that does not match kind DWord'
+        }
+    }
+    It 'validates QWord and String values against their kind' {
+        $ok = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'QWord'; value = 4294967296 }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Set $ok)) -join '; ' | Should -BeNullOrEmpty
+        $bad = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'QWord'; value = 'x' }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Set $bad)) -join '; ' | Should -Match 'value that does not match kind QWord'
+        $ok = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'String'; value = 'text' }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Set $ok)) -join '; ' | Should -BeNullOrEmpty
+        $bad = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'String'; value = 5 }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Set $bad)) -join '; ' | Should -Match 'value that does not match kind String'
+        $bad = [pscustomobject]@{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'ExpandString'; value = @('a', 'b') }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Set $bad)) -join '; ' | Should -Match 'value that does not match kind ExpandString'
+    }
+    It 'rejects ask and rebootRequired that are not booleans' {
+        $tweak = New-TestTweak
+        $tweak.ask = 'no'
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'ask must be true or false'
+        $tweak = New-TestTweak
+        $tweak.PSObject.Properties.Remove('rebootRequired')
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'rebootRequired must be true or false'
+    }
+    It 'rejects a service tweak whose stop is not a boolean' {
+        $set = [pscustomobject]@{ name = 'RetailDemo'; startType = 'Disabled' }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'service' -Scope 'machine' -Set $set)) -join '; ' | Should -Match 'set.stop must be true or false'
+    }
+    It 'reports a load error before anything else' {
+        $placeholder = [pscustomobject]@{ id = $null; sourceFile = 'x.json'; loadError = 'file x.json has no tweaks array' }
+        (Test-TuneupTweak -Tweak $placeholder) -join '; ' | Should -Be 'file x.json has no tweaks array'
+    }
 }
 
 Describe 'Test-TuneupCatalog' {
@@ -816,6 +862,24 @@ Describe 'Import-TuneupCatalog' {
         $catalog.Count | Should -Be 1
         (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -Match 'does not match file ui.json'
     }
+    It 'reports a file without a tweaks array' {
+        $dir = Join-Path $TestDrive 'bad-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'a.json') -Value '{ "other": [] }' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $dir 'b.json') -Value '{ "tweaks": { "id": "b.one" } }' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $dir 'c.json') -Value '[ { "id": "c.one" } ]' -Encoding UTF8
+        Set-Content -LiteralPath (Join-Path $dir 'd.json') -Value '{ "tweaks": null }' -Encoding UTF8
+        $errors = Test-TuneupCatalog -Catalog @(Import-TuneupCatalog -Path $dir)
+        foreach ($name in 'a.json', 'b.json', 'c.json', 'd.json') {
+            $errors -join '; ' | Should -Match "file $([regex]::Escape($name)) has no tweaks array"
+        }
+    }
+    It 'accepts a file with an empty tweaks array' {
+        $dir = Join-Path $TestDrive 'empty-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        Set-Content -LiteralPath (Join-Path $dir 'ui.json') -Value '{ "tweaks": [] }' -Encoding UTF8
+        @(Import-TuneupCatalog -Path $dir).Count | Should -Be 0
+    }
 }
 
 Describe 'Test-TuneupProfileSet' {
@@ -827,6 +891,9 @@ Describe 'Test-TuneupProfileSet' {
     }
     It 'rejects unknown tweak ids' {
         (Test-TuneupProfileSet -Profiles @(New-TestProfile -Id 'base' -Include @('ui.nope')) -Catalog $Catalog) -join '; ' | Should -Match 'unknown tweak ui.nope'
+    }
+    It 'rejects unknown tweak ids in keep' {
+        (Test-TuneupProfileSet -Profiles @(New-TestProfile -Id 'base' -Keep @('ui.gone')) -Catalog $Catalog) -join '; ' | Should -Match 'unknown tweak ui.gone'
     }
     It 'rejects high-risk tweaks inside a profile' {
         (Test-TuneupProfileSet -Profiles @(New-TestProfile -Id 'base' -Include @('ui.danger')) -Catalog $Catalog) -join '; ' | Should -Match 'high-risk tweak ui.danger'
@@ -872,7 +939,12 @@ function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.json' | Sort-Object Name) {
         $data = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($tweak in @($data.tweaks)) {
+        $tweaksProperty = $data.PSObject.Properties['tweaks']
+        if ($null -eq $tweaksProperty -or $tweaksProperty.Value -isnot [array]) {
+            [pscustomobject]@{ id = $null; sourceFile = $file.Name; loadError = "file $($file.Name) has no tweaks array" }
+            continue
+        }
+        foreach ($tweak in @($tweaksProperty.Value)) {
             if ($null -eq $tweak) { continue }
             $tweak | Add-Member -NotePropertyName sourceFile -NotePropertyValue $file.Name -Force
             $tweak
@@ -880,9 +952,33 @@ function Import-TuneupCatalog {
     }
 }
 
+function Test-TuneupRegistryValue {
+    param([string]$Kind, $Value)
+    if ($Value -is [array]) { return $false }
+    switch ($Kind) {
+        'DWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -2147483648 -Max 4294967295) }
+        'QWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -9223372036854775808 -Max 9223372036854775807) }
+        default { return ($Value -is [string]) }
+    }
+}
+
+function Test-TuneupIntegerInRange {
+    param($Value, [decimal]$Min, [decimal]$Max)
+    $integerTypes = @([int], [long], [uint32], [uint64], [int16], [uint16], [byte], [sbyte])
+    $isInteger = $false
+    foreach ($type in $integerTypes) { if ($Value -is $type) { $isInteger = $true } }
+    if (-not $isInteger) { return $false }
+    $number = [decimal]$Value
+    return ($number -ge $Min -and $number -le $Max)
+}
+
 function Test-TuneupTweak {
     param([Parameter(Mandatory)]$Tweak)
     $errors = New-Object System.Collections.Generic.List[string]
+    if ($Tweak.loadError) {
+        $errors.Add([string]$Tweak.loadError)
+        return $errors.ToArray()
+    }
     $id = [string]$Tweak.id
     if ($id -cnotmatch '^[a-z]+(\.[a-z0-9-]+)+$') {
         $errors.Add("invalid id '$id'")
@@ -898,6 +994,8 @@ function Test-TuneupTweak {
     }
     if ($script:TweakRisks -notcontains $Tweak.risk) { $errors.Add("$id has an invalid risk '$($Tweak.risk)'") }
     if ($script:TweakScopes -notcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
+    if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
+    if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
 
     $families = @($Tweak.os.families | Where-Object { $_ })
     if (-not $families.Count -or @($families | Where-Object { $script:TweakFamilies -notcontains $_ }).Count) {
@@ -925,13 +1023,18 @@ function Test-TuneupTweak {
                 $errors.Add("$id scope does not match its registry hive")
             }
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
-            if ($null -ne $set.value -and $script:RegistryKinds -notcontains $set.kind) {
-                $errors.Add("$id has an invalid registry kind '$($set.kind)'")
+            if ($null -ne $set.value) {
+                if ($script:RegistryKinds -notcontains $set.kind) {
+                    $errors.Add("$id has an invalid registry kind '$($set.kind)'")
+                } elseif (-not (Test-TuneupRegistryValue -Kind $set.kind -Value $set.value)) {
+                    $errors.Add("$id has a value that does not match kind $($set.kind)")
+                }
             }
         }
         'service' {
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
             if ($script:ServiceStartTypes -notcontains $set.startType) { $errors.Add("$id has an invalid startType '$($set.startType)'") }
+            if ($set.stop -isnot [bool]) { $errors.Add("$id set.stop must be true or false") }
             if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
         }
         'task' {
@@ -1131,7 +1234,7 @@ Solo cinco ajustes para ejercitar los tres manejadores; el Plan 3 revisa cada un
 - [ ] **Step 5: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Catalog.Tests.ps1`
-Expected: 19 passed.
+Expected: 29 passed.
 
 - [ ] **Step 6: Commit**
 

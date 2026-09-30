@@ -10,7 +10,12 @@ function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.json' | Sort-Object Name) {
         $data = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($tweak in @($data.tweaks)) {
+        $tweaksProperty = $data.PSObject.Properties['tweaks']
+        if ($null -eq $tweaksProperty -or $tweaksProperty.Value -isnot [array]) {
+            [pscustomobject]@{ id = $null; sourceFile = $file.Name; loadError = "file $($file.Name) has no tweaks array" }
+            continue
+        }
+        foreach ($tweak in @($tweaksProperty.Value)) {
             if ($null -eq $tweak) { continue }
             $tweak | Add-Member -NotePropertyName sourceFile -NotePropertyValue $file.Name -Force
             $tweak
@@ -18,9 +23,33 @@ function Import-TuneupCatalog {
     }
 }
 
+function Test-TuneupRegistryValue {
+    param([string]$Kind, $Value)
+    if ($Value -is [array]) { return $false }
+    switch ($Kind) {
+        'DWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -2147483648 -Max 4294967295) }
+        'QWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -9223372036854775808 -Max 9223372036854775807) }
+        default { return ($Value -is [string]) }
+    }
+}
+
+function Test-TuneupIntegerInRange {
+    param($Value, [decimal]$Min, [decimal]$Max)
+    $integerTypes = @([int], [long], [uint32], [uint64], [int16], [uint16], [byte], [sbyte])
+    $isInteger = $false
+    foreach ($type in $integerTypes) { if ($Value -is $type) { $isInteger = $true } }
+    if (-not $isInteger) { return $false }
+    $number = [decimal]$Value
+    return ($number -ge $Min -and $number -le $Max)
+}
+
 function Test-TuneupTweak {
     param([Parameter(Mandatory)]$Tweak)
     $errors = New-Object System.Collections.Generic.List[string]
+    if ($Tweak.loadError) {
+        $errors.Add([string]$Tweak.loadError)
+        return $errors.ToArray()
+    }
     $id = [string]$Tweak.id
     if ($id -cnotmatch '^[a-z]+(\.[a-z0-9-]+)+$') {
         $errors.Add("invalid id '$id'")
@@ -36,6 +65,8 @@ function Test-TuneupTweak {
     }
     if ($script:TweakRisks -notcontains $Tweak.risk) { $errors.Add("$id has an invalid risk '$($Tweak.risk)'") }
     if ($script:TweakScopes -notcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
+    if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
+    if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
 
     $families = @($Tweak.os.families | Where-Object { $_ })
     if (-not $families.Count -or @($families | Where-Object { $script:TweakFamilies -notcontains $_ }).Count) {
@@ -63,13 +94,18 @@ function Test-TuneupTweak {
                 $errors.Add("$id scope does not match its registry hive")
             }
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
-            if ($null -ne $set.value -and $script:RegistryKinds -notcontains $set.kind) {
-                $errors.Add("$id has an invalid registry kind '$($set.kind)'")
+            if ($null -ne $set.value) {
+                if ($script:RegistryKinds -notcontains $set.kind) {
+                    $errors.Add("$id has an invalid registry kind '$($set.kind)'")
+                } elseif (-not (Test-TuneupRegistryValue -Kind $set.kind -Value $set.value)) {
+                    $errors.Add("$id has a value that does not match kind $($set.kind)")
+                }
             }
         }
         'service' {
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
             if ($script:ServiceStartTypes -notcontains $set.startType) { $errors.Add("$id has an invalid startType '$($set.startType)'") }
+            if ($set.stop -isnot [bool]) { $errors.Add("$id set.stop must be true or false") }
             if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
         }
         'task' {
