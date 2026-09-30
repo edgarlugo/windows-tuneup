@@ -27,6 +27,9 @@ function Get-ServiceTweakState {
         return [pscustomobject]@{ present = $false; startType = $null; running = $false }
     }
     $properties = Get-ItemProperty -LiteralPath $registryPath
+    if ($null -eq $properties.Start) {
+        return [pscustomobject]@{ present = $false; startType = $null; running = $false }
+    }
     $startType = switch ([int]$properties.Start) {
         0 { 'Boot' }
         1 { 'System' }
@@ -53,8 +56,21 @@ function Test-ServiceTweakState {
 
 function Set-ServiceTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
-    Set-TuneupServiceStartType -Name $Tweak.set.name -StartType $Tweak.set.startType
-    if ($Tweak.set.stop) { Stop-Service -Name $Tweak.set.name -Force -ErrorAction SilentlyContinue }
+    $name = [string]$Tweak.set.name
+    $startType = [string]$Tweak.set.startType
+    $current = Get-ServiceTweakState -Tweak $Tweak
+    if ($current.startType -eq 'Boot' -or $current.startType -eq 'System') {
+        throw "Refusing to change boot or system driver $name"
+    }
+    Set-TuneupServiceStartType -Name $name -StartType $startType
+    if ($Tweak.set.stop -and $current.running) {
+        try {
+            Stop-Service -Name $name -ErrorAction Stop
+        }
+        catch {
+            throw "Start type of $name set to $startType, but stopping it failed: $($_.Exception.Message)"
+        }
+    }
 }
 
 function Restore-ServiceTweakState {
@@ -63,5 +79,5 @@ function Restore-ServiceTweakState {
     if ($script:ScStartArguments.ContainsKey([string]$State.startType)) {
         Set-TuneupServiceStartType -Name $Tweak.set.name -StartType $State.startType
     }
-    if ($State.running) { Start-Service -Name $Tweak.set.name -ErrorAction SilentlyContinue }
+    if ($State.running) { Start-Service -Name $Tweak.set.name -ErrorAction Stop }
 }

@@ -31,12 +31,52 @@ Describe 'Service handler' {
         Test-ServiceTweakState -Tweak $Tweak | Should -Be 'applied'
     }
 
-    It 'sets the start type with sc.exe and stops the service when asked' {
+    It 'treats a service key without a Start value as not-present' {
+        Mock -ModuleName Tuneup Test-Path { $true }
+        Mock -ModuleName Tuneup Get-ItemProperty { [pscustomobject]@{ ImagePath = 'x.exe' } }
+        Mock -ModuleName Tuneup Get-Service { [pscustomobject]@{ Status = 'Stopped' } }
+        $state = Get-ServiceTweakState -Tweak $Tweak
+        $state.present | Should -BeFalse
+        Test-ServiceTweakState -Tweak $Tweak | Should -Be 'not-present'
+    }
+
+    It 'sets the start type with sc.exe and stops a running service without -Force' {
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true } }
         Mock -ModuleName Tuneup Invoke-TuneupSc { }
         Mock -ModuleName Tuneup Stop-Service { }
         Set-ServiceTweakDesired -Tweak $Tweak
         Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Name -eq 'RetailDemo' -and $Start -eq 'disabled' }
-        Should -Invoke Stop-Service -ModuleName Tuneup -Times 1 -Exactly
+        Should -Invoke Stop-Service -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { -not $Force }
+    }
+
+    It 'does not stop a service that is not running' {
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = 'Manual'; running = $false } }
+        Mock -ModuleName Tuneup Invoke-TuneupSc { }
+        Mock -ModuleName Tuneup Stop-Service { }
+        Set-ServiceTweakDesired -Tweak $Tweak
+        Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly
+        Should -Invoke Stop-Service -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'throws a clear error when stopping fails after the start type was changed' {
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true } }
+        Mock -ModuleName Tuneup Invoke-TuneupSc { }
+        Mock -ModuleName Tuneup Stop-Service { throw 'cannot stop' }
+        { Set-ServiceTweakDesired -Tweak $Tweak } |
+            Should -Throw 'Start type of RetailDemo set to Disabled, but stopping it failed: cannot stop'
+        Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly
+    }
+
+    It 'refuses to change a <Current> driver before calling sc.exe' -TestCases @(
+        @{ Current = 'Boot' }
+        @{ Current = 'System' }
+    ) {
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = $Current; running = $false } }
+        Mock -ModuleName Tuneup Invoke-TuneupSc { }
+        Mock -ModuleName Tuneup Stop-Service { }
+        { Set-ServiceTweakDesired -Tweak $Tweak } | Should -Throw 'Refusing to change boot or system driver RetailDemo'
+        Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 0 -Exactly
+        Should -Invoke Stop-Service -ModuleName Tuneup -Times 0 -Exactly
     }
 
     It 'restores the previous start type and starts the service if it was running' {
@@ -45,7 +85,14 @@ Describe 'Service handler' {
         $state = [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true }
         Restore-ServiceTweakState -Tweak $Tweak -State $state
         Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Start -eq 'demand' }
-        Should -Invoke Start-Service -ModuleName Tuneup -Times 1 -Exactly
+        Should -Invoke Start-Service -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $ErrorAction -eq 'Stop' }
+    }
+
+    It 'surfaces a failed service start from restore' {
+        Mock -ModuleName Tuneup Invoke-TuneupSc { }
+        Mock -ModuleName Tuneup Start-Service { throw 'cannot start' }
+        $state = [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true }
+        { Restore-ServiceTweakState -Tweak $Tweak -State $state } | Should -Throw '*cannot start*'
     }
 
     It 'does not touch boot or system drivers on restore' {
