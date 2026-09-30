@@ -1,14 +1,55 @@
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-$script:AdministratorsSid = 'S-1-5-32-544'
-$script:TrustedOwnerSids = @('S-1-5-32-544', 'S-1-5-18')
+$script:StateOwnerSid = 'S-1-5-32-544'
+$script:TrustedSids = @('S-1-5-18', 'S-1-5-32-544')
+$script:UsersSid = 'S-1-5-32-545'
+$script:OwnerRightsSid = 'S-1-3-4'
 $script:RunIdPattern = '^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$'
+$script:RunSchemaVersion = 1
+# Any of these granted to an untrusted SID lets it change or replace a state file.
+$script:WriteRights = [int][System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+$script:WriteRights = $script:WriteRights -bor 0x10000000 -bor 0x40000000
+$script:NativeFileSource = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace WindowsTuneup {
+    public static class NativeFile {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileInformation {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
+
+        public static uint GetLinkCount(SafeFileHandle handle) {
+            FileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return information.NumberOfLinks;
+        }
+    }
+}
+'@
 
 function Get-TuneupStateRoot {
     param([string]$StateRoot, [switch]$Machine)
     if ($StateRoot) { return $StateRoot }
-    $variable = $(if ($Machine) { 'ProgramData' } else { 'LOCALAPPDATA' })
-    $base = [Environment]::GetEnvironmentVariable($variable)
-    if (-not $base) { throw "Cannot find the state folder: $variable is not set" }
+    $folder = $(if ($Machine) { 'CommonApplicationData' } else { 'LocalApplicationData' })
+    $base = [Environment]::GetFolderPath($folder)
+    if (-not $base) { throw "Cannot find the state folder: $folder is not available" }
     Join-Path $base 'windows-tuneup'
 }
 
@@ -23,13 +64,18 @@ function Get-TuneupRootKind {
     'custom'
 }
 
-function Resolve-TuneupJournalRoot {
+function Resolve-TuneupFileRoot {
     param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    if ($Root -and @('machine', 'user', 'custom') -notcontains $Root) { throw "Unknown state root '$Root'" }
     # A path inside a real state folder always gets that folder's rules, whatever the caller says.
     $kind = Get-TuneupRootKind -Path $Path
     if ($kind -ne 'custom') { return $kind }
     if ($Root) { return $Root }
     'custom'
+}
+
+function Get-TuneupCurrentUserSid {
+    [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 }
 
 function Get-TuneupUntrustedMessage {
@@ -38,19 +84,30 @@ function Get-TuneupUntrustedMessage {
 }
 
 function New-TuneupStateSecurity {
-    $security = New-Object System.Security.AccessControl.DirectorySecurity
-    $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:AdministratorsSid))
-    $security.SetAccessRuleProtection($true, $false)
-    $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    $grants = @(
-        @('S-1-5-18', 'FullControl'),
-        @('S-1-5-32-544', 'FullControl'),
-        @('S-1-5-32-545', 'ReadAndExecute')
+    param(
+        [switch]$File,
+        [string]$OwnerSid = $script:StateOwnerSid,
+        [string[]]$TrustedSids = $script:TrustedSids
     )
+    if ($File) {
+        $security = New-Object System.Security.AccessControl.FileSecurity
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
+    }
+    else {
+        $security = New-Object System.Security.AccessControl.DirectorySecurity
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    }
+    $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $OwnerSid))
+    $security.SetAccessRuleProtection($true, $false)
+    $grants = New-Object System.Collections.Generic.List[object]
+    foreach ($sid in $TrustedSids) { $grants.Add([pscustomobject]@{ Sid = $sid; Rights = 'FullControl' }) }
+    $grants.Add([pscustomobject]@{ Sid = $script:UsersSid; Rights = 'ReadAndExecute' })
+    # OWNER RIGHTS replaces the owner's implicit WRITE_DAC, so owning an item grants nothing extra.
+    $grants.Add([pscustomobject]@{ Sid = $script:OwnerRightsSid; Rights = 'ReadAndExecute' })
     foreach ($grant in $grants) {
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
-            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $grant[0]),
-            [System.Security.AccessControl.FileSystemRights]$grant[1],
+            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $grant.Sid),
+            [System.Security.AccessControl.FileSystemRights]$grant.Rights,
             $inheritance,
             [System.Security.AccessControl.PropagationFlags]::None,
             [System.Security.AccessControl.AccessControlType]::Allow
@@ -61,8 +118,12 @@ function New-TuneupStateSecurity {
 }
 
 function Set-TuneupStateSecurity {
-    param([Parameter(Mandatory)][string]$Path)
-    $security = New-TuneupStateSecurity
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$OwnerSid = $script:StateOwnerSid,
+        [string[]]$TrustedSids = $script:TrustedSids
+    )
+    $security = New-TuneupStateSecurity -OwnerSid $OwnerSid -TrustedSids $TrustedSids
     try {
         $current = Get-Acl -LiteralPath $Path -ErrorAction Stop
         # Windows PowerShell 5.1 Set-Acl also rewrites the SACL (needs SeSecurityPrivilege) when
@@ -75,29 +136,48 @@ function Set-TuneupStateSecurity {
     }
 }
 
-function Set-TuneupTrustedOwner {
-    param([Parameter(Mandatory)][string]$Path)
-    try {
-        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
-        $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:AdministratorsSid))
-        Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+function New-TuneupSecureDirectory {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Security)
+    [System.IO.Directory]::CreateDirectory($Path, $Security) | Out-Null
+}
+
+function New-TuneupSecureFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Security)
+    New-Object System.IO.FileStream -ArgumentList @(
+        $Path,
+        [System.IO.FileMode]::CreateNew,
+        [System.Security.AccessControl.FileSystemRights]::Write,
+        [System.IO.FileShare]::None,
+        4096,
+        [System.IO.FileOptions]::None,
+        $Security
+    )
+}
+
+function Test-TuneupTrustedSecurity {
+    param([Parameter(Mandatory)]$Security, [string[]]$TrustedSids = $script:TrustedSids)
+    $owner = $Security.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($null -eq $owner -or $TrustedSids -notcontains $owner.Value) { return $false }
+    foreach ($rule in $Security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        if ($TrustedSids -contains $rule.IdentityReference.Value) { continue }
+        if (([int]$rule.FileSystemRights -band $script:WriteRights) -ne 0) { return $false }
     }
-    catch {
-        throw (Get-TuneupUntrustedMessage -Path (Split-Path -Parent $Path))
-    }
+    $true
 }
 
 function Test-TuneupTrustedItem {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [string[]]$TrustedSids = $script:TrustedSids)
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
-        $owner = (Get-Acl -LiteralPath $Path -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not $item.PSIsContainer -and $item.LinkType -eq 'HardLink') { return $false }
+        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
     }
     catch {
         return $false
     }
-    ($null -ne $owner) -and ($script:TrustedOwnerSids -contains $owner.Value)
+    Test-TuneupTrustedSecurity -Security $security -TrustedSids $TrustedSids
 }
 
 function Test-TuneupTrustedRun {
@@ -107,25 +187,135 @@ function Test-TuneupTrustedRun {
     (-not (Test-Path -LiteralPath $journal)) -or (Test-TuneupTrustedItem -Path $journal)
 }
 
+function Get-TuneupFileLinkCount {
+    param([Parameter(Mandatory)]$Handle)
+    if (-not ('WindowsTuneup.NativeFile' -as [type])) { Add-Type -TypeDefinition $script:NativeFileSource }
+    [WindowsTuneup.NativeFile]::GetLinkCount($Handle)
+}
+
+function Open-TuneupTrustedStream {
+    param([Parameter(Mandatory)][string]$Path, [switch]$Append)
+    $untrusted = "State file $Path is not trusted"
+    if (-not (Test-TuneupTrustedItem -Path (Split-Path -Parent $Path))) { throw $untrusted }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw $untrusted }
+    # Owner, DACL and link count are checked on the handle that is then read or written, and
+    # FileShare.Read keeps anyone else from writing while it is open.
+    if ($Append) {
+        $stream = New-Object System.IO.FileStream -ArgumentList $Path, ([System.IO.FileMode]::Append), ([System.IO.FileAccess]::Write), ([System.IO.FileShare]::Read)
+    }
+    else {
+        $stream = New-Object System.IO.FileStream -ArgumentList $Path, ([System.IO.FileMode]::Open), ([System.IO.FileAccess]::Read), ([System.IO.FileShare]::Read)
+    }
+    try {
+        $trusted = (Test-TuneupTrustedSecurity -Security $stream.GetAccessControl()) -and
+            ((Get-TuneupFileLinkCount -Handle $stream.SafeFileHandle) -eq 1)
+    }
+    catch {
+        $trusted = $false
+    }
+    if (-not $trusted) {
+        $stream.Dispose()
+        throw $untrusted
+    }
+    $stream
+}
+
+function Read-TuneupStateFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root, [switch]$IgnoreUntrusted)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -ne 'machine') {
+        return [System.IO.File]::ReadAllText($Path, $script:Utf8NoBom)
+    }
+    try {
+        $stream = Open-TuneupTrustedStream -Path $Path
+    }
+    catch {
+        if (-not $IgnoreUntrusted) { throw }
+        Write-Warning "Ignoring untrusted state file $Path"
+        return $null
+    }
+    $reader = New-Object System.IO.StreamReader -ArgumentList $stream, $script:Utf8NoBom, $true
+    try { $reader.ReadToEnd() }
+    finally { $reader.Dispose() }
+}
+
+function Write-TuneupStateFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [switch]$Append,
+        [string]$Root
+    )
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -ne 'machine') {
+        if ($Append) { [System.IO.File]::AppendAllText($Path, $Text, $script:Utf8NoBom) }
+        else { [System.IO.File]::WriteAllText($Path, $Text, $script:Utf8NoBom) }
+        return
+    }
+    if ($Append -and (Test-Path -LiteralPath $Path)) {
+        $stream = Open-TuneupTrustedStream -Path $Path -Append
+    }
+    else {
+        $parent = Split-Path -Parent $Path
+        if (-not (Test-TuneupTrustedItem -Path $parent)) { throw (Get-TuneupUntrustedMessage -Path $parent) }
+        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        $stream = New-TuneupSecureFile -Path $Path -Security (New-TuneupStateSecurity -File)
+    }
+    try {
+        $bytes = $script:Utf8NoBom.GetBytes($Text)
+        $stream.Write($bytes, 0, $bytes.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Read-TuneupTrustedJson {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    $text = Read-TuneupStateFile -Path $Path -Root $Root -IgnoreUntrusted
+    if (-not $text) { return $null }
+    try {
+        $text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Ignoring unreadable state file $Path"
+        $null
+    }
+}
+
+function Test-TuneupRunMarker {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Dir, [Parameter(Mandatory)][string]$Name, [string]$Root)
+    $path = Join-Path $Dir $Name
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    if ((Resolve-TuneupFileRoot -Path $path -Root $Root) -ne 'machine') { return $true }
+    if (Test-TuneupTrustedItem -Path $path) { return $true }
+    Write-Warning "Ignoring untrusted state file $path"
+    $false
+}
+
 function Initialize-TuneupStateRoot {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($folder in @($Path, (Join-Path $Path 'runs'))) {
-        $created = $false
-        if (-not (Test-Path -LiteralPath $folder)) {
+        $existed = Test-Path -LiteralPath $folder
+        if (-not $existed) {
             try {
-                New-Item -ItemType Directory -Path $folder -ErrorAction Stop | Out-Null
-                $created = $true
+                New-TuneupSecureDirectory -Path $folder -Security (New-TuneupStateSecurity)
             }
             catch {
                 if (-not (Test-Path -LiteralPath $folder)) { throw }
+                $existed = $true
             }
         }
-        # Never take over a folder someone else made: its owner could swap it for a junction
+        # Checked after creating it too: someone may have made it first, even as a junction.
+        # A folder someone else made is never taken over: its owner could swap it for a junction
         # between the check and Set-Acl, and the ACL would land on the junction target.
-        if (-not $created -and -not (Test-TuneupTrustedItem -Path $folder)) {
+        if (-not (Test-TuneupTrustedItem -Path $folder)) {
             throw (Get-TuneupUntrustedMessage -Path $folder)
         }
-        Set-TuneupStateSecurity -Path $folder
+        if ($existed) { Set-TuneupStateSecurity -Path $folder }
     }
 }
 
@@ -164,20 +354,29 @@ function New-TuneupRun {
         $id = '{0}-{1:D2}' -f $baseId, $counter
     }
     $dir = Join-Path $runsDir $id
-    New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
     if ($kind -eq 'machine') {
-        Set-TuneupStateSecurity -Path $dir
-        $journal = Join-Path $dir 'snapshot.jsonl'
-        [System.IO.File]::Open($journal, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write).Dispose()
-        Set-TuneupTrustedOwner -Path $journal
+        New-TuneupSecureDirectory -Path $dir -Security (New-TuneupStateSecurity)
+        if (-not (Test-TuneupTrustedItem -Path $dir)) { throw (Get-TuneupUntrustedMessage -Path $dir) }
+        (New-TuneupSecureFile -Path (Join-Path $dir 'snapshot.jsonl') -Security (New-TuneupStateSecurity -File)).Dispose()
     }
-    [pscustomobject]@{ Id = $id; Dir = $dir; Root = $kind }
+    else {
+        New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+    }
+    $userSid = Get-TuneupCurrentUserSid
+    $info = [pscustomobject]@{
+        schemaVersion = $script:RunSchemaVersion
+        userSid       = $userSid
+        machine       = ($kind -eq 'machine')
+        createdAt     = (Get-Date).ToString('s')
+    }
+    Save-TuneupJson -Path (Join-Path $dir 'run.json') -Object $info -Root $kind
+    [pscustomobject]@{ Id = $id; Dir = $dir; Root = $kind; UserSid = $userSid }
 }
 
 function Save-TuneupJson {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object, [string]$Root)
     $json = ConvertTo-Json -InputObject $Object -Depth 10
-    [System.IO.File]::WriteAllText($Path, $json, $script:Utf8NoBom)
+    Write-TuneupStateFile -Path $Path -Text $json -Root $Root
 }
 
 function Add-TuneupJournalEntry {
@@ -185,27 +384,23 @@ function Add-TuneupJournalEntry {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)]$Tweak,
         [Parameter(Mandatory)][AllowNull()]$State,
-        [ValidateSet('machine', 'user', 'custom')][string]$Root
+        [string]$Root
     )
-    if ((Resolve-TuneupJournalRoot -Path $Path -Root $Root) -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $Tweak)) {
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $Tweak)) {
         throw "Cannot journal machine-scope tweak '$($Tweak.id)' in the user state folder"
     }
     $entry = [pscustomobject]@{ id = $Tweak.id; tweak = $Tweak; state = $State }
     $line = ConvertTo-Json -InputObject $entry -Depth 10 -Compress
-    [System.IO.File]::AppendAllText($Path, $line + [Environment]::NewLine, $script:Utf8NoBom)
+    Write-TuneupStateFile -Path $Path -Text ($line + [Environment]::NewLine) -Append -Root $Root
 }
 
 function Read-TuneupJournal {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [ValidateSet('machine', 'user', 'custom')][string]$Root
-    )
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-    $kind = Resolve-TuneupJournalRoot -Path $Path -Root $Root
-    if ($kind -eq 'machine' -and -not (Test-TuneupTrustedRun -Dir (Split-Path -Parent $Path))) {
-        throw "Journal $Path is not trusted"
-    }
-    $lines = [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    $kind = Resolve-TuneupFileRoot -Path $Path -Root $Root
+    $text = Read-TuneupStateFile -Path $Path -Root $kind
+    if ($null -eq $text) { return }
+    $lines = @($text -split "`r?`n")
     $lastIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i].Trim()) { $lastIndex = $i }
@@ -224,6 +419,21 @@ function Read-TuneupJournal {
         }
         if ($kind -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $entry.tweak)) {
             Write-Warning "Ignoring machine-scope entry '$($entry.id)' in user journal $Path"
+            continue
+        }
+        $entry
+    }
+}
+
+function Read-TuneupRunJournal {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    $currentSid = Get-TuneupCurrentUserSid
+    foreach ($entry in @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)) {
+        # A user-scope entry holds HKCU values of whoever made the run; restoring it would write them
+        # into the current user's hive instead.
+        if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
+            Write-Warning "Ignoring user-scope entry '$($entry.id)' of run $($Run.Id): it belongs to another user"
             continue
         }
         $entry
@@ -262,13 +472,17 @@ function Get-TuneupRunList {
                 Write-Warning "Ignoring untrusted run $($dir.FullName)"
                 continue
             }
+            $info = Read-TuneupTrustedJson -Path (Join-Path $dir.FullName 'run.json') -Root $root.Kind
+            $userSid = $null
+            if ($null -ne $info -and $info.userSid -is [string]) { $userSid = $info.userSid }
             # A space sorts before '-', so '20250101-000000' stays ahead of '20250101-000000-02'.
             $key = $dir.Name + ' ' + $root.Kind
             $byKey[$key] = [pscustomobject]@{
-                Id     = $dir.Name
-                Dir    = $dir.FullName
-                Undone = (Test-Path -LiteralPath (Join-Path $dir.FullName 'undone.json'))
-                Root   = $root.Kind
+                Id      = $dir.Name
+                Dir     = $dir.FullName
+                Undone  = (Test-TuneupRunMarker -Dir $dir.FullName -Name 'undone.json' -Root $root.Kind)
+                Root    = $root.Kind
+                UserSid = $userSid
             }
             $keys.Add($key)
         }
@@ -283,7 +497,22 @@ function Test-TuneupRunHasJournal {
     (Test-Path -LiteralPath $journal -PathType Leaf) -and ((Get-Item -LiteralPath $journal -Force).Length -gt 0)
 }
 
+function Test-TuneupRunCompletable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    if ($Run.Root -eq 'user') { return $true }
+    if ($Run.UserSid -ne (Get-TuneupCurrentUserSid)) { return $false }
+    try {
+        $entries = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)
+    }
+    catch {
+        return $false
+    }
+    @($entries | Where-Object { -not (Test-TuneupUserScopedTweak -Tweak $_.tweak) }).Count -eq 0
+}
+
 function Resolve-TuneupRun {
+    [CmdletBinding()]
     param(
         [string]$StateRoot,
         [string]$MachineRoot,
@@ -292,8 +521,13 @@ function Resolve-TuneupRun {
     )
     $runs = @(Get-TuneupRunList -StateRoot $StateRoot -MachineRoot $MachineRoot -UserRoot $UserRoot |
         Where-Object { Test-TuneupRunHasJournal -Dir $_.Dir })
-    if ($RunId -eq 'last') {
-        return ($runs | Where-Object { -not $_.Undone } | Select-Object -Last 1)
+    if ($RunId -ne 'last') {
+        return ($runs | Where-Object { $_.Id -eq $RunId } | Select-Object -First 1)
     }
-    $runs | Where-Object { $_.Id -eq $RunId } | Select-Object -First 1
+    # Without elevation only runs this user can fully undo are candidates for 'last'.
+    $isAdmin = [bool](Test-TuneupAdmin)
+    $pending = @($runs | Where-Object { -not $_.Undone })
+    for ($i = $pending.Count - 1; $i -ge 0; $i--) {
+        if ($isAdmin -or (Test-TuneupRunCompletable -Run $pending[$i])) { return $pending[$i] }
+    }
 }

@@ -239,15 +239,22 @@ Dentro de cada una, la corrida vive en `runs\<yyyyMMdd-HHmmss>\`:
 
 | Archivo | Contenido |
 |---|---|
+| `run.json` | Quién la creó: `schemaVersion`, `userSid`, `machine`, `createdAt` |
 | `plan.json` | Lo que se iba a hacer y los motivos de cada omisión |
 | `snapshot.jsonl` | Diario: una línea por ajuste, escrita **antes** de tocarlo |
 | `result.json` | Resultado por ajuste y conteos (esquema versionado) |
+| `undone.json`, `undone-tweaks.txt` | Marcas de lo que ya se deshizo |
 | `transcript.log` | Salida completa |
 
-Queda fuera de la carpeta del script, así que deshacer funciona aunque se borre la descarga.
-`-Status` y `-Undo` leen las dos carpetas y ordenan las corridas por id; una corrida con el
-diario vacío no cuenta para `-Undo last`. `-StateRoot <carpeta>` (pruebas y desarrollo) usa
-solo esa carpeta, sin ACL ni revisión de dueño.
+Las rutas salen de `GetFolderPath('CommonApplicationData')` y
+`GetFolderPath('LocalApplicationData')`, no de variables de entorno. Queda fuera de la carpeta
+del script, así que deshacer funciona aunque se borre la descarga. `-Status` y `-Undo` leen
+las dos carpetas y ordenan las corridas por id; una corrida con el diario vacío no cuenta para
+`-Undo last`.
+
+`-StateRoot <carpeta>` es solo para pruebas y desarrollo (los runners de CI son
+administradores y las pruebas lo usan): usa esa carpeta sin ACL ni ninguna revisión de
+confianza, así que **no debe usarse en un equipo real**.
 
 **Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
 registro, servicio o tarea), así que el diario decide qué se toca con permisos de
@@ -255,26 +262,49 @@ administrador. En `C:\ProgramData` cualquier usuario puede crear carpetas y arch
 usuario estándar podría plantar un diario, o crear `windows-tuneup` antes que la
 herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
 
-- **ACL de la carpeta de máquina.** Cada vez que un proceso elevado la inicializa (la crea o
-  ya existe) se fija, en `windows-tuneup` y en `runs`: dueño Administradores, sin herencia de
-  `ProgramData`, SYSTEM y Administradores con control total y Usuarios con lectura y
-  ejecución, heredable a carpetas y archivos. Se usan SID (`S-1-5-18`, `S-1-5-32-544`,
-  `S-1-5-32-545`), no nombres, porque cambian con el idioma de Windows.
-- **Nada ajeno.** Si la carpeta ya existe y no es de Administradores ni de SYSTEM, es una
-  unión (junction) o no acepta la ACL, se detiene con "State folder … is not trusted. Delete
-  it as administrator and run again." No se adueña de carpetas ajenas: su dueño podría
-  cambiarlas por una unión justo antes y la ACL caería en otra carpeta.
-- **Dueño explícito.** Cada corrida nueva y su `snapshot.jsonl` (creado vacío al abrirla)
-  quedan con dueño Administradores aunque la directiva "Propietario predeterminado de objetos
-  creados por miembros del grupo Administradores" esté en "Creador del objeto".
+- **ACL de la carpeta de máquina.** Dueño Administradores, sin herencia de `ProgramData`,
+  SYSTEM y Administradores con control total, Usuarios con lectura y ejecución y OWNER RIGHTS
+  (`S-1-3-4`) con lectura y ejecución, heredable a carpetas y archivos; OWNER RIGHTS quita al
+  dueño el permiso implícito de cambiar la ACL. Se usan SID (`S-1-5-18`, `S-1-5-32-544`,
+  `S-1-5-32-545`, `S-1-3-4`), no nombres, porque cambian con el idioma de Windows.
+- **Creación atómica.** `windows-tuneup`, `runs` y cada corrida se crean con
+  `Directory.CreateDirectory(ruta, DirectorySecurity)`; `snapshot.jsonl`, `run.json` y los
+  demás archivos, con un `FileStream` en modo `CreateNew` que recibe la `FileSecurity`. Nacen
+  con dueño Administradores y la ACL puesta, sin un instante con los permisos heredados y
+  aunque la directiva "Propietario predeterminado de objetos creados por miembros del grupo
+  Administradores" esté en "Creador del objeto". Si `windows-tuneup` o `runs` ya existían y
+  son confiables, un proceso elevado vuelve a aplicarles la ACL.
+- **Nada ajeno.** Si la carpeta no es confiable (incluso recién creada, por si otro la creó
+  primero), se detiene con "State folder … is not trusted. Delete it as administrator and run
+  again." No se adueña de carpetas ajenas: su dueño podría cambiarlas por una unión justo
+  antes y la ACL caería en otra carpeta.
+- **Confiable = dueño, DACL y enlaces.** Un elemento es confiable si su dueño es
+  Administradores o SYSTEM, ninguna entrada que permite da a otro SID escritura, anexar,
+  borrar, cambiar permisos, tomar posesión, escribir atributos o escritura/control genéricos
+  (las que deniegan no cuentan), no es un punto de reanálisis y, si es archivo, no tiene otro
+  enlace físico. Los archivos de la carpeta de máquina se abren una sola vez: dueño, DACL y
+  cantidad de enlaces se validan sobre ese mismo identificador, que se lee o se anexa sin
+  permitir otros escritores mientras está abierto.
 - **Solo corridas confiables.** Al leer la carpeta de máquina se ignora, con advertencia,
-  toda corrida cuya carpeta o diario no sea de Administradores o SYSTEM, o sea un punto de
-  reanálisis; si `windows-tuneup` o `runs` no son confiables se ignora la carpeta entera. Un
-  usuario estándar no puede crear archivos con esos dueños.
+  toda corrida cuya carpeta o diario no sea confiable, y también `run.json`, `result.json`,
+  `undone.json` y `undone-tweaks.txt` que no lo sean; si `windows-tuneup` o `runs` no son
+  confiables se ignora la carpeta entera.
 - **La carpeta de usuario no toca la máquina.** No se escribe en ella un ajuste que no sea de
   usuario, y al leerla se descarta, con advertencia, toda entrada que no sea `scope: user` de
   tipo `registry` con ruta `HKCU:\` (la misma regla que valida el catálogo). Así, lo que un
   proceso sin elevar deja ahí no puede tocar el equipo cuando un administrador deshace.
+- **Cada usuario deshace lo suyo.** Las entradas de usuario guardan valores de `HKCU` de quien
+  creó la corrida; `-Undo` y `-Status` ignoran, con advertencia, las de una corrida cuyo
+  `userSid` no es el del usuario actual (o que no lo dice). Sin elevar, `-Undo last` solo
+  considera corridas que puede completar: las de la carpeta de usuario y las de máquina sin
+  ajustes de máquina creadas por el mismo usuario.
+- **Deshacer sin registro no es deshacer limpio.** Si después de restaurar no se puede
+  escribir `undone.json` o `undone-tweaks.txt`, el resultado incluye un fallo y el código de
+  salida es `2`.
+- **Qué pueden ver otros.** Usuarios puede leer diarios y resultados de la carpeta de
+  máquina; solo contienen los valores anteriores de los ajustes, no datos personales.
+- **Bloqueo posible.** Un usuario puede crear `windows-tuneup` en `ProgramData` antes que la
+  herramienta; las corridas elevadas se detienen hasta que un administrador borre esa carpeta.
 
 ### Parámetros
 
@@ -359,8 +389,10 @@ reporte de medición adjunto.
 - Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar.
 - `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar.
 - `-Undo` sigue ante errores y lista lo que no pudo restaurar con la instrucción manual.
-- `-Undo` y `-Status` ignoran, con advertencia, las corridas no confiables de la carpeta de
-  máquina y las entradas de máquina de la carpeta de usuario.
+- `-Undo` y `-Status` ignoran, con advertencia, las corridas y marcas no confiables de la
+  carpeta de máquina, las entradas de máquina de la carpeta de usuario y las entradas de
+  usuario de corridas de otro usuario.
+- Si `-Undo` restaura pero no puede registrarlo, lo informa como fallo (código `2`).
 - Todo queda local; no se envía nada a ningún servidor.
 
 ## 8. Skill de Claude

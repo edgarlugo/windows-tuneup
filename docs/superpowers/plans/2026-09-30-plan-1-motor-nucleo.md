@@ -2408,18 +2408,49 @@ BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $script:AdminSid = 'S-1-5-32-544'
+    $script:OtherSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'
+    $script:MeSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     function New-OwnedSecurity([string]$Sid) {
         $security = New-Object System.Security.AccessControl.DirectorySecurity
         $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $Sid))
         $security
     }
-    function New-RunFolder([string]$Root, [string]$Id, [object[]]$Tweaks = @((New-TestTweak))) {
+    function Set-TestTrust([string]$Owner, [string[]]$Trusted) {
+        InModuleScope Tuneup -Parameters @{ Owner = $Owner; Trusted = $Trusted } {
+            param($Owner, $Trusted)
+            $script:StateOwnerSid = $Owner
+            $script:TrustedSids = $Trusted
+        }
+    }
+    # The state folders are hardened for Administrators; tests can only own files as the current user.
+    function Use-CurrentUserAsTrusted { Set-TestTrust -Owner $MeSid -Trusted @('S-1-5-18', 'S-1-5-32-544', $MeSid) }
+    function Reset-TestTrust { Set-TestTrust -Owner 'S-1-5-32-544' -Trusted @('S-1-5-18', 'S-1-5-32-544') }
+    function Grant-EveryoneWrite([string]$Path) {
+        $acl = Get-Acl -LiteralPath $Path
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
+        if ((Get-Item -LiteralPath $Path -Force).PSIsContainer) {
+            $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        }
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList 'S-1-1-0'),
+            [System.Security.AccessControl.FileSystemRights]::Write, $inheritance,
+            [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)
+        $acl.AddAccessRule($rule)
+        $acl.SetAuditRuleProtection($acl.AreAccessRulesProtected, $true)
+        Set-Acl -LiteralPath $Path -AclObject $acl
+    }
+    function New-RunFolder([string]$Root, [string]$Id, [object[]]$Tweaks = @((New-TestTweak)), [string]$UserSid = $MeSid) {
         $dir = Join-Path $Root "runs\$Id"
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
         foreach ($tweak in $Tweaks) {
             Add-TuneupJournalEntry -Path (Join-Path $dir 'snapshot.jsonl') -Tweak $tweak -State $null -Root 'custom'
         }
+        Save-TuneupJson -Path (Join-Path $dir 'run.json') -Root 'custom' `
+            -Object ([pscustomobject]@{ schemaVersion = 1; userSid = $UserSid; machine = $true; createdAt = 'now' })
         $dir
+    }
+    function Get-Rules($Security) {
+        @($Security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
     }
     $script:MachineTweak = New-TestTweak -Id 'test.machine' -Scope 'machine' `
         -Set ([pscustomobject]@{ path = 'HKLM:\Software\windows-tuneup-test'; name = 'Sample'; kind = 'DWord'; value = 1 })
@@ -2558,12 +2589,23 @@ Describe 'Run state' {
         $run.Root | Should -Be 'custom'
         (@(Get-TuneupRunList -StateRoot $Root))[0].Root | Should -Be 'custom'
     }
+
+    It 'records who made the run in run.json' {
+        $run = New-TuneupRun -StateRoot $Root
+        $run.UserSid | Should -Be $MeSid
+        $info = Get-Content -LiteralPath (Join-Path $run.Dir 'run.json') -Raw | ConvertFrom-Json
+        $info.schemaVersion | Should -Be 1
+        $info.userSid | Should -Be $MeSid
+        $info.machine | Should -BeFalse
+        $info.createdAt | Should -Not -BeNullOrEmpty
+        (@(Get-TuneupRunList -StateRoot $Root))[0].UserSid | Should -Be $MeSid
+    }
 }
 
 Describe 'State roots' {
     It 'uses the user folder unless the machine folder is asked for' {
-        Get-TuneupStateRoot | Should -Be (Join-Path $env:LOCALAPPDATA 'windows-tuneup')
-        Get-TuneupStateRoot -Machine | Should -Be (Join-Path $env:ProgramData 'windows-tuneup')
+        Get-TuneupStateRoot | Should -Be (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'windows-tuneup')
+        Get-TuneupStateRoot -Machine | Should -Be (Join-Path ([Environment]::GetFolderPath('CommonApplicationData')) 'windows-tuneup')
         Get-TuneupStateRoot -StateRoot 'D:\dev-state' -Machine | Should -Be 'D:\dev-state'
     }
 
@@ -2580,17 +2622,22 @@ Describe 'Machine state folder security' {
         $script:Folder = Join-Path $TestDrive ([guid]::NewGuid().ToString())
     }
 
+    AfterEach {
+        Reset-TestTrust
+    }
+
     It 'builds a protected ACL owned by Administrators from well-known SIDs' {
         $security = New-TuneupStateSecurity
         $security | Should -BeOfType [System.Security.AccessControl.DirectorySecurity]
         $security.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $AdminSid
         $security.AreAccessRulesProtected | Should -BeTrue
-        $rules = @($security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-        $rules.Count | Should -Be 3
+        $rules = Get-Rules $security
+        $rules.Count | Should -Be 4
         $expected = @{
             'S-1-5-18'     = [System.Security.AccessControl.FileSystemRights]::FullControl
             'S-1-5-32-544' = [System.Security.AccessControl.FileSystemRights]::FullControl
             'S-1-5-32-545' = [System.Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
+            'S-1-3-4'      = [System.Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize'
         }
         foreach ($rule in $rules) {
             $sid = $rule.IdentityReference.Value
@@ -2603,6 +2650,23 @@ Describe 'Machine state folder security' {
         }
     }
 
+    It 'builds the same ACL for files without inheritance flags' {
+        $security = New-TuneupStateSecurity -File
+        $security | Should -BeOfType [System.Security.AccessControl.FileSecurity]
+        $security.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $AdminSid
+        $security.AreAccessRulesProtected | Should -BeTrue
+        $rules = Get-Rules $security
+        ($rules | ForEach-Object { $_.IdentityReference.Value } | Sort-Object) -join ',' | Should -Be 'S-1-3-4,S-1-5-18,S-1-5-32-544,S-1-5-32-545'
+        @($rules | Where-Object { $_.InheritanceFlags -ne 'None' }).Count | Should -Be 0
+    }
+
+    It 'builds the ACL for injected SIDs' {
+        $security = New-TuneupStateSecurity -OwnerSid $OtherSid -TrustedSids @($OtherSid)
+        $security.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $OtherSid
+        ((Get-Rules $security) | ForEach-Object { $_.IdentityReference.Value } | Sort-Object) -join ',' |
+            Should -Be "S-1-3-4,$OtherSid,S-1-5-32-545"
+    }
+
     It 'applies that ACL with Set-Acl' {
         New-Item -ItemType Directory -Path $Folder | Out-Null
         Mock -ModuleName Tuneup Set-Acl { }
@@ -2610,7 +2674,7 @@ Describe 'Machine state folder security' {
         Should -Invoke Set-Acl -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
             $LiteralPath -eq $Folder -and $AclObject.AreAccessRulesProtected -and
             $AclObject.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544' -and
-            @($AclObject.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])).Count -eq 3
+            @($AclObject.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])).Count -eq 4
         }
     }
 
@@ -2633,12 +2697,31 @@ Describe 'Machine state folder security' {
             Should -Throw -ExpectedMessage "State folder $Folder is not trusted. Delete it as administrator and run again."
     }
 
-    It 'creates and hardens a missing machine folder and its runs folder' {
+    It 'hardens a real folder with injected SIDs' {
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        Set-TuneupStateSecurity -Path $Folder -OwnerSid $MeSid -TrustedSids @($MeSid)
+        $acl = Get-Acl -LiteralPath $Folder
+        $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $MeSid
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $rules = Get-Rules $acl
+        ($rules | ForEach-Object { $_.IdentityReference.Value } | Sort-Object) -join ',' | Should -Be "S-1-3-4,$MeSid,S-1-5-32-545"
+        ($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-3-4' }).FileSystemRights |
+            Should -Be ([System.Security.AccessControl.FileSystemRights]'ReadAndExecute, Synchronize')
+        @($rules | Where-Object { $_.IsInherited }).Count | Should -Be 0
+        Test-TuneupTrustedItem -Path $Folder -TrustedSids @($MeSid) | Should -BeTrue
+    }
+
+    It 'creates a missing machine folder and its runs folder with the ACL already in place' {
+        Use-CurrentUserAsTrusted
         Mock -ModuleName Tuneup Set-Acl { }
         Initialize-TuneupStateRoot -Path $Folder
-        Test-Path -LiteralPath (Join-Path $Folder 'runs') -PathType Container | Should -BeTrue
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $LiteralPath -eq $Folder }
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $LiteralPath -eq (Join-Path $Folder 'runs') }
+        foreach ($path in $Folder, (Join-Path $Folder 'runs')) {
+            $acl = Get-Acl -LiteralPath $path
+            $acl.AreAccessRulesProtected | Should -BeTrue -Because $path
+            $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $MeSid
+            @(Get-Rules $acl | Where-Object { $_.IdentityReference.Value -eq 'S-1-3-4' }).Count | Should -Be 1
+        }
+        Should -Invoke Set-Acl -ModuleName Tuneup -Times 0 -Exactly
     }
 
     It 're-applies the ACL to an existing folder owned by Administrators' {
@@ -2657,6 +2740,18 @@ Describe 'Machine state folder security' {
         Should -Invoke Set-Acl -ModuleName Tuneup -Times 0 -Exactly
     }
 
+    It 'refuses a folder that someone else created first while it was being created' {
+        Mock -ModuleName Tuneup New-TuneupSecureDirectory {
+            New-Item -ItemType Directory -Path $Path | Out-Null
+            throw 'Cannot create a file when that file already exists'
+        }
+        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
+        Mock -ModuleName Tuneup Set-Acl { }
+        { Initialize-TuneupStateRoot -Path $Folder } | Should -Throw -ExpectedMessage "State folder $Folder is not trusted.*"
+        Test-Path -LiteralPath $Folder | Should -BeTrue
+        Should -Invoke Set-Acl -ModuleName Tuneup -Times 0 -Exactly
+    }
+
     It 'refuses a machine folder that is a junction' {
         $target = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $target | Out-Null
@@ -2668,52 +2763,14 @@ Describe 'Machine state folder security' {
     }
 }
 
-Describe 'Machine runs' {
+Describe 'Trust checks' {
     BeforeEach {
-        $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-    }
-
-    It 'needs an elevated process' {
-        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
-        Mock -ModuleName Tuneup Set-Acl { }
-        { New-TuneupRun -Machine -MachineRoot $MachineRoot } | Should -Throw -ExpectedMessage '*elevated*'
-        Test-Path -LiteralPath $MachineRoot | Should -BeFalse
-    }
-
-    It 'creates a hardened run with an empty journal owned by Administrators' {
-        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
-        Mock -ModuleName Tuneup Set-Acl { }
-        $run = New-TuneupRun -Machine -MachineRoot $MachineRoot
-        $run.Root | Should -Be 'machine'
-        $run.Dir | Should -Be (Join-Path $MachineRoot "runs\$($run.Id)")
-        $journal = Join-Path $run.Dir 'snapshot.jsonl'
-        (Get-Item -LiteralPath $journal).Length | Should -Be 0
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
-            $LiteralPath -eq $run.Dir -and $AclObject.AreAccessRulesProtected
-        }
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
-            $LiteralPath -eq $journal -and $AclObject.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -eq 'S-1-5-32-544'
-        }
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 4 -Exactly
-    }
-
-    It 'writes new runs to the user folder when not elevated' {
-        $userRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-        Mock -ModuleName Tuneup Set-Acl { }
-        $run = New-TuneupRun -UserRoot $userRoot -MachineRoot $MachineRoot
-        $run.Root | Should -Be 'user'
-        $run.Dir | Should -Be (Join-Path $userRoot "runs\$($run.Id)")
-        Test-Path -LiteralPath (Join-Path $run.Dir 'snapshot.jsonl') | Should -BeFalse
-        Should -Invoke Set-Acl -ModuleName Tuneup -Times 0 -Exactly
-    }
-}
-
-Describe 'Trusted runs' {
-    BeforeEach {
-        $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-        $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         $script:Item = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $Item | Out-Null
+    }
+
+    AfterEach {
+        Reset-TestTrust
     }
 
     It 'trusts items owned by <Name>' -TestCases @(
@@ -2735,14 +2792,160 @@ Describe 'Trusted runs' {
         Test-TuneupTrustedItem -Path (Join-Path $Item 'missing') | Should -BeFalse
     }
 
+    It 'does not trust a DACL that grants <Name> to another SID' -TestCases @(
+        @{ Name = 'WriteData'; Rights = 0x2 }
+        @{ Name = 'AppendData'; Rights = 0x4 }
+        @{ Name = 'WriteExtendedAttributes'; Rights = 0x10 }
+        @{ Name = 'DeleteSubdirectoriesAndFiles'; Rights = 0x40 }
+        @{ Name = 'WriteAttributes'; Rights = 0x100 }
+        @{ Name = 'Delete'; Rights = 0x10000 }
+        @{ Name = 'ChangePermissions'; Rights = 0x40000 }
+        @{ Name = 'TakeOwnership'; Rights = 0x80000 }
+        @{ Name = 'GenericAll'; Rights = 0x10000000 }
+        @{ Name = 'GenericWrite'; Rights = 0x40000000 }
+    ) {
+        Mock -ModuleName Tuneup Get-Acl {
+            $security = New-OwnedSecurity 'S-1-5-32-544'
+            $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+                (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList 'S-1-5-32-545'),
+                [System.Security.AccessControl.FileSystemRights]$Rights,
+                [System.Security.AccessControl.InheritanceFlags]::None,
+                [System.Security.AccessControl.PropagationFlags]::None,
+                [System.Security.AccessControl.AccessControlType]::Allow)))
+            $security
+        }
+        Test-TuneupTrustedItem -Path $Item | Should -BeFalse
+    }
+
+    It 'ignores deny entries and read-only grants' {
+        Mock -ModuleName Tuneup Get-Acl {
+            $security = New-OwnedSecurity 'S-1-5-32-544'
+            foreach ($rule in @(
+                    @('S-1-1-0', 'FullControl', 'Deny'),
+                    @('S-1-5-32-545', 'ReadAndExecute', 'Allow'),
+                    @('S-1-5-32-544', 'FullControl', 'Allow'))) {
+                $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+                    (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $rule[0]),
+                    [System.Security.AccessControl.FileSystemRights]$rule[1],
+                    [System.Security.AccessControl.InheritanceFlags]::None,
+                    [System.Security.AccessControl.PropagationFlags]::None,
+                    [System.Security.AccessControl.AccessControlType]$rule[2])))
+            }
+            $security
+        }
+        Test-TuneupTrustedItem -Path $Item | Should -BeTrue
+    }
+
+    It 'does not trust a real folder once Everyone can write to it' {
+        Set-TuneupStateSecurity -Path $Item -OwnerSid $MeSid -TrustedSids @($MeSid)
+        Test-TuneupTrustedItem -Path $Item -TrustedSids @($MeSid) | Should -BeTrue
+        Grant-EveryoneWrite $Item
+        Test-TuneupTrustedItem -Path $Item -TrustedSids @($MeSid) | Should -BeFalse
+    }
+
+    It 'does not trust a real file with a second hard link' {
+        Use-CurrentUserAsTrusted
+        Set-TuneupStateSecurity -Path $Item
+        $file = Join-Path $Item 'snapshot.jsonl'
+        [System.IO.File]::WriteAllText($file, '')
+        Test-TuneupTrustedItem -Path $file | Should -BeTrue
+        New-Item -ItemType HardLink -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString())) -Value $file | Out-Null
+        Test-TuneupTrustedItem -Path $file | Should -BeFalse
+    }
+}
+
+Describe 'Machine runs' {
+    BeforeEach {
+        $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        Use-CurrentUserAsTrusted
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+    }
+
+    AfterEach {
+        Reset-TestTrust
+    }
+
+    It 'needs an elevated process' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        { New-TuneupRun -Machine -MachineRoot $MachineRoot } | Should -Throw -ExpectedMessage '*elevated*'
+        Test-Path -LiteralPath $MachineRoot | Should -BeFalse
+    }
+
+    It 'creates the run folder, journal and run.json with the protected ACL' {
+        $run = New-TuneupRun -Machine -MachineRoot $MachineRoot
+        $run.Root | Should -Be 'machine'
+        $run.UserSid | Should -Be $MeSid
+        $run.Dir | Should -Be (Join-Path $MachineRoot "runs\$($run.Id)")
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        (Get-Item -LiteralPath $journal).Length | Should -Be 0
+        foreach ($path in $run.Dir, $journal, (Join-Path $run.Dir 'run.json')) {
+            $acl = Get-Acl -LiteralPath $path
+            $acl.AreAccessRulesProtected | Should -BeTrue -Because $path
+            $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $MeSid -Because $path
+            @(Get-Rules $acl | Where-Object { $_.IdentityReference.Value -eq 'S-1-3-4' }).Count | Should -Be 1 -Because $path
+        }
+        $info = Read-TuneupTrustedJson -Path (Join-Path $run.Dir 'run.json') -Root 'machine'
+        $info.userSid | Should -Be $MeSid
+        $info.machine | Should -BeTrue
+        $info.schemaVersion | Should -Be 1
+        $listed = @(Get-TuneupRunList -MachineRoot $MachineRoot -UserRoot (Join-Path $TestDrive 'none'))
+        "$($listed[0].Id)/$($listed[0].Root)/$($listed[0].UserSid)" | Should -Be "$($run.Id)/machine/$MeSid"
+    }
+
+    It 'appends to the machine journal through a checked handle' {
+        $run = New-TuneupRun -Machine -MachineRoot $MachineRoot
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        Add-TuneupJournalEntry -Path $journal -Tweak $MachineTweak -State $null -Root 'machine'
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak) -State $null -Root 'machine'
+        (@(Read-TuneupJournal -Path $journal -Root 'machine') | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine,test.sample'
+    }
+
+    It 'refuses to append to a machine journal with a second hard link' {
+        $run = New-TuneupRun -Machine -MachineRoot $MachineRoot
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        New-Item -ItemType HardLink -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString())) -Value $journal | Out-Null
+        { Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak) -State $null -Root 'machine' } |
+            Should -Throw -ExpectedMessage "State file $journal is not trusted"
+        { Read-TuneupJournal -Path $journal -Root 'machine' } | Should -Throw -ExpectedMessage '*is not trusted*'
+    }
+
+    It 'writes machine state files with the protected ACL and can replace them' {
+        $run = New-TuneupRun -Machine -MachineRoot $MachineRoot
+        $path = Join-Path $run.Dir 'undone.json'
+        Save-TuneupJson -Path $path -Object ([pscustomobject]@{ undoneAt = 'first' }) -Root 'machine'
+        Save-TuneupJson -Path $path -Object ([pscustomobject]@{ undoneAt = 'second' }) -Root 'machine'
+        (Read-TuneupTrustedJson -Path $path -Root 'machine').undoneAt | Should -Be 'second'
+        (Get-Acl -LiteralPath $path).AreAccessRulesProtected | Should -BeTrue
+        Test-TuneupRunMarker -Dir $run.Dir -Name 'undone.json' -Root 'machine' | Should -BeTrue
+    }
+
+    It 'writes new runs to the user folder when not elevated' {
+        $userRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $run = New-TuneupRun -UserRoot $userRoot -MachineRoot $MachineRoot
+        $run.Root | Should -Be 'user'
+        $run.Dir | Should -Be (Join-Path $userRoot "runs\$($run.Id)")
+        Test-Path -LiteralPath (Join-Path $run.Dir 'snapshot.jsonl') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $run.Dir 'run.json') -Raw | ConvertFrom-Json).machine | Should -BeFalse
+        Test-Path -LiteralPath $MachineRoot | Should -BeFalse
+    }
+}
+
+Describe 'Trusted runs' {
+    BeforeEach {
+        $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        Use-CurrentUserAsTrusted
+        Initialize-TuneupStateRoot -Path $MachineRoot
+    }
+
+    AfterEach {
+        Reset-TestTrust
+    }
+
     It 'skips a planted machine run and resolves the last trusted one' {
         $good = New-RunFolder -Root $MachineRoot -Id '20250101-000000'
         $planted = New-RunFolder -Root $MachineRoot -Id '20250101-000001' -Tweaks @($MachineTweak)
-        $plantedJournal = Join-Path $planted 'snapshot.jsonl'
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-32-544' }
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' } -ParameterFilter {
-            $LiteralPath -eq $plantedJournal
-        }
+        Grant-EveryoneWrite (Join-Path $planted 'snapshot.jsonl')
         $runs = @(Get-TuneupRunList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue)
         ($runs | ForEach-Object { $_.Id }) -join ',' | Should -Be '20250101-000000'
         "$($warned[0])" | Should -BeLike "Ignoring untrusted run $planted*"
@@ -2752,7 +2955,6 @@ Describe 'Trusted runs' {
     It 'skips a machine run folder owned by a user' {
         New-RunFolder -Root $MachineRoot -Id '20250101-000000' | Out-Null
         $planted = New-RunFolder -Root $MachineRoot -Id '20250101-000001'
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-32-544' }
         Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' } -ParameterFilter {
             $LiteralPath -eq $planted
         }
@@ -2763,7 +2965,6 @@ Describe 'Trusted runs' {
     It 'ignores the whole machine folder when its runs folder is not trusted' {
         New-RunFolder -Root $MachineRoot -Id '20250101-000000' | Out-Null
         $runsDir = Join-Path $MachineRoot 'runs'
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-32-544' }
         Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' } -ParameterFilter {
             $LiteralPath -eq $runsDir
         }
@@ -2773,14 +2974,38 @@ Describe 'Trusted runs' {
 
     It 'refuses to read a machine journal that is not trusted' {
         $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000'
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
+        Grant-EveryoneWrite (Join-Path $dir 'snapshot.jsonl')
         { Read-TuneupJournal -Path (Join-Path $dir 'snapshot.jsonl') -Root 'machine' } | Should -Throw -ExpectedMessage '*is not trusted*'
     }
 
     It 'reads machine-scope entries from a trusted machine journal' {
         $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak, (New-TestTweak))
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-32-544' }
         @(Read-TuneupJournal -Path (Join-Path $dir 'snapshot.jsonl') -Root 'machine').Count | Should -Be 2
+    }
+
+    It 'ignores run markers and run info that are not trusted' {
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000'
+        foreach ($name in 'undone.json', 'result.json') {
+            Save-TuneupJson -Path (Join-Path $dir $name) -Root 'custom' -Object ([pscustomobject]@{ results = @() })
+        }
+        foreach ($name in 'undone.json', 'result.json', 'run.json') { Grant-EveryoneWrite (Join-Path $dir $name) }
+        $run = @(Get-TuneupRunList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue)[0]
+        $run.Undone | Should -BeFalse
+        $run.UserSid | Should -BeNullOrEmpty
+        @($warned | Where-Object { "$_" -like 'Ignoring untrusted state file *' }).Count | Should -Be 2
+        Read-TuneupTrustedJson -Path (Join-Path $dir 'result.json') -Root 'machine' -WarningAction SilentlyContinue | Should -BeNullOrEmpty
+        Read-TuneupStateFile -Path (Join-Path $dir 'result.json') -Root 'machine' -IgnoreUntrusted -WarningAction SilentlyContinue | Should -BeNullOrEmpty
+        { Read-TuneupStateFile -Path (Join-Path $dir 'result.json') -Root 'machine' } | Should -Throw -ExpectedMessage '*is not trusted*'
+    }
+
+    It 'reads trusted run markers and run info' {
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000'
+        Save-TuneupJson -Path (Join-Path $dir 'result.json') -Root 'custom' -Object ([pscustomobject]@{ results = @('x') })
+        Save-TuneupJson -Path (Join-Path $dir 'undone.json') -Root 'custom' -Object ([pscustomobject]@{ undoneAt = 'now' })
+        $run = @(Get-TuneupRunList -MachineRoot $MachineRoot -UserRoot $UserRoot)[0]
+        $run.Undone | Should -BeTrue
+        $run.UserSid | Should -Be $MeSid
+        @((Read-TuneupTrustedJson -Path (Join-Path $dir 'result.json') -Root 'machine').results) -join ',' | Should -Be 'x'
     }
 }
 
@@ -2821,11 +3046,68 @@ Describe 'User runs' {
     }
 }
 
+Describe 'Runs of other users' {
+    BeforeEach {
+        $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        Use-CurrentUserAsTrusted
+        Initialize-TuneupStateRoot -Path $MachineRoot
+    }
+
+    AfterEach {
+        Reset-TestTrust
+    }
+
+    It 'skips user-scope entries of a run made by another user' {
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak, (New-TestTweak)) -UserSid $OtherSid
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $OtherSid }
+        $entries = @(Read-TuneupRunJournal -Run $run -WarningVariable warned -WarningAction SilentlyContinue)
+        ($entries | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine'
+        "$($warned[0])" | Should -BeLike "Ignoring user-scope entry 'test.sample' of run 20250101-000000*"
+    }
+
+    It 'keeps every entry of a run made by the current user' {
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak, (New-TestTweak))
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $MeSid }
+        @(Read-TuneupRunJournal -Run $run).Count | Should -Be 2
+    }
+
+    It 'skips user-scope entries when the run does not say who made it' {
+        $dir = New-RunFolder -Root $UserRoot -Id '20250101-000000'
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'custom'; UserSid = $null }
+        @(Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue).Count | Should -Be 0
+    }
+
+    It 'resolves last to a run that a non-elevated user can complete' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        New-RunFolder -Root $MachineRoot -Id '20250101-000000' | Out-Null
+        New-RunFolder -Root $MachineRoot -Id '20250101-000001' -UserSid $OtherSid | Out-Null
+        New-RunFolder -Root $MachineRoot -Id '20250101-000002' -Tweaks @($MachineTweak, (New-TestTweak)) | Out-Null
+        (Resolve-TuneupRun -MachineRoot $MachineRoot -UserRoot $UserRoot -RunId 'last').Id | Should -Be '20250101-000000'
+        (Resolve-TuneupRun -MachineRoot $MachineRoot -UserRoot $UserRoot -RunId '20250101-000002').Id | Should -Be '20250101-000002'
+        New-RunFolder -Root $UserRoot -Id '20240101-000000' -UserSid $OtherSid | Out-Null
+        New-RunFolder -Root $UserRoot -Id '20250101-000003' | Out-Null
+        (Resolve-TuneupRun -MachineRoot $MachineRoot -UserRoot $UserRoot -RunId 'last').Root | Should -Be 'user'
+    }
+
+    It 'resolves last to the newest run when elevated' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        New-RunFolder -Root $MachineRoot -Id '20250101-000000' | Out-Null
+        New-RunFolder -Root $MachineRoot -Id '20250101-000001' -Tweaks @($MachineTweak) -UserSid $OtherSid | Out-Null
+        (Resolve-TuneupRun -MachineRoot $MachineRoot -UserRoot $UserRoot -RunId 'last').Id | Should -Be '20250101-000001'
+    }
+}
+
 Describe 'Merged run list' {
     BeforeEach {
         $script:MachineRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-        Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-32-544' }
+        Use-CurrentUserAsTrusted
+        Initialize-TuneupStateRoot -Path $MachineRoot
+    }
+
+    AfterEach {
+        Reset-TestTrust
     }
 
     It 'merges both roots sorted by id and tags each run' {
@@ -2864,16 +3146,57 @@ Expected: FAIL, `New-TuneupRun` no se reconoce.
 `engine/State.ps1`:
 ```powershell
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-$script:AdministratorsSid = 'S-1-5-32-544'
-$script:TrustedOwnerSids = @('S-1-5-32-544', 'S-1-5-18')
+$script:StateOwnerSid = 'S-1-5-32-544'
+$script:TrustedSids = @('S-1-5-18', 'S-1-5-32-544')
+$script:UsersSid = 'S-1-5-32-545'
+$script:OwnerRightsSid = 'S-1-3-4'
 $script:RunIdPattern = '^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$'
+$script:RunSchemaVersion = 1
+# Any of these granted to an untrusted SID lets it change or replace a state file.
+$script:WriteRights = [int][System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles, WriteAttributes, Delete, ChangePermissions, TakeOwnership'
+$script:WriteRights = $script:WriteRights -bor 0x10000000 -bor 0x40000000
+$script:NativeFileSource = @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+namespace WindowsTuneup {
+    public static class NativeFile {
+        [StructLayout(LayoutKind.Sequential)]
+        private struct FileInformation {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+            public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+            public uint VolumeSerialNumber;
+            public uint FileSizeHigh;
+            public uint FileSizeLow;
+            public uint NumberOfLinks;
+            public uint FileIndexHigh;
+            public uint FileIndexLow;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool GetFileInformationByHandle(SafeFileHandle handle, out FileInformation information);
+
+        public static uint GetLinkCount(SafeFileHandle handle) {
+            FileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return information.NumberOfLinks;
+        }
+    }
+}
+'@
 
 function Get-TuneupStateRoot {
     param([string]$StateRoot, [switch]$Machine)
     if ($StateRoot) { return $StateRoot }
-    $variable = $(if ($Machine) { 'ProgramData' } else { 'LOCALAPPDATA' })
-    $base = [Environment]::GetEnvironmentVariable($variable)
-    if (-not $base) { throw "Cannot find the state folder: $variable is not set" }
+    $folder = $(if ($Machine) { 'CommonApplicationData' } else { 'LocalApplicationData' })
+    $base = [Environment]::GetFolderPath($folder)
+    if (-not $base) { throw "Cannot find the state folder: $folder is not available" }
     Join-Path $base 'windows-tuneup'
 }
 
@@ -2888,13 +3211,18 @@ function Get-TuneupRootKind {
     'custom'
 }
 
-function Resolve-TuneupJournalRoot {
+function Resolve-TuneupFileRoot {
     param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    if ($Root -and @('machine', 'user', 'custom') -notcontains $Root) { throw "Unknown state root '$Root'" }
     # A path inside a real state folder always gets that folder's rules, whatever the caller says.
     $kind = Get-TuneupRootKind -Path $Path
     if ($kind -ne 'custom') { return $kind }
     if ($Root) { return $Root }
     'custom'
+}
+
+function Get-TuneupCurrentUserSid {
+    [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 }
 
 function Get-TuneupUntrustedMessage {
@@ -2903,19 +3231,30 @@ function Get-TuneupUntrustedMessage {
 }
 
 function New-TuneupStateSecurity {
-    $security = New-Object System.Security.AccessControl.DirectorySecurity
-    $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:AdministratorsSid))
-    $security.SetAccessRuleProtection($true, $false)
-    $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    $grants = @(
-        @('S-1-5-18', 'FullControl'),
-        @('S-1-5-32-544', 'FullControl'),
-        @('S-1-5-32-545', 'ReadAndExecute')
+    param(
+        [switch]$File,
+        [string]$OwnerSid = $script:StateOwnerSid,
+        [string[]]$TrustedSids = $script:TrustedSids
     )
+    if ($File) {
+        $security = New-Object System.Security.AccessControl.FileSecurity
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]::None
+    }
+    else {
+        $security = New-Object System.Security.AccessControl.DirectorySecurity
+        $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    }
+    $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $OwnerSid))
+    $security.SetAccessRuleProtection($true, $false)
+    $grants = New-Object System.Collections.Generic.List[object]
+    foreach ($sid in $TrustedSids) { $grants.Add([pscustomobject]@{ Sid = $sid; Rights = 'FullControl' }) }
+    $grants.Add([pscustomobject]@{ Sid = $script:UsersSid; Rights = 'ReadAndExecute' })
+    # OWNER RIGHTS replaces the owner's implicit WRITE_DAC, so owning an item grants nothing extra.
+    $grants.Add([pscustomobject]@{ Sid = $script:OwnerRightsSid; Rights = 'ReadAndExecute' })
     foreach ($grant in $grants) {
         $rule = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
-            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $grant[0]),
-            [System.Security.AccessControl.FileSystemRights]$grant[1],
+            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $grant.Sid),
+            [System.Security.AccessControl.FileSystemRights]$grant.Rights,
             $inheritance,
             [System.Security.AccessControl.PropagationFlags]::None,
             [System.Security.AccessControl.AccessControlType]::Allow
@@ -2926,8 +3265,12 @@ function New-TuneupStateSecurity {
 }
 
 function Set-TuneupStateSecurity {
-    param([Parameter(Mandatory)][string]$Path)
-    $security = New-TuneupStateSecurity
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$OwnerSid = $script:StateOwnerSid,
+        [string[]]$TrustedSids = $script:TrustedSids
+    )
+    $security = New-TuneupStateSecurity -OwnerSid $OwnerSid -TrustedSids $TrustedSids
     try {
         $current = Get-Acl -LiteralPath $Path -ErrorAction Stop
         # Windows PowerShell 5.1 Set-Acl also rewrites the SACL (needs SeSecurityPrivilege) when
@@ -2940,29 +3283,48 @@ function Set-TuneupStateSecurity {
     }
 }
 
-function Set-TuneupTrustedOwner {
-    param([Parameter(Mandatory)][string]$Path)
-    try {
-        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
-        $security.SetOwner((New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $script:AdministratorsSid))
-        Set-Acl -LiteralPath $Path -AclObject $security -ErrorAction Stop
+function New-TuneupSecureDirectory {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Security)
+    [System.IO.Directory]::CreateDirectory($Path, $Security) | Out-Null
+}
+
+function New-TuneupSecureFile {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Security)
+    New-Object System.IO.FileStream -ArgumentList @(
+        $Path,
+        [System.IO.FileMode]::CreateNew,
+        [System.Security.AccessControl.FileSystemRights]::Write,
+        [System.IO.FileShare]::None,
+        4096,
+        [System.IO.FileOptions]::None,
+        $Security
+    )
+}
+
+function Test-TuneupTrustedSecurity {
+    param([Parameter(Mandatory)]$Security, [string[]]$TrustedSids = $script:TrustedSids)
+    $owner = $Security.GetOwner([System.Security.Principal.SecurityIdentifier])
+    if ($null -eq $owner -or $TrustedSids -notcontains $owner.Value) { return $false }
+    foreach ($rule in $Security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        if ($TrustedSids -contains $rule.IdentityReference.Value) { continue }
+        if (([int]$rule.FileSystemRights -band $script:WriteRights) -ne 0) { return $false }
     }
-    catch {
-        throw (Get-TuneupUntrustedMessage -Path (Split-Path -Parent $Path))
-    }
+    $true
 }
 
 function Test-TuneupTrustedItem {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [string[]]$TrustedSids = $script:TrustedSids)
     try {
         $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
-        $owner = (Get-Acl -LiteralPath $Path -ErrorAction Stop).GetOwner([System.Security.Principal.SecurityIdentifier])
+        if (-not $item.PSIsContainer -and $item.LinkType -eq 'HardLink') { return $false }
+        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
     }
     catch {
         return $false
     }
-    ($null -ne $owner) -and ($script:TrustedOwnerSids -contains $owner.Value)
+    Test-TuneupTrustedSecurity -Security $security -TrustedSids $TrustedSids
 }
 
 function Test-TuneupTrustedRun {
@@ -2972,25 +3334,135 @@ function Test-TuneupTrustedRun {
     (-not (Test-Path -LiteralPath $journal)) -or (Test-TuneupTrustedItem -Path $journal)
 }
 
+function Get-TuneupFileLinkCount {
+    param([Parameter(Mandatory)]$Handle)
+    if (-not ('WindowsTuneup.NativeFile' -as [type])) { Add-Type -TypeDefinition $script:NativeFileSource }
+    [WindowsTuneup.NativeFile]::GetLinkCount($Handle)
+}
+
+function Open-TuneupTrustedStream {
+    param([Parameter(Mandatory)][string]$Path, [switch]$Append)
+    $untrusted = "State file $Path is not trusted"
+    if (-not (Test-TuneupTrustedItem -Path (Split-Path -Parent $Path))) { throw $untrusted }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { throw $untrusted }
+    # Owner, DACL and link count are checked on the handle that is then read or written, and
+    # FileShare.Read keeps anyone else from writing while it is open.
+    if ($Append) {
+        $stream = New-Object System.IO.FileStream -ArgumentList $Path, ([System.IO.FileMode]::Append), ([System.IO.FileAccess]::Write), ([System.IO.FileShare]::Read)
+    }
+    else {
+        $stream = New-Object System.IO.FileStream -ArgumentList $Path, ([System.IO.FileMode]::Open), ([System.IO.FileAccess]::Read), ([System.IO.FileShare]::Read)
+    }
+    try {
+        $trusted = (Test-TuneupTrustedSecurity -Security $stream.GetAccessControl()) -and
+            ((Get-TuneupFileLinkCount -Handle $stream.SafeFileHandle) -eq 1)
+    }
+    catch {
+        $trusted = $false
+    }
+    if (-not $trusted) {
+        $stream.Dispose()
+        throw $untrusted
+    }
+    $stream
+}
+
+function Read-TuneupStateFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root, [switch]$IgnoreUntrusted)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -ne 'machine') {
+        return [System.IO.File]::ReadAllText($Path, $script:Utf8NoBom)
+    }
+    try {
+        $stream = Open-TuneupTrustedStream -Path $Path
+    }
+    catch {
+        if (-not $IgnoreUntrusted) { throw }
+        Write-Warning "Ignoring untrusted state file $Path"
+        return $null
+    }
+    $reader = New-Object System.IO.StreamReader -ArgumentList $stream, $script:Utf8NoBom, $true
+    try { $reader.ReadToEnd() }
+    finally { $reader.Dispose() }
+}
+
+function Write-TuneupStateFile {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
+        [switch]$Append,
+        [string]$Root
+    )
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -ne 'machine') {
+        if ($Append) { [System.IO.File]::AppendAllText($Path, $Text, $script:Utf8NoBom) }
+        else { [System.IO.File]::WriteAllText($Path, $Text, $script:Utf8NoBom) }
+        return
+    }
+    if ($Append -and (Test-Path -LiteralPath $Path)) {
+        $stream = Open-TuneupTrustedStream -Path $Path -Append
+    }
+    else {
+        $parent = Split-Path -Parent $Path
+        if (-not (Test-TuneupTrustedItem -Path $parent)) { throw (Get-TuneupUntrustedMessage -Path $parent) }
+        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        $stream = New-TuneupSecureFile -Path $Path -Security (New-TuneupStateSecurity -File)
+    }
+    try {
+        $bytes = $script:Utf8NoBom.GetBytes($Text)
+        $stream.Write($bytes, 0, $bytes.Length)
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
+function Read-TuneupTrustedJson {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    $text = Read-TuneupStateFile -Path $Path -Root $Root -IgnoreUntrusted
+    if (-not $text) { return $null }
+    try {
+        $text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Warning "Ignoring unreadable state file $Path"
+        $null
+    }
+}
+
+function Test-TuneupRunMarker {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Dir, [Parameter(Mandatory)][string]$Name, [string]$Root)
+    $path = Join-Path $Dir $Name
+    if (-not (Test-Path -LiteralPath $path)) { return $false }
+    if ((Resolve-TuneupFileRoot -Path $path -Root $Root) -ne 'machine') { return $true }
+    if (Test-TuneupTrustedItem -Path $path) { return $true }
+    Write-Warning "Ignoring untrusted state file $path"
+    $false
+}
+
 function Initialize-TuneupStateRoot {
     param([Parameter(Mandatory)][string]$Path)
     foreach ($folder in @($Path, (Join-Path $Path 'runs'))) {
-        $created = $false
-        if (-not (Test-Path -LiteralPath $folder)) {
+        $existed = Test-Path -LiteralPath $folder
+        if (-not $existed) {
             try {
-                New-Item -ItemType Directory -Path $folder -ErrorAction Stop | Out-Null
-                $created = $true
+                New-TuneupSecureDirectory -Path $folder -Security (New-TuneupStateSecurity)
             }
             catch {
                 if (-not (Test-Path -LiteralPath $folder)) { throw }
+                $existed = $true
             }
         }
-        # Never take over a folder someone else made: its owner could swap it for a junction
+        # Checked after creating it too: someone may have made it first, even as a junction.
+        # A folder someone else made is never taken over: its owner could swap it for a junction
         # between the check and Set-Acl, and the ACL would land on the junction target.
-        if (-not $created -and -not (Test-TuneupTrustedItem -Path $folder)) {
+        if (-not (Test-TuneupTrustedItem -Path $folder)) {
             throw (Get-TuneupUntrustedMessage -Path $folder)
         }
-        Set-TuneupStateSecurity -Path $folder
+        if ($existed) { Set-TuneupStateSecurity -Path $folder }
     }
 }
 
@@ -3029,20 +3501,29 @@ function New-TuneupRun {
         $id = '{0}-{1:D2}' -f $baseId, $counter
     }
     $dir = Join-Path $runsDir $id
-    New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
     if ($kind -eq 'machine') {
-        Set-TuneupStateSecurity -Path $dir
-        $journal = Join-Path $dir 'snapshot.jsonl'
-        [System.IO.File]::Open($journal, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write).Dispose()
-        Set-TuneupTrustedOwner -Path $journal
+        New-TuneupSecureDirectory -Path $dir -Security (New-TuneupStateSecurity)
+        if (-not (Test-TuneupTrustedItem -Path $dir)) { throw (Get-TuneupUntrustedMessage -Path $dir) }
+        (New-TuneupSecureFile -Path (Join-Path $dir 'snapshot.jsonl') -Security (New-TuneupStateSecurity -File)).Dispose()
     }
-    [pscustomobject]@{ Id = $id; Dir = $dir; Root = $kind }
+    else {
+        New-Item -ItemType Directory -Path $dir -ErrorAction Stop | Out-Null
+    }
+    $userSid = Get-TuneupCurrentUserSid
+    $info = [pscustomobject]@{
+        schemaVersion = $script:RunSchemaVersion
+        userSid       = $userSid
+        machine       = ($kind -eq 'machine')
+        createdAt     = (Get-Date).ToString('s')
+    }
+    Save-TuneupJson -Path (Join-Path $dir 'run.json') -Object $info -Root $kind
+    [pscustomobject]@{ Id = $id; Dir = $dir; Root = $kind; UserSid = $userSid }
 }
 
 function Save-TuneupJson {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object, [string]$Root)
     $json = ConvertTo-Json -InputObject $Object -Depth 10
-    [System.IO.File]::WriteAllText($Path, $json, $script:Utf8NoBom)
+    Write-TuneupStateFile -Path $Path -Text $json -Root $Root
 }
 
 function Add-TuneupJournalEntry {
@@ -3050,27 +3531,23 @@ function Add-TuneupJournalEntry {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)]$Tweak,
         [Parameter(Mandatory)][AllowNull()]$State,
-        [ValidateSet('machine', 'user', 'custom')][string]$Root
+        [string]$Root
     )
-    if ((Resolve-TuneupJournalRoot -Path $Path -Root $Root) -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $Tweak)) {
+    if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $Tweak)) {
         throw "Cannot journal machine-scope tweak '$($Tweak.id)' in the user state folder"
     }
     $entry = [pscustomobject]@{ id = $Tweak.id; tweak = $Tweak; state = $State }
     $line = ConvertTo-Json -InputObject $entry -Depth 10 -Compress
-    [System.IO.File]::AppendAllText($Path, $line + [Environment]::NewLine, $script:Utf8NoBom)
+    Write-TuneupStateFile -Path $Path -Text ($line + [Environment]::NewLine) -Append -Root $Root
 }
 
 function Read-TuneupJournal {
-    param(
-        [Parameter(Mandatory)][string]$Path,
-        [ValidateSet('machine', 'user', 'custom')][string]$Root
-    )
-    if (-not (Test-Path -LiteralPath $Path)) { return }
-    $kind = Resolve-TuneupJournalRoot -Path $Path -Root $Root
-    if ($kind -eq 'machine' -and -not (Test-TuneupTrustedRun -Dir (Split-Path -Parent $Path))) {
-        throw "Journal $Path is not trusted"
-    }
-    $lines = [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [string]$Root)
+    $kind = Resolve-TuneupFileRoot -Path $Path -Root $Root
+    $text = Read-TuneupStateFile -Path $Path -Root $kind
+    if ($null -eq $text) { return }
+    $lines = @($text -split "`r?`n")
     $lastIndex = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i].Trim()) { $lastIndex = $i }
@@ -3089,6 +3566,21 @@ function Read-TuneupJournal {
         }
         if ($kind -eq 'user' -and -not (Test-TuneupUserScopedTweak -Tweak $entry.tweak)) {
             Write-Warning "Ignoring machine-scope entry '$($entry.id)' in user journal $Path"
+            continue
+        }
+        $entry
+    }
+}
+
+function Read-TuneupRunJournal {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    $currentSid = Get-TuneupCurrentUserSid
+    foreach ($entry in @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)) {
+        # A user-scope entry holds HKCU values of whoever made the run; restoring it would write them
+        # into the current user's hive instead.
+        if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
+            Write-Warning "Ignoring user-scope entry '$($entry.id)' of run $($Run.Id): it belongs to another user"
             continue
         }
         $entry
@@ -3127,13 +3619,17 @@ function Get-TuneupRunList {
                 Write-Warning "Ignoring untrusted run $($dir.FullName)"
                 continue
             }
+            $info = Read-TuneupTrustedJson -Path (Join-Path $dir.FullName 'run.json') -Root $root.Kind
+            $userSid = $null
+            if ($null -ne $info -and $info.userSid -is [string]) { $userSid = $info.userSid }
             # A space sorts before '-', so '20250101-000000' stays ahead of '20250101-000000-02'.
             $key = $dir.Name + ' ' + $root.Kind
             $byKey[$key] = [pscustomobject]@{
-                Id     = $dir.Name
-                Dir    = $dir.FullName
-                Undone = (Test-Path -LiteralPath (Join-Path $dir.FullName 'undone.json'))
-                Root   = $root.Kind
+                Id      = $dir.Name
+                Dir     = $dir.FullName
+                Undone  = (Test-TuneupRunMarker -Dir $dir.FullName -Name 'undone.json' -Root $root.Kind)
+                Root    = $root.Kind
+                UserSid = $userSid
             }
             $keys.Add($key)
         }
@@ -3148,7 +3644,22 @@ function Test-TuneupRunHasJournal {
     (Test-Path -LiteralPath $journal -PathType Leaf) -and ((Get-Item -LiteralPath $journal -Force).Length -gt 0)
 }
 
+function Test-TuneupRunCompletable {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    if ($Run.Root -eq 'user') { return $true }
+    if ($Run.UserSid -ne (Get-TuneupCurrentUserSid)) { return $false }
+    try {
+        $entries = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)
+    }
+    catch {
+        return $false
+    }
+    @($entries | Where-Object { -not (Test-TuneupUserScopedTweak -Tweak $_.tweak) }).Count -eq 0
+}
+
 function Resolve-TuneupRun {
+    [CmdletBinding()]
     param(
         [string]$StateRoot,
         [string]$MachineRoot,
@@ -3157,21 +3668,26 @@ function Resolve-TuneupRun {
     )
     $runs = @(Get-TuneupRunList -StateRoot $StateRoot -MachineRoot $MachineRoot -UserRoot $UserRoot |
         Where-Object { Test-TuneupRunHasJournal -Dir $_.Dir })
-    if ($RunId -eq 'last') {
-        return ($runs | Where-Object { -not $_.Undone } | Select-Object -Last 1)
+    if ($RunId -ne 'last') {
+        return ($runs | Where-Object { $_.Id -eq $RunId } | Select-Object -First 1)
     }
-    $runs | Where-Object { $_.Id -eq $RunId } | Select-Object -First 1
+    # Without elevation only runs this user can fully undo are candidates for 'last'.
+    $isAdmin = [bool](Test-TuneupAdmin)
+    $pending = @($runs | Where-Object { -not $_.Undone })
+    for ($i = $pending.Count - 1; $i -ge 0; $i--) {
+        if ($isAdmin -or (Test-TuneupRunCompletable -Run $pending[$i])) { return $pending[$i] }
+    }
 }
 ```
 
 Nota: el sufijo usa dos dígitos (`-02`, `-03`…) para que el orden alfabético coincida con el orden de creación.
 
-Nota: hay dos carpetas de estado (máquina en `%ProgramData%` para procesos elevados, usuario en `%LOCALAPPDATA%` sin elevar); `-StateRoot` es una carpeta única sin ACL. La ACL, la regla de dueños confiables y el filtro de la carpeta de usuario están explicados en la especificación, §5 "Estado en disco". Las pruebas nunca tocan las carpetas reales: inyectan `-MachineRoot`/`-UserRoot` en `$TestDrive` y simulan `Get-Acl`, `Set-Acl` y `Test-TuneupAdmin`.
+Nota: hay dos carpetas de estado (máquina en `%ProgramData%` para procesos elevados, usuario en `%LOCALAPPDATA%` sin elevar); `-StateRoot` es una carpeta única sin ACL. La ACL, la confianza (dueño, DACL y enlaces), `run.json` y el filtro por usuario están explicados en la especificación, §5 "Estado en disco". Las pruebas nunca tocan las carpetas reales: inyectan `-MachineRoot`/`-UserRoot` en `$TestDrive`, cambian los SID de confianza al usuario actual (`Use-CurrentUserAsTrusted`) para crear y verificar ACL reales, y simulan `Get-Acl`, `Set-Acl` y `Test-TuneupAdmin` donde hace falta. Las carpetas de máquina de prueba se endurecen primero con `Initialize-TuneupStateRoot`, porque la DACL de `%TEMP%` puede dar escritura a otros SID.
 
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/State.Tests.ps1`
-Expected: 43 passed.
+Expected: 71 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -3180,7 +3696,7 @@ git add engine/State.ps1 tests/State.Tests.ps1
 git commit -m "feat: corridas y diario en disco"
 ```
 
-Seguimientos (mismo contenido final ya incluido arriba): `git commit -m "fix: diario tolerante a cortes y listado de corridas estricto"` y `git commit -m "fix: carpeta de estado protegida contra diarios plantados"`.
+Seguimientos (mismo contenido final ya incluido arriba): `git commit -m "fix: diario tolerante a cortes y listado de corridas estricto"`, `git commit -m "fix: carpeta de estado protegida contra diarios plantados"` y `git commit -m "fix: confianza del estado por DACL, enlaces y usuario"`.
 
 ---
 
@@ -3206,13 +3722,13 @@ BeforeAll {
     }
 }
 
-AfterEach {
-    if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-}
-
 Describe 'Invoke-TuneupPlan' {
     BeforeEach {
         $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
     It 'applies the plan, journals each tweak first and reports the result' {
@@ -3367,20 +3883,20 @@ BeforeAll {
     }
 }
 
-AfterEach {
-    if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-}
-
 Describe 'Undo and status' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
     It 'restores the exact previous state' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'Two' -PropertyType String -Value 'old' | Out-Null
         $run = Invoke-TestApply $Root
-        $results = @(Invoke-TuneupUndo -RunDir $run.Dir)
+        $results = @(Invoke-TuneupUndo -Run $run)
         ($results | ForEach-Object { $_.status }) -join ',' | Should -Be 'restored,restored'
         $item = Get-Item -LiteralPath $Key
         $item.GetValueNames() -contains 'One' | Should -BeFalse
@@ -3390,13 +3906,22 @@ Describe 'Undo and status' {
 
     It 'removes keys that did not exist before' {
         $run = Invoke-TestApply $Root
-        Invoke-TuneupUndo -RunDir $run.Dir | Out-Null
+        Invoke-TuneupUndo -Run $run | Out-Null
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'reports a failure when the undo cannot be recorded' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Save-TuneupJson { throw 'disk full' } -ParameterFilter { $Path -like '*undone.json' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        ($results | ForEach-Object { $_.status }) -join ',' | Should -Be 'restored,restored,failed'
+        $results[2].error | Should -BeLike '*disk full*'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
 
     It 'undoes a single tweak' {
         $run = Invoke-TestApply $Root
-        Invoke-TuneupUndo -RunDir $run.Dir -TweakId 'test.one' | Out-Null
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
         $item = Get-Item -LiteralPath $Key
         $item.GetValueNames() -contains 'One' | Should -BeFalse
         $item.GetValue('Two') | Should -Be 'x'
@@ -3405,7 +3930,7 @@ Describe 'Undo and status' {
 
     It 'throws when the tweak is not in the run' {
         $run = Invoke-TestApply $Root
-        { Invoke-TuneupUndo -RunDir $run.Dir -TweakId 'test.nope' } | Should -Throw
+        { Invoke-TuneupUndo -Run $run -TweakId 'test.nope' } | Should -Throw
     }
 
     It 'reports ok and drift' {
@@ -3418,7 +3943,7 @@ Describe 'Undo and status' {
 
     It 'ignores runs that were undone' {
         $run = Invoke-TestApply $Root
-        Invoke-TuneupUndo -RunDir $run.Dir | Out-Null
+        Invoke-TuneupUndo -Run $run | Out-Null
         @(Get-TuneupStatus -StateRoot $Root).Count | Should -Be 0
     }
 
@@ -3441,12 +3966,8 @@ Expected: FAIL, `Invoke-TuneupUndo` no se reconoce.
 `engine/Undo.ps1`:
 ```powershell
 function Invoke-TuneupUndo {
-    param(
-        [Parameter(Mandatory)][string]$RunDir,
-        [string]$TweakId,
-        [ValidateSet('machine', 'user', 'custom')][string]$Root = 'custom'
-    )
-    $entries = @(Read-TuneupJournal -Path (Join-Path $RunDir 'snapshot.jsonl') -Root $Root)
+    param([Parameter(Mandatory)]$Run, [string]$TweakId)
+    $entries = @(Read-TuneupRunJournal -Run $Run)
     [array]::Reverse($entries)
     if ($TweakId) {
         $entries = @($entries | Where-Object { $_.id -eq $TweakId })
@@ -3460,10 +3981,16 @@ function Invoke-TuneupUndo {
             [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; error = $_.Exception.Message }
         }
     })
-    if ($TweakId) {
-        Add-Content -LiteralPath (Join-Path $RunDir 'undone-tweaks.txt') -Value $TweakId -Encoding ASCII
-    } else {
-        Save-TuneupJson -Path (Join-Path $RunDir 'undone.json') -Object ([pscustomobject]@{ undoneAt = (Get-Date).ToString('s'); results = $results })
+    # The values are already restored; an unrecorded undo would leave the run pending, so it is reported.
+    try {
+        if ($TweakId) {
+            Write-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Text ($TweakId + [Environment]::NewLine) -Append -Root $Run.Root
+        } else {
+            Save-TuneupJson -Path (Join-Path $Run.Dir 'undone.json') -Root $Run.Root `
+                -Object ([pscustomobject]@{ undoneAt = (Get-Date).ToString('s'); results = $results })
+        }
+    } catch {
+        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; error = "The undo could not be recorded: $($_.Exception.Message)" }
     }
     $results
 }
@@ -3474,15 +4001,14 @@ function Get-TuneupStatus {
     foreach ($run in @(Get-TuneupRunList -StateRoot $StateRoot)) {
         if ($run.Undone) { continue }
         $undoneIds = @()
-        $undoneFile = Join-Path $run.Dir 'undone-tweaks.txt'
-        if (Test-Path -LiteralPath $undoneFile) { $undoneIds = @(Get-Content -LiteralPath $undoneFile) }
-        $resultFile = Join-Path $run.Dir 'result.json'
+        $undoneText = Read-TuneupStateFile -Path (Join-Path $run.Dir 'undone-tweaks.txt') -Root $run.Root -IgnoreUntrusted
+        if ($undoneText) { $undoneIds = @($undoneText -split "`r?`n" | Where-Object { $_ }) }
         $touchedIds = $null
-        if (Test-Path -LiteralPath $resultFile) {
-            $result = Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json
+        $result = Read-TuneupTrustedJson -Path (Join-Path $run.Dir 'result.json') -Root $run.Root
+        if ($null -ne $result) {
             $touchedIds = @($result.results | Where-Object { $_.status -eq 'applied' -or $_.status -eq 'not-applied' } | ForEach-Object { $_.id })
         }
-        foreach ($entry in @(Read-TuneupJournal -Path (Join-Path $run.Dir 'snapshot.jsonl') -Root $run.Root)) {
+        foreach ($entry in @(Read-TuneupRunJournal -Run $run)) {
             if ($undoneIds -contains $entry.id) { continue }
             if ($null -ne $touchedIds -and $touchedIds -notcontains $entry.id) { continue }
             $latest[[string]$entry.id] = [pscustomobject]@{ tweak = $entry.tweak; runId = $run.Id }
@@ -3503,12 +4029,12 @@ function Get-TuneupStatus {
 
 Nota: si una corrida se cortó antes de escribir `result.json`, `$touchedIds` queda en `$null` y se consideran todos los ajustes del diario, porque pudieron quedar aplicados.
 
-Nota: `-Root` llega a `Read-TuneupJournal` para que la carpeta de máquina exija dueños confiables y la de usuario descarte entradas de máquina. Dentro de una carpeta de estado real la regla se deduce de la ruta aunque falte `-Root`; las pruebas usan `-StateRoot` (`custom`) y no la necesitan.
+Nota: todo lo que se lee de una corrida pasa por los lectores de `State.ps1`: `Read-TuneupRunJournal` (confianza de la carpeta de máquina, sin entradas de máquina en la de usuario y sin entradas de usuario de otra persona), `Read-TuneupTrustedJson` y `Read-TuneupStateFile -IgnoreUntrusted` para `result.json` y `undone-tweaks.txt`, y `Undone` del listado para `undone.json`. Las marcas se escriben con `Save-TuneupJson`/`Write-TuneupStateFile`, que en la carpeta de máquina crean el archivo ya protegido.
 
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: 7 passed.
+Expected: 8 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -3700,15 +4226,6 @@ BeforeAll {
     function Get-Ids($Items) { ($Items | ForEach-Object { $_.id }) -join ',' }
 }
 
-BeforeEach {
-    $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-    if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-}
-
-AfterAll {
-    if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-}
-
 Describe 'ConvertTo-TuneupList' {
     It 'splits comma separated values from a single argument' {
         (ConvertTo-TuneupList -Value @('base, extra', 'dev')) -join '|' | Should -Be 'base|extra|dev'
@@ -3716,6 +4233,15 @@ Describe 'ConvertTo-TuneupList' {
 }
 
 Describe 'tuneup.ps1' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
     It 'shows the plan as JSON without changing anything' {
         $result = Invoke-Tuneup @('-WhatIf', '-Json')
         $result.ExitCode | Should -Be 0
@@ -4009,11 +4535,11 @@ try {
     if ($Undo) {
         $run = Resolve-TuneupRun -StateRoot $StateRoot -RunId $Undo
         if (-not $run) { Stop-Tuneup -Message (Get-TuneupText -Key 'undo.none') }
-        $entries = @(Read-TuneupJournal -Path (Join-Path $run.Dir 'snapshot.jsonl') -Root $run.Root)
+        $entries = @(Read-TuneupRunJournal -Run $run)
         if (-not $environment.IsAdmin -and @($entries | Where-Object { $_.tweak.scope -eq 'machine' }).Count) {
             Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin')
         }
-        $undoResults = @(Invoke-TuneupUndo -RunDir $run.Dir -Root $run.Root -TweakId $Tweak)
+        $undoResults = @(Invoke-TuneupUndo -Run $run -TweakId $Tweak)
         Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Json:$Json
         if (@($undoResults | Where-Object { $_.status -eq 'failed' }).Count) { exit 2 }
         exit 0
