@@ -793,6 +793,15 @@ Describe 'Test-TuneupTweak' {
         $set = [pscustomobject]@{ path = '\Microsoft\Windows'; name = 'X'; state = 'Disabled' }
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'task' -Scope 'machine' -Set $set)) -join '; ' | Should -Match 'backslash'
     }
+    It 'rejects wildcard characters in a task name or path' {
+        foreach ($set in @(
+                [pscustomobject]@{ path = '\Microsoft\Windows\'; name = 'Sample*'; state = 'Disabled' },
+                [pscustomobject]@{ path = '\Microsoft\Windows\'; name = 'Sam?le'; state = 'Disabled' },
+                [pscustomobject]@{ path = '\Microsoft\Windows\'; name = 'Sample[1]'; state = 'Disabled' },
+                [pscustomobject]@{ path = '\Microsoft\*\'; name = 'Sample'; state = 'Disabled' })) {
+            (Test-TuneupTweak -Tweak (New-TestTweak -Type 'task' -Scope 'machine' -Set $set)) -join '; ' | Should -Match 'cannot contain wildcard characters'
+        }
+    }
     It 'rejects an unsupported type' {
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'magic')) -join '; ' | Should -Match "unsupported type 'magic'"
     }
@@ -1057,6 +1066,7 @@ function Test-TuneupTweak {
         'task' {
             if ([string]$set.path -notmatch '^\\(.*\\)?$') { $errors.Add("$id task path must start and end with a backslash") }
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
+            if (([string]$set.name + [string]$set.path) -match '[*?\[\]]') { $errors.Add("$id task name and path cannot contain wildcard characters") }
             if ($script:TaskStates -notcontains $set.state) { $errors.Add("$id has an invalid task state '$($set.state)'") }
             if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
         }
@@ -1252,7 +1262,7 @@ Solo cinco ajustes para ejercitar los tres manejadores; el Plan 3 revisa cada un
 - [ ] **Step 5: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Catalog.Tests.ps1`
-Expected: 31 passed.
+Expected: 32 passed.
 
 - [ ] **Step 6: Commit**
 
@@ -1809,17 +1819,33 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $script:Tweak = New-TestTweak -Id 'tasks.sample' -Type 'task' -Scope 'machine' `
         -Set ([pscustomobject]@{ path = '\Microsoft\Windows\Test\'; name = 'Sample'; state = 'Disabled' })
+    $script:EnabledTweak = New-TestTweak -Id 'tasks.sample2' -Type 'task' -Scope 'machine' `
+        -Set ([pscustomobject]@{ path = '\Microsoft\Windows\Test\'; name = 'Sample'; state = 'Enabled' })
+    # Client-only CIM instance: the real cmdlets type -InputObject as CimInstance, and this never touches a real task.
+    $script:NewFakeTask = {
+        param([string]$Name, [string]$State)
+        New-CimInstance -ClientOnly -ClassName MSFT_ScheduledTask -Namespace 'Root/Microsoft/Windows/TaskScheduler' `
+            -Property @{ TaskName = $Name; TaskPath = '\Microsoft\Windows\Test\'; State = $State }
+    }
 }
 
 Describe 'Task handler' {
     It 'reports an enabled task as not applied when the goal is Disabled' {
-        Mock -ModuleName Tuneup Get-ScheduledTask { [pscustomobject]@{ State = 'Ready' } }
+        $fake = & $NewFakeTask 'Sample' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
         (Get-TaskTweakState -Tweak $Tweak).enabled | Should -BeTrue
         Test-TaskTweakState -Tweak $Tweak | Should -Be 'not-applied'
     }
 
+    It 'counts a running task as enabled' {
+        $fake = & $NewFakeTask 'Sample' 'Running'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
+        (Get-TaskTweakState -Tweak $Tweak).enabled | Should -BeTrue
+    }
+
     It 'reports a disabled task as applied' {
-        Mock -ModuleName Tuneup Get-ScheduledTask { [pscustomobject]@{ State = 'Disabled' } }
+        $fake = & $NewFakeTask 'Sample' 'Disabled'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
         Test-TaskTweakState -Tweak $Tweak | Should -Be 'applied'
     }
 
@@ -1828,16 +1854,77 @@ Describe 'Task handler' {
         Test-TaskTweakState -Tweak $Tweak | Should -Be 'not-present'
     }
 
-    It 'disables the task' {
+    It 'resolves only the exact match when the wildcard lookup returns several tasks' {
+        $near = & $NewFakeTask 'SampleOther' 'Ready'
+        $exact = & $NewFakeTask 'Sample' 'Disabled'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $near; $exact }.GetNewClosure()
+        (Get-TaskTweakState -Tweak $Tweak).enabled | Should -BeFalse
+    }
+
+    It 'reports not-present when the lookup only returns near matches' {
+        $near = & $NewFakeTask 'SampleOther' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $near }.GetNewClosure()
+        Test-TaskTweakState -Tweak $Tweak | Should -Be 'not-present'
+    }
+
+    It 'disables the exact task object with errors made terminating' {
+        $fake = & $NewFakeTask 'Sample' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
         Mock -ModuleName Tuneup Disable-ScheduledTask { }
         Set-TaskTweakDesired -Tweak $Tweak
-        Should -Invoke Disable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $TaskName -eq 'Sample' -and $TaskPath -eq '\Microsoft\Windows\Test\' }
+        Should -Invoke Disable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $InputObject.TaskName -eq 'Sample' -and $InputObject.TaskPath -eq '\Microsoft\Windows\Test\' -and $ErrorAction -eq 'Stop'
+        }
+    }
+
+    It 'enables the task when the goal state is Enabled' {
+        $fake = & $NewFakeTask 'Sample' 'Disabled'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
+        Mock -ModuleName Tuneup Enable-ScheduledTask { }
+        Set-TaskTweakDesired -Tweak $EnabledTweak
+        Should -Invoke Enable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $InputObject.TaskName -eq 'Sample' -and $ErrorAction -eq 'Stop'
+        }
     }
 
     It 'enables the task again when it was enabled before' {
+        $fake = & $NewFakeTask 'Sample' 'Disabled'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
         Mock -ModuleName Tuneup Enable-ScheduledTask { }
         Restore-TaskTweakState -Tweak $Tweak -State ([pscustomobject]@{ present = $true; enabled = $true })
-        Should -Invoke Enable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly
+        Should -Invoke Enable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $ErrorAction -eq 'Stop' }
+    }
+
+    It 'disables the task again when it was disabled before' {
+        $fake = & $NewFakeTask 'Sample' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
+        Mock -ModuleName Tuneup Disable-ScheduledTask { }
+        Restore-TaskTweakState -Tweak $EnabledTweak -State ([pscustomobject]@{ present = $true; enabled = $false })
+        Should -Invoke Disable-ScheduledTask -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $ErrorAction -eq 'Stop' }
+    }
+
+    It 'does nothing on restore when the task was not present' {
+        $fake = & $NewFakeTask 'Sample' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
+        Mock -ModuleName Tuneup Enable-ScheduledTask { }
+        Mock -ModuleName Tuneup Disable-ScheduledTask { }
+        Restore-TaskTweakState -Tweak $Tweak -State ([pscustomobject]@{ present = $false; enabled = $null })
+        Should -Invoke Enable-ScheduledTask -ModuleName Tuneup -Times 0 -Exactly
+        Should -Invoke Disable-ScheduledTask -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'throws when the task is missing at write time' {
+        Mock -ModuleName Tuneup Get-ScheduledTask { $null }
+        Mock -ModuleName Tuneup Disable-ScheduledTask { }
+        { Set-TaskTweakDesired -Tweak $Tweak } | Should -Throw '*Scheduled task \Microsoft\Windows\Test\Sample not found*'
+        Should -Invoke Disable-ScheduledTask -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'propagates a failure from Disable-ScheduledTask' {
+        $fake = & $NewFakeTask 'Sample' 'Ready'
+        Mock -ModuleName Tuneup Get-ScheduledTask { $fake }.GetNewClosure()
+        Mock -ModuleName Tuneup Disable-ScheduledTask { throw 'access denied' }
+        { Set-TaskTweakDesired -Tweak $Tweak } | Should -Throw '*access denied*'
     }
 }
 ```
@@ -1851,9 +1938,18 @@ Expected: FAIL, `Get-TaskTweakState` no se reconoce.
 
 `engine/handlers/Task.ps1`:
 ```powershell
+function Get-TuneupScheduledTask {
+    param([Parameter(Mandatory)]$Tweak)
+    # Get-ScheduledTask treats names and paths as wildcards, so keep only the exact match.
+    $found = @(Get-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskName -eq $Tweak.set.name -and $_.TaskPath -eq $Tweak.set.path })
+    if ($found.Count -eq 0) { return $null }
+    $found[0]
+}
+
 function Get-TaskTweakState {
     param([Parameter(Mandatory)]$Tweak)
-    $task = Get-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction SilentlyContinue
+    $task = Get-TuneupScheduledTask -Tweak $Tweak
     if ($null -eq $task) { return [pscustomobject]@{ present = $false; enabled = $null } }
     [pscustomobject]@{ present = $true; enabled = ([string]$task.State -ne 'Disabled') }
 }
@@ -1868,10 +1964,12 @@ function Test-TaskTweakState {
 
 function Set-TuneupTaskEnabled {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)][bool]$Enabled)
+    $task = Get-TuneupScheduledTask -Tweak $Tweak
+    if ($null -eq $task) { throw "Scheduled task $($Tweak.set.path)$($Tweak.set.name) not found" }
     if ($Enabled) {
-        Enable-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction Stop | Out-Null
+        Enable-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null
     } else {
-        Disable-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction Stop | Out-Null
+        Disable-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null
     }
 }
 
@@ -1890,7 +1988,7 @@ function Restore-TaskTweakState {
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Task.Tests.ps1`
-Expected: 5 passed.
+Expected: 13 passed.
 
 - [ ] **Step 5: Commit**
 

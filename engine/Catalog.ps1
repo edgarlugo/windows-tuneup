@@ -112,6 +112,7 @@ function Test-TuneupTweak {
         'task' {
             if ([string]$set.path -notmatch '^\\(.*\\)?$') { $errors.Add("$id task path must start and end with a backslash") }
             if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
+            if (([string]$set.name + [string]$set.path) -match '[*?\[\]]') { $errors.Add("$id task name and path cannot contain wildcard characters") }
             if ($script:TaskStates -notcontains $set.state) { $errors.Add("$id has an invalid task state '$($set.state)'") }
             if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
         }

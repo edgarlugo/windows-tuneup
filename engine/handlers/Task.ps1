@@ -1,6 +1,15 @@
+function Get-TuneupScheduledTask {
+    param([Parameter(Mandatory)]$Tweak)
+    # Get-ScheduledTask treats names and paths as wildcards, so keep only the exact match.
+    $found = @(Get-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction SilentlyContinue |
+            Where-Object { $_.TaskName -eq $Tweak.set.name -and $_.TaskPath -eq $Tweak.set.path })
+    if ($found.Count -eq 0) { return $null }
+    $found[0]
+}
+
 function Get-TaskTweakState {
     param([Parameter(Mandatory)]$Tweak)
-    $task = Get-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction SilentlyContinue
+    $task = Get-TuneupScheduledTask -Tweak $Tweak
     if ($null -eq $task) { return [pscustomobject]@{ present = $false; enabled = $null } }
     [pscustomobject]@{ present = $true; enabled = ([string]$task.State -ne 'Disabled') }
 }
@@ -15,10 +24,12 @@ function Test-TaskTweakState {
 
 function Set-TuneupTaskEnabled {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)][bool]$Enabled)
+    $task = Get-TuneupScheduledTask -Tweak $Tweak
+    if ($null -eq $task) { throw "Scheduled task $($Tweak.set.path)$($Tweak.set.name) not found" }
     if ($Enabled) {
-        Enable-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction Stop | Out-Null
+        Enable-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null
     } else {
-        Disable-ScheduledTask -TaskPath $Tweak.set.path -TaskName $Tweak.set.name -ErrorAction Stop | Out-Null
+        Disable-ScheduledTask -InputObject $task -ErrorAction Stop | Out-Null
     }
 }
 
