@@ -46,7 +46,7 @@ Describe 'Service handler' {
         Mock -ModuleName Tuneup Stop-Service { }
         Set-ServiceTweakDesired -Tweak $Tweak
         Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Name -eq 'RetailDemo' -and $Start -eq 'disabled' }
-        Should -Invoke Stop-Service -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { -not $Force }
+        Should -Invoke Stop-Service -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { -not $Force -and $ErrorAction -eq 'Stop' }
     }
 
     It 'does not stop a service that is not running' {
