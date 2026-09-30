@@ -82,4 +82,34 @@ Describe 'Registry handler' {
         Restore-RegistryTweakState -Tweak $tweak -State $state
         (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
     }
+
+    It 'does not equate a MultiString element that contains a space with two elements' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'M' -PropertyType MultiString -Value @('a b') | Out-Null
+        Test-RegistryTweakState -Tweak (New-RegTweak $Key 'M' 'MultiString' @('a', 'b')) | Should -Be 'not-applied'
+        Test-RegistryTweakState -Tweak (New-RegTweak $Key 'M' 'MultiString' @('a b')) | Should -Be 'applied'
+    }
+
+    It 'compares Binary values byte by byte' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'B' -PropertyType Binary -Value ([byte[]]@(1, 2, 3)) | Out-Null
+        Test-RegistryTweakState -Tweak (New-RegTweak $Key 'B' 'Binary' @(1, 2, 3)) | Should -Be 'applied'
+        Test-RegistryTweakState -Tweak (New-RegTweak $Key 'B' 'Binary' @(1, 2)) | Should -Be 'not-applied'
+        Test-RegistryTweakState -Tweak (New-RegTweak $Key 'B' 'Binary' @(1, 2, 4)) | Should -Be 'not-applied'
+    }
+
+    It 'restores a REG_NONE value with its kind and bytes after a JSON round trip' {
+        $hive = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\windows-tuneup-test')
+        $hive.SetValue('N', [byte[]]@(1, 2, 3), [Microsoft.Win32.RegistryValueKind]::None)
+        $hive.Close()
+        $tweak = New-RegTweak $Key 'N' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        $state.kind | Should -Be 'None'
+        Set-RegistryTweakDesired -Tweak $tweak
+        (Get-Item -LiteralPath $Key).GetValueKind('N') | Should -Be 'DWord'
+        Restore-RegistryTweakState -Tweak $tweak -State $state
+        $item = Get-Item -LiteralPath $Key
+        $item.GetValueKind('N') | Should -Be 'None'
+        ($item.GetValue('N') -join ',') | Should -Be '1,2,3'
+    }
 }

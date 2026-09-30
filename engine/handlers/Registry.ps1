@@ -5,12 +5,56 @@ function ConvertTo-TuneupDWord {
     [BitConverter]::ToInt32([BitConverter]::GetBytes([uint32]$number), 0)
 }
 
+function ConvertTo-TuneupByteArray {
+    param([AllowNull()]$Value)
+    if ($null -eq $Value) { return , ([byte[]]@()) }
+    , ([byte[]]@($Value))
+}
+
 function Test-TuneupRegistryValueEqual {
     param([Parameter(Mandatory)][string]$Kind, $Current, $Desired)
     switch ($Kind) {
         'DWord' { return (ConvertTo-TuneupDWord -Value $Current) -eq (ConvertTo-TuneupDWord -Value $Desired) }
         'QWord' { return [int64]$Current -eq [int64]$Desired }
+        'MultiString' {
+            $left = [string[]]@($Current)
+            $right = [string[]]@($Desired)
+            if ($left.Count -ne $right.Count) { return $false }
+            for ($i = 0; $i -lt $left.Count; $i++) {
+                if ($left[$i] -cne $right[$i]) { return $false }
+            }
+            return $true
+        }
+        { $_ -in 'Binary', 'None', 'Unknown' } {
+            $left = ConvertTo-TuneupByteArray -Value $Current
+            $right = ConvertTo-TuneupByteArray -Value $Desired
+            if ($left.Length -ne $right.Length) { return $false }
+            for ($i = 0; $i -lt $left.Length; $i++) {
+                if ($left[$i] -ne $right[$i]) { return $false }
+            }
+            return $true
+        }
         default { return [string]$Current -ceq [string]$Desired }
+    }
+}
+
+function Write-TuneupRawRegistryValue {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$Kind,
+        [AllowNull()]$Value
+    )
+    if ($Path -match '^HKCU:\\?(?<sub>.*)$') { $root = [Microsoft.Win32.Registry]::CurrentUser }
+    elseif ($Path -match '^HKLM:\\?(?<sub>.*)$') { $root = [Microsoft.Win32.Registry]::LocalMachine }
+    else { throw "Unsupported registry path for kind ${Kind}: $Path" }
+    $key = $root.OpenSubKey($Matches['sub'], $true)
+    if ($null -eq $key) { throw "Cannot open registry key for writing: $Path" }
+    try {
+        $key.SetValue($Name, (ConvertTo-TuneupByteArray -Value $Value), [Microsoft.Win32.RegistryValueKind]$Kind)
+    }
+    finally {
+        $key.Close()
     }
 }
 
@@ -21,13 +65,17 @@ function Write-TuneupRegistryValue {
         [Parameter(Mandatory)][string]$Kind,
         [AllowNull()]$Value
     )
-    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force | Out-Null }
+    if (-not (Test-Path -LiteralPath $Path)) { New-Item -Path $Path -Force -ErrorAction Stop | Out-Null }
+    if ($Kind -in 'None', 'Unknown') {
+        Write-TuneupRawRegistryValue -Path $Path -Name $Name -Kind $Kind -Value $Value
+        return
+    }
     if ($Kind -eq 'DWord') { $data = ConvertTo-TuneupDWord -Value $Value }
     elseif ($Kind -eq 'QWord') { $data = [int64]$Value }
-    elseif ($Kind -eq 'Binary') { $data = [byte[]]@($Value) }
+    elseif ($Kind -eq 'Binary') { $data = ConvertTo-TuneupByteArray -Value $Value }
     elseif ($Kind -eq 'MultiString') { $data = [string[]]@($Value) }
     else { $data = [string]$Value }
-    New-ItemProperty -LiteralPath $Path -Name $Name -PropertyType $Kind -Value $data -Force | Out-Null
+    New-ItemProperty -LiteralPath $Path -Name $Name -PropertyType $Kind -Value $data -Force -ErrorAction Stop | Out-Null
 }
 
 function Get-RegistryTweakState {
@@ -99,7 +147,7 @@ function Restore-RegistryTweakState {
         $isEmpty = ($key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0)
         $key.Close()
         if (-not $isEmpty) { break }
-        Remove-Item -LiteralPath $current -Force
+        Remove-Item -LiteralPath $current -Force -ErrorAction Stop
         $current = Split-Path -Path $current -Parent
     }
 }
