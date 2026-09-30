@@ -8,17 +8,24 @@ function Invoke-TuneupUndo {
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
+    # Entries of another user are reported as skipped: they stay pending for their owner.
+    $foreign = @($journal.SkippedEntries)
+    $skip = { param($entry, $reason) [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'skipped'; reason = $reason; error = $null } }
     if ($TweakId) {
         $entries = @($entries | Where-Object { $_.id -eq $TweakId })
-        if (-not $entries.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
+        $foreign = @($foreign | Where-Object { $_.id -eq $TweakId })
+        if (-not $entries.Count -and -not $foreign.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
         if ($alreadyUndone -contains $TweakId) {
             # Restoring again would overwrite whatever the tweak holds now with a stale value.
-            return [pscustomobject]@{ id = $TweakId; title = Get-TuneupTitle -Tweak $entries[0].tweak; status = 'skipped'; reason = 'already-undone'; error = $null }
+            return (& $skip (@($entries) + @($foreign))[0] 'already-undone')
         }
+        if (-not $entries.Count) { return (& $skip $foreign[0] 'other-user') }
     } else {
         $entries = @($entries | Where-Object { $alreadyUndone -notcontains $_.id })
+        $foreign = @($foreign | Where-Object { $alreadyUndone -notcontains $_.id })
     }
     [array]::Reverse($entries)
+    [array]::Reverse($foreign)
     $results = @(foreach ($entry in $entries) {
         try {
             Restore-TuneupState -Tweak $entry.tweak -State $entry.state
@@ -27,6 +34,7 @@ function Invoke-TuneupUndo {
             [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; reason = $null; error = $_.Exception.Message }
         }
     })
+    $results += @(foreach ($entry in $foreign) { & $skip $entry 'other-user' })
     # The values are already restored; an unrecorded undo would leave the run pending, so it is reported.
     # The whole run is marked only when every one of its tweaks is restored. Anything left (a failed
     # restore, or entries of another user) keeps the run pending, and only the tweaks restored here are

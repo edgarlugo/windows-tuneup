@@ -24,12 +24,34 @@
     },
     {
       "id": "test.three",
-      "title": { "es": "Prueba tres", "en": "Test three" },
+      "title": { "es": "Prueba tres: configuración", "en": "Test three: settings" },
       "why": { "es": "Prueba", "en": "Test" },
       "risk": "low", "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry", "scope": "user",
       "set": { "path": "HKCU:\\Software\\windows-tuneup-test", "name": "Three", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.four",
+      "title": { "es": "Prueba cuatro", "en": "Test four" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test\\Sub", "name": "Four", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.machine",
+      "title": { "es": "Prueba de sistema", "en": "System test" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\windows-tuneup-test", "name": "Machine", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
       "sources": ["https://example.com/test"]
     }

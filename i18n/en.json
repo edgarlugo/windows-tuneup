@@ -8,10 +8,12 @@
   "err.unknownTweak": "Unknown tweak: {0}",
   "err.tweakNotInRun": "Tweak {0} is not part of that run.",
   "err.runAlreadyUndone": "Run {0} was already undone.",
+  "err.badArgs": "Invalid parameter combination: {0}",
   "undo.none": "There are no runs to undo.",
   "plan.header": "Plan: {0} to apply, {1} skipped",
   "plan.apply": "  + {0} [{1}]",
   "plan.skip": "  - {0}: {1}",
+  "plan.needsAdmin": "To apply the system changes, open PowerShell as administrator.",
   "nothing": "Nothing to change.",
   "confirm": "Apply {0} changes? (y/n)",
   "confirm.pattern": "^(y|yes)$",
@@ -30,6 +32,7 @@
   "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
   "reason.already-undone": "already undone",
+  "reason.other-user": "belongs to another user",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",
   "status.failed": "failed",
@@ -51,5 +54,5 @@
   "status.header": "Tweaks applied by windows-tuneup:",
   "status.empty": "windows-tuneup has not applied any tweak on this machine.",
   "undo.header": "Undoing run {0}:",
-  "undo.summary": "Restored: {0} · Failed: {1}"
+  "undo.summary": "Restored: {0} · Failed: {1} · Skipped: {2}"
 }

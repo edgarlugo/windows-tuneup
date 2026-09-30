@@ -63,10 +63,20 @@ Describe 'Undo and status' {
     It 'does not mark a run of another user as undone' {
         $run = Invoke-TestApply $Root
         $foreign = [pscustomobject]@{ Id = $run.Id; Dir = $run.Dir; Root = $run.Root; UserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
-        @(Invoke-TuneupUndo -Run $foreign -WarningAction SilentlyContinue).Count | Should -Be 0
+        $results = @(Invoke-TuneupUndo -Run $foreign -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.two:skipped:other-user,test.one:skipped:other-user'
+        $results[0].title | Should -Be 'Title test.two'
         (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeFalse
+    }
+
+    It 'skips a single tweak of another user' {
+        $run = Invoke-TestApply $Root
+        $foreign = [pscustomobject]@{ Id = $run.Id; Dir = $run.Dir; Root = $run.Root; UserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
+        $results = @(Invoke-TuneupUndo -Run $foreign -TweakId 'test.one' -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:skipped:other-user'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
     It 'undoes a single tweak' {

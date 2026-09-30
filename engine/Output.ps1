@@ -18,9 +18,27 @@ function ConvertTo-TuneupPlanView {
     }
 }
 
+function ConvertTo-TuneupEnvironmentView {
+    param([Parameter(Mandatory)]$Environment)
+    [pscustomobject]@{
+        build         = $Environment.Build
+        ubr           = $Environment.UBR
+        family        = $Environment.Family
+        edition       = $Environment.Edition
+        isServer      = $Environment.IsServer
+        isManaged     = $Environment.IsManaged
+        isAdmin       = $Environment.IsAdmin
+        hasBattery    = $Environment.HasBattery
+        pendingReboot = $Environment.PendingReboot
+    }
+}
+
 function Write-TuneupJson {
     param([Parameter(Mandatory)]$Object)
-    Write-Output (ConvertTo-Json -InputObject $Object -Depth 10)
+    $json = ConvertTo-Json -InputObject $Object -Depth 10
+    # ASCII only, so the console code page cannot garble accents on the way out.
+    $escaped = [regex]::Replace($json, '[^\x00-\x7F]', { param($match) '\u{0:x4}' -f [int][char]$match.Value })
+    Write-Output $escaped
 }
 
 function Add-TuneupJsonWarning {
@@ -40,11 +58,13 @@ function Write-TuneupPlanReport {
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
+    $requiresAdmin = @($items | Where-Object { $_.action -eq 'apply' -and $_.scope -eq 'machine' }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'plan'
-            environment   = $Environment
+            environment   = ConvertTo-TuneupEnvironmentView -Environment $Environment
+            requiresAdmin = $requiresAdmin
             items         = $items
             summary       = [pscustomobject]@{ apply = $toApply; skip = $items.Count - $toApply }
         }))
@@ -59,6 +79,7 @@ function Write-TuneupPlanReport {
         }
     }
     if (-not $toApply) { Write-Host (Get-TuneupText -Key 'nothing') -ForegroundColor Green }
+    if ($requiresAdmin -and -not $Environment.IsAdmin) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
 }
 
 function New-TuneupApplyReport {
@@ -68,24 +89,56 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment
     )
-    $count = { param($status) @($Results | Where-Object { $_.status -eq $status }).Count }
+    # A tweak left out because its backup could not be written was not done: it is counted apart.
+    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' }).Count }
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
         runId          = $Run.Id
         runDir         = $Run.Dir
         finishedAt     = (Get-Date).ToString('s')
-        environment    = $Environment
+        environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { $_.status -eq 'applied' -and $_.rebootRequired }).Count -gt 0)
         summary        = [pscustomobject]@{
-            applied    = & $count 'applied'
-            notApplied = & $count 'not-applied'
-            failed     = & $count 'failed'
-            skipped    = & $count 'skipped'
+            applied       = & $count 'applied'
+            notApplied    = & $count 'not-applied'
+            failed        = & $count 'failed'
+            skipped       = & $count 'skipped'
+            journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
         }
         results        = $Results
     }
+}
+
+function Save-TuneupApplyReport {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    # The changes are already made; losing result.json must not hide the report of what was done.
+    try {
+        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $Report
+        $true
+    } catch {
+        Write-Warning "The result of run $($Run.Id) could not be saved: $($_.Exception.Message)"
+        $false
+    }
+}
+
+function Get-TuneupApplyExitCode {
+    param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
+    $summary = $Report.summary
+    $touched = $summary.applied + $summary.notApplied + $summary.failed
+    if ($summary.journalErrors -and -not $touched) { return 1 }
+    if ($summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
+    0
+}
+
+function Get-TuneupUndoExitCode {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results)
+    $restored = @($Results | Where-Object { $_.status -eq 'restored' }).Count
+    $pending = @($Results | Where-Object { $_.status -eq 'failed' -or ($_.status -eq 'skipped' -and $_.reason -ne 'already-undone') }).Count
+    if (-not $pending) { return 0 }
+    if ($restored) { return 2 }
+    1
 }
 
 function Write-TuneupApplyReport {
@@ -97,6 +150,11 @@ function Write-TuneupApplyReport {
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
     $colors = @{ 'applied' = 'Green'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Report.results) {
+        if ($result.reason -eq 'journal-error') {
+            Write-Host ((Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key 'status.skipped'), $result.title) + ": $(Get-TuneupText -Key 'reason.journal-error')") -ForegroundColor Red
+            if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
+            continue
+        }
         if ($result.status -eq 'skipped') { continue }
         Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $colors[$result.status]
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
@@ -148,14 +206,14 @@ function Write-TuneupUndoReport {
         return
     }
     Write-Host (Get-TuneupText -Key 'undo.header' -Format $RunId)
-    $colors = @{ 'restored' = 'Green'; 'skipped' = 'DarkGray'; 'failed' = 'Red' }
+    $colors = @{ 'restored' = 'Green'; 'skipped' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Results) {
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
         Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
-    Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed)
+    Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed, $skipped)
 }
 
 function Write-TuneupErrorReport {

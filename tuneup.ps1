@@ -67,10 +67,28 @@ function Stop-Tuneup {
 $ProfileName = @(ConvertTo-TuneupList -Value $ProfileName)
 $Include = @(ConvertTo-TuneupList -Value $Include)
 $Exclude = @(ConvertTo-TuneupList -Value $Exclude)
-if (-not $CatalogPath) { $CatalogPath = Join-Path $PSScriptRoot 'catalog' }
-if (-not $ProfilesPath) { $ProfilesPath = Join-Path $PSScriptRoot 'profiles' }
+
+$conflict = $null
+if ($Tweak -and -not $Undo) { $conflict = '-Tweak (-Undo)' }
+elseif ($Status -and $Undo) { $conflict = '-Status -Undo' }
+elseif ($Status -or $Undo) {
+    $extra = @()
+    if ($ProfileName.Count) { $extra += '-Profile' }
+    if ($Include.Count) { $extra += '-Include' }
+    if ($Exclude.Count) { $extra += '-Exclude' }
+    if ($WhatIf) { $extra += '-WhatIf' }
+    if ($Yes) { $extra += '-Yes' }
+    if ($extra.Count) { $conflict = (@($(if ($Status) { '-Status' } else { '-Undo' })) + $extra) -join ' ' }
+}
+if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
 try {
+    # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
+    $pathApi = $ExecutionContext.SessionState.Path
+    if ($StateRoot) { $StateRoot = $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) }
+    $CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $PSScriptRoot 'catalog' })
+    $ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $PSScriptRoot 'profiles' })
+
     $catalog = @(Invoke-TuneupStep { Import-TuneupCatalog -Path $CatalogPath })
     $profileSet = @(Invoke-TuneupStep { Import-TuneupProfileSet -Path $ProfilesPath })
     $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
@@ -96,13 +114,13 @@ try {
         # Machine-folder runs always need elevation; a -StateRoot run only for its machine tweaks.
         $needsAdmin = ($run.Root -eq 'machine')
         if (-not $needsAdmin) {
-            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
+            # Its warnings come again, once, from the undo itself.
+            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
         }
         if ($needsAdmin -and -not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin') }
         $undoResults = @(Invoke-TuneupStep { Invoke-TuneupUndo -Run $run -TweakId $Tweak })
         Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Warnings $script:Warnings.ToArray() -Json:$Json
-        if (@($undoResults | Where-Object { $_.status -eq 'failed' }).Count) { exit 2 }
-        exit 0
+        exit (Get-TuneupUndoExitCode -Results $undoResults)
     }
 
     $plan = @(Invoke-TuneupStep {
@@ -135,10 +153,9 @@ try {
     if ($machineChanges) { $restorePoint = Invoke-TuneupStep { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
     $results = @(Invoke-TuneupStep { Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir })
     $report = New-TuneupApplyReport -Run $run -Results $results -RestorePoint $restorePoint -Environment $environment
-    Invoke-TuneupStep { Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Root $run.Root -Object $report }
+    $saved = Invoke-TuneupStep { Save-TuneupApplyReport -Run $run -Report $report }
     Write-TuneupApplyReport -Report $report -Warnings $script:Warnings.ToArray() -Json:$Json
-    if ($report.summary.notApplied -or $report.summary.failed) { exit 2 }
-    exit 0
+    exit (Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved))
 } catch {
     Stop-Tuneup -Message $_.Exception.Message
 }

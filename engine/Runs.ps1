@@ -78,17 +78,19 @@ function Get-TuneupRunJournal {
     $currentSid = Get-TuneupCurrentUserSid
     $entries = New-Object System.Collections.Generic.List[object]
     $skipped = New-Object System.Collections.Generic.List[string]
+    $skippedEntries = New-Object System.Collections.Generic.List[object]
     foreach ($entry in @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)) {
         # A user-scope entry holds HKCU values of whoever made the run; restoring it would write them
         # into the current user's hive instead.
         if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
             Write-Warning "Ignoring user-scope entry '$($entry.id)' of run $($Run.Id): it belongs to another user"
             $skipped.Add([string]$entry.id)
+            $skippedEntries.Add($entry)
             continue
         }
         $entries.Add($entry)
     }
-    [pscustomobject]@{ Entries = $entries.ToArray(); Skipped = $skipped.ToArray() }
+    [pscustomobject]@{ Entries = $entries.ToArray(); Skipped = $skipped.ToArray(); SkippedEntries = $skippedEntries.ToArray() }
 }
 
 function Read-TuneupRunJournal {

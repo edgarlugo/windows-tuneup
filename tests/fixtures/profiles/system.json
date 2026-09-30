@@ -1,0 +1,6 @@
+{
+  "id": "system", "aliases": [],
+  "title": { "es": "Sistema", "en": "System" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.machine"], "keep": []
+}

@@ -254,6 +254,7 @@ Describe 'Runs of other users' {
         $journal = Get-TuneupRunJournal -Run $run -WarningVariable warned -WarningAction SilentlyContinue
         ($journal.Entries | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine'
         @($journal.Skipped) -join ',' | Should -Be 'test.sample'
+        (@($journal.SkippedEntries) | ForEach-Object { $_.tweak.id }) -join ',' | Should -Be 'test.sample'
         "$($warned[0])" | Should -BeLike "Ignoring user-scope entry 'test.sample' of run 20250101-000000*"
         (@(Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine'
     }

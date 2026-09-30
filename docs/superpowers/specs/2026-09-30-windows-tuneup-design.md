@@ -339,6 +339,19 @@ herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
 | `-Lang es\|en` | Idioma de los mensajes |
 | `-Force` | Permite builds no soportados; nunca salta la lista negra |
 
+Combinaciones que no tienen sentido se rechazan antes de leer nada (código `1`): `-Tweak` sin
+`-Undo`, `-Status` con `-Undo`, y `-Status` o `-Undo` junto a `-Profile`, `-Include`,
+`-Exclude`, `-WhatIf` o `-Yes`. Las rutas relativas de `-StateRoot`, `-CatalogPath` y
+`-ProfilesPath` se resuelven contra la ubicación actual de PowerShell.
+
+Con `-Json` la salida estándar es un solo documento JSON en ASCII (todo carácter no ASCII va
+como `\uXXXX`, así que la página de códigos de la consola no lo altera), con las claves en
+camelCase y el arreglo `warnings`. El plan indica `requiresAdmin` cuando tiene cambios de
+sistema; sin `-Json` y sin elevar, `-WhatIf` lo recuerda con una línea. Un error anterior a que
+el script cargue su módulo y sus textos (por ejemplo, un parámetro desconocido o un `-Lang`
+fuera de `es`/`en`) lo informa PowerShell por la salida de errores, sin documento JSON, con
+código `1`.
+
 ### Medición
 
 Tomada después de un reinicio y 2 minutos en reposo:
@@ -403,7 +416,11 @@ reporte de medición adjunto.
 
 ### Después
 
-- Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar.
+- Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar. Un ajuste que
+  no se aplicó porque no se pudo escribir su diario cuenta como no hecho: si no se cambió nada es
+  `1`, si algo sí, `2`; también es `2` si no se pudo guardar `result.json` después de aplicar. En
+  `-Undo`: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (quedan fallos o ajustes de
+  otro usuario), `1` nada restaurado.
 - `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar.
 - `-Undo` sigue ante errores y lista lo que no pudo restaurar con la instrucción manual.
 - `-Undo` y `-Status` ignoran, con advertencia, las corridas y marcas no confiables de la

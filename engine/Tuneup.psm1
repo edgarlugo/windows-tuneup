@@ -1,3 +1,4 @@
+$ErrorActionPreference = 'Stop'
 $engineRoot = $PSScriptRoot
 foreach ($folder in @($engineRoot, (Join-Path $engineRoot 'handlers'))) {
     if (-not (Test-Path -LiteralPath $folder)) { continue }

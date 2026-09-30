@@ -8,10 +8,12 @@
   "err.unknownTweak": "Ajuste desconocido: {0}",
   "err.tweakNotInRun": "El ajuste {0} no está en esa corrida.",
   "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
+  "err.badArgs": "Combinación de parámetros no válida: {0}",
   "undo.none": "No hay corridas para deshacer.",
   "plan.header": "Plan: {0} para aplicar, {1} omitidos",
   "plan.apply": "  + {0} [{1}]",
   "plan.skip": "  - {0}: {1}",
+  "plan.needsAdmin": "Para aplicar los cambios de sistema, abre PowerShell como administrador.",
   "nothing": "No hay cambios pendientes.",
   "confirm": "¿Aplicar {0} cambios? (s/n)",
   "confirm.pattern": "^(s|si|sí|y|yes)$",
@@ -30,6 +32,7 @@
   "reason.state-unreadable": "no se pudo leer su estado actual",
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
   "reason.already-undone": "ya se había deshecho",
+  "reason.other-user": "pertenece a otro usuario",
   "status.applied": "aplicado",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
   "status.failed": "falló",
@@ -51,5 +54,5 @@
   "status.header": "Ajustes aplicados por windows-tuneup:",
   "status.empty": "windows-tuneup no ha aplicado ajustes en este equipo.",
   "undo.header": "Deshaciendo la corrida {0}:",
-  "undo.summary": "Restaurados: {0} · Fallidos: {1}"
+  "undo.summary": "Restaurados: {0} · Fallidos: {1} · Omitidos: {2}"
 }

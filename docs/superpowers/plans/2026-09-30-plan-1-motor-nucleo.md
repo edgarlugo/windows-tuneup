@@ -75,8 +75,8 @@ windows-tuneup/
 │   ├── Registry.Tests.ps1, Service.Tests.ps1, Task.Tests.ps1, Dispatch.Tests.ps1
 │   ├── Planner.Tests.ps1, StateSecurity.Tests.ps1, StateFiles.Tests.ps1, Runs.Tests.ps1
 │   ├── Executor.Tests.ps1, Undo.Tests.ps1
-│   ├── RestorePoint.Tests.ps1, Cli.Tests.ps1
-│   └── fixtures/catalog/test.json, fixtures/profiles/base.json, extra.json
+│   ├── RestorePoint.Tests.ps1, Output.Tests.ps1, Cli.Tests.ps1
+│   └── fixtures/catalog/test.json, fixtures/profiles/base.json, extra.json, nested.json, system.json
 ├── build/test.ps1, build/lint.ps1, build/PSScriptAnalyzerSettings.psd1
 ├── .github/workflows/ci.yml
 ├── README.md, LICENSE, .gitignore, .gitattributes
@@ -414,6 +414,7 @@ Expected: FAIL, el módulo `engine\Tuneup.psm1` no existe.
 
 `engine/Tuneup.psm1`:
 ```powershell
+$ErrorActionPreference = 'Stop'
 $engineRoot = $PSScriptRoot
 foreach ($folder in @($engineRoot, (Join-Path $engineRoot 'handlers'))) {
     if (-not (Test-Path -LiteralPath $folder)) { continue }
@@ -486,10 +487,12 @@ function Get-TuneupTitle {
   "err.unknownTweak": "Ajuste desconocido: {0}",
   "err.tweakNotInRun": "El ajuste {0} no está en esa corrida.",
   "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
+  "err.badArgs": "Combinación de parámetros no válida: {0}",
   "undo.none": "No hay corridas para deshacer.",
   "plan.header": "Plan: {0} para aplicar, {1} omitidos",
   "plan.apply": "  + {0} [{1}]",
   "plan.skip": "  - {0}: {1}",
+  "plan.needsAdmin": "Para aplicar los cambios de sistema, abre PowerShell como administrador.",
   "nothing": "No hay cambios pendientes.",
   "confirm": "¿Aplicar {0} cambios? (s/n)",
   "confirm.pattern": "^(s|si|sí|y|yes)$",
@@ -508,6 +511,7 @@ function Get-TuneupTitle {
   "reason.state-unreadable": "no se pudo leer su estado actual",
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
   "reason.already-undone": "ya se había deshecho",
+  "reason.other-user": "pertenece a otro usuario",
   "status.applied": "aplicado",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
   "status.failed": "falló",
@@ -529,7 +533,7 @@ function Get-TuneupTitle {
   "status.header": "Ajustes aplicados por windows-tuneup:",
   "status.empty": "windows-tuneup no ha aplicado ajustes en este equipo.",
   "undo.header": "Deshaciendo la corrida {0}:",
-  "undo.summary": "Restaurados: {0} · Fallidos: {1}"
+  "undo.summary": "Restaurados: {0} · Fallidos: {1} · Omitidos: {2}"
 }
 ```
 
@@ -545,10 +549,12 @@ function Get-TuneupTitle {
   "err.unknownTweak": "Unknown tweak: {0}",
   "err.tweakNotInRun": "Tweak {0} is not part of that run.",
   "err.runAlreadyUndone": "Run {0} was already undone.",
+  "err.badArgs": "Invalid parameter combination: {0}",
   "undo.none": "There are no runs to undo.",
   "plan.header": "Plan: {0} to apply, {1} skipped",
   "plan.apply": "  + {0} [{1}]",
   "plan.skip": "  - {0}: {1}",
+  "plan.needsAdmin": "To apply the system changes, open PowerShell as administrator.",
   "nothing": "Nothing to change.",
   "confirm": "Apply {0} changes? (y/n)",
   "confirm.pattern": "^(y|yes)$",
@@ -567,6 +573,7 @@ function Get-TuneupTitle {
   "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
   "reason.already-undone": "already undone",
+  "reason.other-user": "belongs to another user",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",
   "status.failed": "failed",
@@ -588,7 +595,7 @@ function Get-TuneupTitle {
   "status.header": "Tweaks applied by windows-tuneup:",
   "status.empty": "windows-tuneup has not applied any tweak on this machine.",
   "undo.header": "Undoing run {0}:",
-  "undo.summary": "Restored: {0} · Failed: {1}"
+  "undo.summary": "Restored: {0} · Failed: {1} · Skipped: {2}"
 }
 ```
 
@@ -2423,7 +2430,7 @@ API que usan las tareas siguientes:
 | `Read-TuneupStateFile -Path [-Root] [-IgnoreUntrusted]` / `Read-TuneupTrustedJson -Path [-Root]` | Leen archivos de estado; lo no confiable o en uso se ignora con advertencia |
 | `Get-TuneupRunList [-StateRoot]` | Corridas de las dos carpetas: `{ Id, Dir, Undone, Root, UserSid }` |
 | `Resolve-TuneupRun [-StateRoot] -RunId <id\|last>` | Elige la corrida; `last` respeta las reglas de elevación y de usuario |
-| `Get-TuneupRunJournal -Run` / `Read-TuneupRunJournal -Run` | Entradas que el usuario actual puede restaurar (`Entries`) y las de otro usuario (`Skipped`) |
+| `Get-TuneupRunJournal -Run` / `Read-TuneupRunJournal -Run` | Entradas que el usuario actual puede restaurar (`Entries`) y las de otro usuario (`Skipped` con sus ids, `SkippedEntries` completas) |
 | `Get-TuneupUndoneTweakId -Run` | Ajustes ya deshechos uno por uno (`undone-tweaks.txt`) |
 | `Assert-TuneupRunUndoable -Run` | Falla si la corrida es de la carpeta de máquina y el proceso no está elevado |
 
@@ -2715,10 +2722,20 @@ Describe 'Undo and status' {
     It 'does not mark a run of another user as undone' {
         $run = Invoke-TestApply $Root
         $foreign = [pscustomobject]@{ Id = $run.Id; Dir = $run.Dir; Root = $run.Root; UserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
-        @(Invoke-TuneupUndo -Run $foreign -WarningAction SilentlyContinue).Count | Should -Be 0
+        $results = @(Invoke-TuneupUndo -Run $foreign -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.two:skipped:other-user,test.one:skipped:other-user'
+        $results[0].title | Should -Be 'Title test.two'
         (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeFalse
+    }
+
+    It 'skips a single tweak of another user' {
+        $run = Invoke-TestApply $Root
+        $foreign = [pscustomobject]@{ Id = $run.Id; Dir = $run.Dir; Root = $run.Root; UserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001' }
+        $results = @(Invoke-TuneupUndo -Run $foreign -TweakId 'test.one' -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:skipped:other-user'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
     It 'undoes a single tweak' {
@@ -2892,17 +2909,24 @@ function Invoke-TuneupUndo {
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
+    # Entries of another user are reported as skipped: they stay pending for their owner.
+    $foreign = @($journal.SkippedEntries)
+    $skip = { param($entry, $reason) [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'skipped'; reason = $reason; error = $null } }
     if ($TweakId) {
         $entries = @($entries | Where-Object { $_.id -eq $TweakId })
-        if (-not $entries.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
+        $foreign = @($foreign | Where-Object { $_.id -eq $TweakId })
+        if (-not $entries.Count -and -not $foreign.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
         if ($alreadyUndone -contains $TweakId) {
             # Restoring again would overwrite whatever the tweak holds now with a stale value.
-            return [pscustomobject]@{ id = $TweakId; title = Get-TuneupTitle -Tweak $entries[0].tweak; status = 'skipped'; reason = 'already-undone'; error = $null }
+            return (& $skip (@($entries) + @($foreign))[0] 'already-undone')
         }
+        if (-not $entries.Count) { return (& $skip $foreign[0] 'other-user') }
     } else {
         $entries = @($entries | Where-Object { $alreadyUndone -notcontains $_.id })
+        $foreign = @($foreign | Where-Object { $alreadyUndone -notcontains $_.id })
     }
     [array]::Reverse($entries)
+    [array]::Reverse($foreign)
     $results = @(foreach ($entry in $entries) {
         try {
             Restore-TuneupState -Tweak $entry.tweak -State $entry.state
@@ -2911,6 +2935,7 @@ function Invoke-TuneupUndo {
             [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; reason = $null; error = $_.Exception.Message }
         }
     })
+    $results += @(foreach ($entry in $foreign) { & $skip $entry 'other-user' })
     # The values are already restored; an unrecorded undo would leave the run pending, so it is reported.
     # The whole run is marked only when every one of its tweaks is restored. Anything left (a failed
     # restore, or entries of another user) keeps the run pending, and only the tweaks restored here are
@@ -2972,7 +2997,7 @@ Nota: `undone.json` se escribe solo cuando todos los ajustes de la corrida queda
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: 21 passed.
+Expected: 22 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -3079,10 +3104,23 @@ git commit -m "feat: punto de restauración con resultado explícito"
 
 **Files:**
 - Create: `engine/Output.ps1`, `tuneup.ps1`
-- Create: `tests/fixtures/catalog/test.json`, `tests/fixtures/profiles/base.json`, `tests/fixtures/profiles/extra.json`
-- Test: `tests/Cli.Tests.ps1`
+- Create: `tests/fixtures/catalog/test.json`, `tests/fixtures/profiles/base.json`, `extra.json`, `nested.json`, `system.json`
+- Modify: `engine/Tuneup.psm1` y `i18n/*.json` (Task 1), `engine/Runs.ps1` (Task 9), `engine/Undo.ps1` y `tests/Undo.Tests.ps1` (Task 11), `tests/Runs.Tests.ps1`
+- Test: `tests/Cli.Tests.ps1`, `tests/Output.Tests.ps1`
+
+Decisiones de la revisión de esta tarea (ya incluidas en el código de abajo y en los bloques de las tareas 1, 9 y 11):
+
+- **Advertencias con `-Json`.** `powershell.exe -File` escribe las advertencias en la salida estándar, así que cada llamada al motor pasa por `Invoke-TuneupStep`, que con `-Json` redirige el flujo de advertencias (`3>&1`) y las guarda, sin repetir, para el arreglo `warnings` que llevan todos los documentos (plan, apply, status, undo y error). Sin `-Json` se muestran como siempre. Se descartó `$WarningPreference = 'SilentlyContinue'`: una herramienta pública no debe callar advertencias de seguridad del estado. `result.json` no lleva `warnings`.
+- **JSON en ASCII.** `Write-TuneupJson` escapa todo carácter no ASCII como `\uXXXX`: la página de códigos de la consola no puede alterar los acentos. El entorno va en camelCase (`ConvertTo-TuneupEnvironmentView`); el objeto interno sigue en PascalCase.
+- **Códigos de salida.** Aplicar: un resultado con motivo `journal-error` cuenta como no hecho (`summary.journalErrors`, aparte de `skipped`): `1` si no se aplicó, quedó sin efecto ni falló nada; si no, `2`. Si `result.json` no se puede guardar después de aplicar, `Save-TuneupApplyReport` avisa, el reporte igual sale y el código es `2`. Deshacer: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (fallos o ajustes de otro usuario), `1` nada restaurado. Las reglas viven en `Get-TuneupApplyExitCode` y `Get-TuneupUndoExitCode` para probarlas sin simular fallos de disco.
+- **Otro usuario.** `Invoke-TuneupUndo` devuelve `skipped` con motivo `other-user` para cada entrada de otro usuario (`SkippedEntries` del diario); el resumen para personas cuenta los omitidos.
+- **Parámetros.** Rutas relativas de `-StateRoot`, `-CatalogPath` y `-ProfilesPath` se resuelven con `GetUnresolvedProviderPathFromPSPath`. Se rechazan (`err.badArgs`, código `1`): `-Tweak` sin `-Undo`, `-Status` con `-Undo`, y `-Status` o `-Undo` con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` o `-Yes`.
+- **Elevación.** El plan JSON lleva `requiresAdmin`; `-WhatIf` sin elevar y con cambios de sistema lo recuerda con `plan.needsAdmin`. Al deshacer, la lectura previa del diario (para saber si hace falta elevación) va con `-WarningAction SilentlyContinue` para no repetir avisos.
+- **Motor.** `engine/Tuneup.psm1` fija `$ErrorActionPreference = 'Stop'` para todo el módulo.
 
 - [ ] **Step 1: Fixtures**
+
+`test.machine` (HKLM) solo se usa para planificar y para comprobar el rechazo sin elevación: nunca se escribe. `test.four` vive en una subclave para poder negar la escritura solo ahí.
 
 `tests/fixtures/catalog/test.json`:
 ```json
@@ -3112,12 +3150,34 @@ git commit -m "feat: punto de restauración con resultado explícito"
     },
     {
       "id": "test.three",
-      "title": { "es": "Prueba tres", "en": "Test three" },
+      "title": { "es": "Prueba tres: configuración", "en": "Test three: settings" },
       "why": { "es": "Prueba", "en": "Test" },
       "risk": "low", "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry", "scope": "user",
       "set": { "path": "HKCU:\\Software\\windows-tuneup-test", "name": "Three", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.four",
+      "title": { "es": "Prueba cuatro", "en": "Test four" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test\\Sub", "name": "Four", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.machine",
+      "title": { "es": "Prueba de sistema", "en": "System test" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\windows-tuneup-test", "name": "Machine", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
       "sources": ["https://example.com/test"]
     }
@@ -3145,20 +3205,47 @@ git commit -m "feat: punto de restauración con resultado explícito"
 }
 ```
 
-- [ ] **Step 2: Prueba que falla**
+`tests/fixtures/profiles/nested.json`:
+```json
+{
+  "id": "nested", "aliases": [],
+  "title": { "es": "Anidado", "en": "Nested" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.four"], "keep": []
+}
+```
+
+`tests/fixtures/profiles/system.json`:
+```json
+{
+  "id": "system", "aliases": [],
+  "title": { "es": "Sistema", "en": "System" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.machine"], "keep": []
+}
+```
+
+- [ ] **Step 2: Pruebas que fallan**
+
+La prueba del diario usa que Windows PowerShell 5.1 no acepta rutas de 260 caracteres o más: la carpeta de la corrida y sus archivos cortos caben, `snapshot.jsonl` no. Si el PowerShell acepta rutas largas, la prueba se marca como omitida. Las de elevación se omiten en un proceso elevado (los runners de CI lo son).
 
 `tests/Cli.Tests.ps1`:
 ```powershell
+BeforeDiscovery {
+    $script:Elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     $script:Repo = Split-Path $PSScriptRoot -Parent
     $script:Fixtures = Join-Path $PSScriptRoot 'fixtures'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
+    $script:SubKey = 'HKCU:\Software\windows-tuneup-test\Sub'
     $script:PowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    function Invoke-Tuneup([string[]]$Arguments) {
+    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en') {
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
             -CatalogPath (Join-Path $Fixtures 'catalog') -ProfilesPath (Join-Path $Fixtures 'profiles') `
-            -StateRoot $script:Root -Force -Lang en @Arguments
+            -StateRoot $script:Root -Force -Lang $Lang @Arguments
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
     function Get-Ids($Items) { ($Items | ForEach-Object { $_.id }) -join ',' }
@@ -3167,6 +3254,26 @@ BeforeAll {
     function ConvertFrom-PureJson([string]$Text) {
         $Text.Trim() | Should -Match '^\{[\s\S]*\}$'
         $Text | ConvertFrom-Json
+    }
+    # Denies the current user writing values in the Sub key only, so a change there fails. The key is
+    # opened for its ACL alone: Set-Acl would ask for write access, which the deny itself blocks.
+    function Set-TestSetValueDeny([switch]$Remove) {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\windows-tuneup-test\Sub',
+            [Microsoft.Win32.RegistryKeyPermissionCheck]::ReadWriteSubTree,
+            [System.Security.AccessControl.RegistryRights]'ReadPermissions, ChangePermissions')
+        try {
+            $acl = $key.GetAccessControl()
+            $rule = New-Object System.Security.AccessControl.RegistryAccessRule -ArgumentList `
+                ([Security.Principal.WindowsIdentity]::GetCurrent().User), 'SetValue', 'None', 'None', 'Deny'
+            if ($Remove) { [void]$acl.RemoveAccessRule($rule) } else { $acl.AddAccessRule($rule) }
+            $key.SetAccessControl($acl)
+        } finally {
+            $key.Close()
+        }
+    }
+    function Remove-TestKey {
+        if (Test-Path -LiteralPath $SubKey) { Set-TestSetValueDeny -Remove }
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 }
 
@@ -3179,11 +3286,11 @@ Describe 'ConvertTo-TuneupList' {
 Describe 'tuneup.ps1' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
-        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Remove-TestKey
     }
 
     AfterAll {
-        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Remove-TestKey
     }
 
     It 'shows the plan as JSON without changing anything' {
@@ -3192,7 +3299,9 @@ Describe 'tuneup.ps1' {
         $json = ConvertFrom-PureJson $result.Output
         $json.schemaVersion | Should -Be 1
         $json.command | Should -Be 'plan'
+        $json.requiresAdmin | Should -BeFalse
         Get-Ids $json.items | Should -Be 'test.one,test.two'
+        $json.environment.PSObject.Properties.Name -join ',' | Should -Be 'build,ubr,family,edition,isServer,isManaged,isAdmin,hasBattery,pendingReboot'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
 
@@ -3205,8 +3314,49 @@ Describe 'tuneup.ps1' {
         $json.rebootRequired | Should -BeTrue
         $json.restorePoint | Should -Be 'not-needed'
         (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
+        $saved = Get-Content -LiteralPath (Join-Path $json.runDir 'result.json') -Raw | ConvertFrom-Json
+        $saved.runId | Should -Be $json.runId
+        $saved.PSObject.Properties.Name | Should -Not -Contain 'warnings'
         $again = (Invoke-Tuneup @('-WhatIf', '-Json')).Output | ConvertFrom-Json
         $again.summary.apply | Should -Be 0
+    }
+
+    It 'exits with 2 when part of the plan fails' {
+        New-Item -Path $SubKey -Force | Out-Null
+        Set-TestSetValueDeny
+        $result = Invoke-Tuneup @('-Profile', 'nested', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 2
+        $json = ConvertFrom-PureJson $result.Output
+        $json.summary.applied | Should -Be 2
+        $json.summary.failed | Should -Be 1
+        ($json.results | Where-Object { $_.id -eq 'test.four' }).status | Should -Be 'failed'
+    }
+
+    It 'exits with 1 when the journal cannot be written before any change' {
+        # Windows PowerShell 5.1 does not take paths of 260 characters or more: the run folder and
+        # its small files fit, the journal (snapshot.jsonl) does not.
+        $script:Root = Join-Path $TestDrive ('j' * (224 - $TestDrive.Length))
+        New-Item -ItemType Directory -Path $Root | Out-Null
+        $probe = Join-Path $Root ('p' * (260 - $Root.Length))
+        try { [System.IO.File]::WriteAllText($probe, 'x') } catch { $probe = $null }
+        if ($probe) {
+            Remove-Item -LiteralPath $probe -Force
+            Set-ItResult -Skipped -Because 'this PowerShell accepts long paths'
+            return
+        }
+        $result = Invoke-Tuneup @('-Yes', '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.summary.applied | Should -Be 0
+        $json.summary.journalErrors | Should -Be 2
+        ($json.results | ForEach-Object { $_.reason }) -join ',' | Should -Be 'journal-error,journal-error'
+        $json.results[0].error | Should -Not -BeNullOrEmpty
+        (Get-ChildItem -LiteralPath (Get-RunDir) -Name) | Should -Contain 'result.json'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        $script:Root = Join-Path $TestDrive ('k' * (224 - $TestDrive.Length))
+        $human = Invoke-Tuneup @('-Yes')
+        $human.ExitCode | Should -Be 1
+        $human.Output | Should -Match 'the backup could not be saved'
     }
 
     It 'reports drift in -Status' {
@@ -3223,6 +3373,19 @@ Describe 'tuneup.ps1' {
         $result.ExitCode | Should -Be 0
         (ConvertFrom-PureJson $result.Output).summary.restored | Should -Be 2
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'exits with 2 when an undo restores only part of the run' {
+        New-Item -Path $SubKey -Force | Out-Null
+        New-ItemProperty -LiteralPath $SubKey -Name 'Four' -PropertyType DWord -Value 0 | Out-Null
+        (Invoke-Tuneup @('-Profile', 'nested', '-Yes', '-Json')).ExitCode | Should -Be 0
+        Set-TestSetValueDeny
+        $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
+        $result.ExitCode | Should -Be 2
+        $json = ConvertFrom-PureJson $result.Output
+        $json.summary.restored | Should -Be 2
+        $json.summary.failed | Should -Be 1
+        (Get-ItemProperty -LiteralPath $SubKey).Four | Should -Be 1
     }
 
     It 'skips a tweak that was already undone and refuses to undo a run twice' {
@@ -3246,6 +3409,28 @@ Describe 'tuneup.ps1' {
         Get-Ids $json.items | Should -Be 'test.one,test.two,test.three'
     }
 
+    It 'resolves a relative -StateRoot against the current folder' {
+        $script:Root = [guid]::NewGuid().ToString()
+        Push-Location -LiteralPath $TestDrive
+        try {
+            $result = Invoke-Tuneup @('-Yes', '-Json')
+        } finally {
+            Pop-Location
+        }
+        $result.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $result.Output).runDir | Should -BeLike (Join-Path $TestDrive "$Root\runs\*")
+    }
+
+    It 'writes JSON as pure ASCII and keeps the accents' {
+        $result = Invoke-Tuneup @('-Profile', 'extra', '-WhatIf', '-Json') -Lang 'es'
+        [regex]::IsMatch($result.Output, '[^\x00-\x7F]') | Should -BeFalse
+        $json = ConvertFrom-PureJson $result.Output
+        ($json.items | Where-Object { $_.id -eq 'test.three' }).title | Should -Be ('Prueba tres: configuraci' + [char]0x00F3 + 'n')
+        $failure = Invoke-Tuneup @('-Tweak', 'test.one', '-Json') -Lang 'es'
+        [regex]::IsMatch($failure.Output, '[^\x00-\x7F]') | Should -BeFalse
+        (ConvertFrom-PureJson $failure.Output).message | Should -BeLike ('Combinaci' + [char]0x00F3 + 'n de par' + [char]0x00E1 + 'metros no v' + [char]0x00E1 + 'lida*')
+    }
+
     It 'exits with 1 on an unknown profile' {
         $result = Invoke-Tuneup @('-Profile', 'nope', '-WhatIf', '-Json')
         $result.ExitCode | Should -Be 1
@@ -3254,9 +3439,43 @@ Describe 'tuneup.ps1' {
         $json.message | Should -Match 'nope'
     }
 
+    It 'rejects <Arguments>' -TestCases @(
+        @{ Arguments = @('-Tweak', 'test.one') }
+        @{ Arguments = @('-Status', '-Undo', 'last') }
+        @{ Arguments = @('-Status', '-WhatIf') }
+        @{ Arguments = @('-Status', '-Include', 'test.three') }
+        @{ Arguments = @('-Undo', 'last', '-Profile', 'extra') }
+        @{ Arguments = @('-Undo', 'last', '-Yes') }
+        @{ Arguments = @('-Undo', 'last', '-Exclude', 'test.one') }
+    ) {
+        param($Arguments)
+        $result = Invoke-Tuneup (@($Arguments) + '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'Invalid parameter combination'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
     It 'refuses to apply with -Json but without -Yes' {
         (Invoke-Tuneup @('-Json')).ExitCode | Should -Be 1
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'marks a plan with system changes as requiring elevation' {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-Profile', 'system', '-WhatIf', '-Json')).Output
+        $json.requiresAdmin | Should -BeTrue
+        ($json.items | Where-Object { $_.id -eq 'test.machine' }).action | Should -Be 'apply'
+    }
+
+    It 'hints at elevation in a plan with system changes' -Skip:$Elevated {
+        (Invoke-Tuneup @('-Profile', 'system', '-WhatIf')).Output | Should -Match 'To apply the system changes, open PowerShell as administrator'
+    }
+
+    It 'refuses system changes without elevation' -Skip:$Elevated {
+        $result = Invoke-Tuneup @('-Profile', 'system', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'The plan has system changes: open PowerShell as administrator.'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Test-Path -LiteralPath 'HKLM:\SOFTWARE\windows-tuneup-test' | Should -BeFalse
     }
 
     It 'carries every JSON document a warnings array' {
@@ -3276,18 +3495,24 @@ Describe 'tuneup.ps1' {
         Get-Ids $json.items | Should -Be 'test.one,test.two'
     }
 
-    It 'puts -Undo warnings inside the JSON document' {
+    It 'skips the tweaks of another user and exits with 1 when nothing was restored' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         $runDir = Get-RunDir
         $info = Get-Content -LiteralPath (Join-Path $runDir 'run.json') -Raw | ConvertFrom-Json
         $info.userSid = 'S-1-5-21-1-2-3-1001'
         [System.IO.File]::WriteAllText((Join-Path $runDir 'run.json'), ($info | ConvertTo-Json))
         $result = Invoke-Tuneup @('-Undo', (Split-Path $runDir -Leaf), '-Json')
-        $result.ExitCode | Should -Be 0
+        $result.ExitCode | Should -Be 1
         $json = ConvertFrom-PureJson $result.Output
         $json.summary.restored | Should -Be 0
+        $json.summary.skipped | Should -Be 2
+        ($json.results | ForEach-Object { $_.reason }) -join ',' | Should -Be 'other-user,other-user'
         @($json.warnings | Where-Object { $_ -match 'belongs to another user' }).Count | Should -Be 2
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        $human = Invoke-Tuneup @('-Undo', (Split-Path $runDir -Leaf))
+        $human.ExitCode | Should -Be 1
+        $human.Output | Should -Match 'Skipped: 2'
+        @([regex]::Matches($human.Output, "Ignoring user-scope entry 'test.one'")).Count | Should -Be 1
     }
 
     It 'puts warnings inside the JSON error document' {
@@ -3310,9 +3535,177 @@ Describe 'tuneup.ps1' {
 }
 ```
 
-- [ ] **Step 3: Verificar que falla**
+`tests/Output.Tests.ps1`:
+```powershell
+BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
+    . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+    function New-TestResult([string]$Status, [string]$Reason, [string]$ErrorText) {
+        [pscustomobject]@{ id = "test.$Status"; title = "Title $Status"; status = $Status; reason = $Reason; error = $ErrorText; rebootRequired = $false }
+    }
+    function New-TestReport([object[]]$Results) {
+        New-TuneupApplyReport -Run ([pscustomobject]@{ Id = '20250101-000000'; Dir = 'C:\runs\20250101-000000' }) -Results $Results `
+            -RestorePoint 'not-needed' -Environment (New-TestEnvironment)
+    }
+    function New-TestPlanItem([string]$Scope, [string]$Action) {
+        $path = $(if ($Scope -eq 'machine') { 'HKLM:\SOFTWARE\windows-tuneup-test' } else { 'HKCU:\Software\windows-tuneup-test' })
+        $tweak = New-TestTweak -Id "test.$Scope" -Scope $Scope -Set ([pscustomobject]@{ path = $path; name = 'X'; kind = 'DWord'; value = 1 })
+        [pscustomobject]@{ Id = $tweak.id; Tweak = $tweak; Action = $Action; Reason = $(if ($Action -eq 'skip') { 'already-applied' } else { $null }) }
+    }
+    $script:JournalError = New-TestResult -Status 'skipped' -Reason 'journal-error' -ErrorText 'Disk full'
+    $script:PlanSkip = New-TestResult -Status 'skipped' -Reason 'already-applied'
+}
 
-Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Cli.Tests.ps1`
+Describe 'Module' {
+    It 'stops on errors inside the engine' {
+        & (Get-Module Tuneup) { Get-Variable -Name ErrorActionPreference -Scope Script -ValueOnly -ErrorAction SilentlyContinue } | Should -Be 'Stop'
+    }
+}
+
+Describe 'Write-TuneupJson' {
+    It 'escapes every non-ASCII character' {
+        $text = 'acci' + [char]0x00F3 + 'n ' + [char]::ConvertFromUtf32(0x1F600)
+        $json = Write-TuneupJson ([pscustomobject]@{ text = $text })
+        [regex]::IsMatch($json, '[^\x00-\x7F]') | Should -BeFalse
+        $json | Should -Match '\\u00f3'
+        ($json | ConvertFrom-Json).text | Should -Be $text
+    }
+}
+
+Describe 'ConvertTo-TuneupEnvironmentView' {
+    It 'uses camelCase keys' {
+        $view = ConvertTo-TuneupEnvironmentView -Environment (New-TestEnvironment -Edition 'Home')
+        $view.PSObject.Properties.Name -join ',' | Should -Be 'build,ubr,family,edition,isServer,isManaged,isAdmin,hasBattery,pendingReboot'
+        $view.edition | Should -Be 'Home'
+        $view.isAdmin | Should -BeTrue
+    }
+}
+
+Describe 'New-TuneupApplyReport' {
+    It 'counts journal errors apart from the skipped tweaks' {
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $JournalError, $PlanSkip)
+        $report.summary.applied | Should -Be 1
+        $report.summary.journalErrors | Should -Be 1
+        $report.summary.skipped | Should -Be 1
+        $report.environment.PSObject.Properties.Name | Should -Contain 'isAdmin'
+    }
+}
+
+Describe 'Get-TuneupApplyExitCode' {
+    It 'returns <Expected> for <Name>' -TestCases @(
+        @{ Name = 'everything applied'; Statuses = @('applied', 'plan-skip'); NotSaved = $false; Expected = 0 }
+        @{ Name = 'a tweak without effect'; Statuses = @('applied', 'not-applied'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'a failed tweak'; Statuses = @('applied', 'failed'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'a journal error before any change'; Statuses = @('journal-error', 'plan-skip'); NotSaved = $false; Expected = 1 }
+        @{ Name = 'a journal error after a change'; Statuses = @('applied', 'journal-error'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'a journal error after a failure'; Statuses = @('failed', 'journal-error'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'an unsaved result'; Statuses = @('applied'); NotSaved = $true; Expected = 2 }
+        @{ Name = 'an unsaved result with nothing applied'; Statuses = @('journal-error'); NotSaved = $true; Expected = 1 }
+    ) {
+        param($Statuses, $NotSaved, $Expected)
+        $results = @(foreach ($status in $Statuses) {
+            switch ($status) {
+                'plan-skip' { $PlanSkip }
+                'journal-error' { $JournalError }
+                default { New-TestResult -Status $status }
+            }
+        })
+        Get-TuneupApplyExitCode -Report (New-TestReport $results) -ResultNotSaved:$NotSaved | Should -Be $Expected
+    }
+}
+
+Describe 'Get-TuneupUndoExitCode' {
+    It 'returns <Expected> for <Name>' -TestCases @(
+        @{ Name = 'everything restored'; Results = @('restored', 'restored'); Expected = 0 }
+        @{ Name = 'restored and already undone'; Results = @('restored', 'already-undone'); Expected = 0 }
+        @{ Name = 'only already undone'; Results = @('already-undone'); Expected = 0 }
+        @{ Name = 'restored and failed'; Results = @('restored', 'failed'); Expected = 2 }
+        @{ Name = 'restored and of another user'; Results = @('restored', 'other-user'); Expected = 2 }
+        @{ Name = 'only failed'; Results = @('failed'); Expected = 1 }
+        @{ Name = 'only of another user'; Results = @('other-user', 'other-user'); Expected = 1 }
+    ) {
+        param($Results, $Expected)
+        $items = @(foreach ($kind in $Results) {
+            if ($kind -in 'already-undone', 'other-user') { New-TestResult -Status 'skipped' -Reason $kind } else { New-TestResult -Status $kind }
+        })
+        Get-TuneupUndoExitCode -Results $items | Should -Be $Expected
+    }
+}
+
+Describe 'Save-TuneupApplyReport' {
+    It 'saves result.json without warnings' {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'custom' }
+        Save-TuneupApplyReport -Run $run -Report (New-TestReport @(New-TestResult -Status 'applied')) | Should -BeTrue
+        $saved = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw | ConvertFrom-Json
+        $saved.runId | Should -Be '20250101-000000'
+        $saved.PSObject.Properties.Name | Should -Not -Contain 'warnings'
+    }
+
+    It 'warns instead of failing when result.json cannot be saved' {
+        Mock -ModuleName Tuneup Save-TuneupJson { throw [System.UnauthorizedAccessException]::new('Access denied') }
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $TestDrive; Root = 'custom' }
+        $saved = Save-TuneupApplyReport -Run $run -Report (New-TestReport @(New-TestResult -Status 'applied')) -WarningVariable warned -WarningAction SilentlyContinue
+        $saved | Should -BeFalse
+        "$($warned[0])" | Should -BeLike '*20250101-000000*Access denied*'
+    }
+}
+
+Describe 'Write-TuneupApplyReport' {
+    It 'lists journal errors with their error and hides plain skips' {
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $JournalError, $PlanSkip)
+        $text = (Write-TuneupApplyReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'Title skipped'
+        $text | Should -Match 'the backup could not be saved'
+        $text | Should -Match 'Disk full'
+        @([regex]::Matches($text, 'Title skipped')).Count | Should -Be 1
+    }
+
+    It 'adds the warnings only to the JSON document' {
+        $report = New-TestReport @(New-TestResult -Status 'applied')
+        $json = Write-TuneupApplyReport -Report $report -Warnings @('careful') -Json | ConvertFrom-Json
+        @($json.warnings) -join ',' | Should -Be 'careful'
+        $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
+    }
+}
+
+Describe 'Write-TuneupPlanReport' {
+    It 'marks a plan with system changes as requiring elevation' {
+        $json = Write-TuneupPlanReport -Plan @((New-TestPlanItem 'user' 'apply'), (New-TestPlanItem 'machine' 'apply')) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
+        $json.requiresAdmin | Should -BeTrue
+        $json.environment.PSObject.Properties.Name | Should -Contain 'isAdmin'
+        $json.environment.PSObject.Properties.Name -ccontains 'IsAdmin' | Should -BeFalse
+    }
+
+    It 'does not require elevation for skipped system tweaks' {
+        $json = Write-TuneupPlanReport -Plan @((New-TestPlanItem 'user' 'apply'), (New-TestPlanItem 'machine' 'skip')) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
+        $json.requiresAdmin | Should -BeFalse
+    }
+
+    It 'hints at elevation only when it is missing' {
+        $plan = @(New-TestPlanItem 'machine' 'apply')
+        $user = New-TestEnvironment
+        $user.IsAdmin = $false
+        (Write-TuneupPlanReport -Plan $plan -Environment $user 6>&1 | Out-String) | Should -Match 'To apply the system changes'
+        (Write-TuneupPlanReport -Plan $plan -Environment (New-TestEnvironment) 6>&1 | Out-String) | Should -Not -Match 'To apply the system changes'
+    }
+}
+
+Describe 'Write-TuneupUndoReport' {
+    It 'shows skipped tweaks with their reason and counts them' {
+        $results = @((New-TestResult -Status 'restored'), (New-TestResult -Status 'skipped' -Reason 'other-user'))
+        $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results $results 6>&1 | Out-String)
+        $text | Should -Match 'Title skipped: belongs to another user'
+        $text | Should -Match 'Restored: 1 . Failed: 0 . Skipped: 1'
+    }
+}
+```
+
+- [ ] **Step 3: Verificar que fallan**
+
+Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Cli.Tests.ps1` (y `tests/Output.Tests.ps1`)
 Expected: FAIL, `ConvertTo-TuneupList` no se reconoce y `tuneup.ps1` no existe.
 
 - [ ] **Step 4: Salida**
@@ -3339,9 +3732,27 @@ function ConvertTo-TuneupPlanView {
     }
 }
 
+function ConvertTo-TuneupEnvironmentView {
+    param([Parameter(Mandatory)]$Environment)
+    [pscustomobject]@{
+        build         = $Environment.Build
+        ubr           = $Environment.UBR
+        family        = $Environment.Family
+        edition       = $Environment.Edition
+        isServer      = $Environment.IsServer
+        isManaged     = $Environment.IsManaged
+        isAdmin       = $Environment.IsAdmin
+        hasBattery    = $Environment.HasBattery
+        pendingReboot = $Environment.PendingReboot
+    }
+}
+
 function Write-TuneupJson {
     param([Parameter(Mandatory)]$Object)
-    Write-Output (ConvertTo-Json -InputObject $Object -Depth 10)
+    $json = ConvertTo-Json -InputObject $Object -Depth 10
+    # ASCII only, so the console code page cannot garble accents on the way out.
+    $escaped = [regex]::Replace($json, '[^\x00-\x7F]', { param($match) '\u{0:x4}' -f [int][char]$match.Value })
+    Write-Output $escaped
 }
 
 function Add-TuneupJsonWarning {
@@ -3361,11 +3772,13 @@ function Write-TuneupPlanReport {
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
+    $requiresAdmin = @($items | Where-Object { $_.action -eq 'apply' -and $_.scope -eq 'machine' }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'plan'
-            environment   = $Environment
+            environment   = ConvertTo-TuneupEnvironmentView -Environment $Environment
+            requiresAdmin = $requiresAdmin
             items         = $items
             summary       = [pscustomobject]@{ apply = $toApply; skip = $items.Count - $toApply }
         }))
@@ -3380,6 +3793,7 @@ function Write-TuneupPlanReport {
         }
     }
     if (-not $toApply) { Write-Host (Get-TuneupText -Key 'nothing') -ForegroundColor Green }
+    if ($requiresAdmin -and -not $Environment.IsAdmin) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
 }
 
 function New-TuneupApplyReport {
@@ -3389,24 +3803,56 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment
     )
-    $count = { param($status) @($Results | Where-Object { $_.status -eq $status }).Count }
+    # A tweak left out because its backup could not be written was not done: it is counted apart.
+    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' }).Count }
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
         runId          = $Run.Id
         runDir         = $Run.Dir
         finishedAt     = (Get-Date).ToString('s')
-        environment    = $Environment
+        environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { $_.status -eq 'applied' -and $_.rebootRequired }).Count -gt 0)
         summary        = [pscustomobject]@{
-            applied    = & $count 'applied'
-            notApplied = & $count 'not-applied'
-            failed     = & $count 'failed'
-            skipped    = & $count 'skipped'
+            applied       = & $count 'applied'
+            notApplied    = & $count 'not-applied'
+            failed        = & $count 'failed'
+            skipped       = & $count 'skipped'
+            journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
         }
         results        = $Results
     }
+}
+
+function Save-TuneupApplyReport {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    # The changes are already made; losing result.json must not hide the report of what was done.
+    try {
+        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $Report
+        $true
+    } catch {
+        Write-Warning "The result of run $($Run.Id) could not be saved: $($_.Exception.Message)"
+        $false
+    }
+}
+
+function Get-TuneupApplyExitCode {
+    param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
+    $summary = $Report.summary
+    $touched = $summary.applied + $summary.notApplied + $summary.failed
+    if ($summary.journalErrors -and -not $touched) { return 1 }
+    if ($summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
+    0
+}
+
+function Get-TuneupUndoExitCode {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results)
+    $restored = @($Results | Where-Object { $_.status -eq 'restored' }).Count
+    $pending = @($Results | Where-Object { $_.status -eq 'failed' -or ($_.status -eq 'skipped' -and $_.reason -ne 'already-undone') }).Count
+    if (-not $pending) { return 0 }
+    if ($restored) { return 2 }
+    1
 }
 
 function Write-TuneupApplyReport {
@@ -3418,6 +3864,11 @@ function Write-TuneupApplyReport {
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
     $colors = @{ 'applied' = 'Green'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Report.results) {
+        if ($result.reason -eq 'journal-error') {
+            Write-Host ((Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key 'status.skipped'), $result.title) + ": $(Get-TuneupText -Key 'reason.journal-error')") -ForegroundColor Red
+            if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
+            continue
+        }
         if ($result.status -eq 'skipped') { continue }
         Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $colors[$result.status]
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
@@ -3469,14 +3920,14 @@ function Write-TuneupUndoReport {
         return
     }
     Write-Host (Get-TuneupText -Key 'undo.header' -Format $RunId)
-    $colors = @{ 'restored' = 'Green'; 'skipped' = 'DarkGray'; 'failed' = 'Red' }
+    $colors = @{ 'restored' = 'Green'; 'skipped' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Results) {
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
         Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
-    Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed)
+    Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed, $skipped)
 }
 
 function Write-TuneupErrorReport {
@@ -3501,8 +3952,6 @@ function Write-TuneupErrorReport {
 ```
 
 - [ ] **Step 5: CLI**
-
-Con `-Json` la salida estándar es un único documento JSON. `powershell.exe -File` escribe las advertencias en la salida estándar, así que cada llamada al motor pasa por `Invoke-TuneupStep`, que con `-Json` redirige el flujo de advertencias (`3>&1`) y las guarda, sin repetir, para el arreglo `warnings` que llevan todos los documentos (plan, apply, status, undo y error). Sin `-Json` se muestran como siempre. Se descartó `$WarningPreference = 'SilentlyContinue'`: una herramienta pública no debe callar advertencias de seguridad del estado.
 
 `tuneup.ps1`:
 ```powershell
@@ -3575,10 +4024,28 @@ function Stop-Tuneup {
 $ProfileName = @(ConvertTo-TuneupList -Value $ProfileName)
 $Include = @(ConvertTo-TuneupList -Value $Include)
 $Exclude = @(ConvertTo-TuneupList -Value $Exclude)
-if (-not $CatalogPath) { $CatalogPath = Join-Path $PSScriptRoot 'catalog' }
-if (-not $ProfilesPath) { $ProfilesPath = Join-Path $PSScriptRoot 'profiles' }
+
+$conflict = $null
+if ($Tweak -and -not $Undo) { $conflict = '-Tweak (-Undo)' }
+elseif ($Status -and $Undo) { $conflict = '-Status -Undo' }
+elseif ($Status -or $Undo) {
+    $extra = @()
+    if ($ProfileName.Count) { $extra += '-Profile' }
+    if ($Include.Count) { $extra += '-Include' }
+    if ($Exclude.Count) { $extra += '-Exclude' }
+    if ($WhatIf) { $extra += '-WhatIf' }
+    if ($Yes) { $extra += '-Yes' }
+    if ($extra.Count) { $conflict = (@($(if ($Status) { '-Status' } else { '-Undo' })) + $extra) -join ' ' }
+}
+if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
 try {
+    # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
+    $pathApi = $ExecutionContext.SessionState.Path
+    if ($StateRoot) { $StateRoot = $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) }
+    $CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $PSScriptRoot 'catalog' })
+    $ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $PSScriptRoot 'profiles' })
+
     $catalog = @(Invoke-TuneupStep { Import-TuneupCatalog -Path $CatalogPath })
     $profileSet = @(Invoke-TuneupStep { Import-TuneupProfileSet -Path $ProfilesPath })
     $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
@@ -3604,13 +4071,13 @@ try {
         # Machine-folder runs always need elevation; a -StateRoot run only for its machine tweaks.
         $needsAdmin = ($run.Root -eq 'machine')
         if (-not $needsAdmin) {
-            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
+            # Its warnings come again, once, from the undo itself.
+            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
         }
         if ($needsAdmin -and -not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin') }
         $undoResults = @(Invoke-TuneupStep { Invoke-TuneupUndo -Run $run -TweakId $Tweak })
         Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Warnings $script:Warnings.ToArray() -Json:$Json
-        if (@($undoResults | Where-Object { $_.status -eq 'failed' }).Count) { exit 2 }
-        exit 0
+        exit (Get-TuneupUndoExitCode -Results $undoResults)
     }
 
     $plan = @(Invoke-TuneupStep {
@@ -3643,10 +4110,9 @@ try {
     if ($machineChanges) { $restorePoint = Invoke-TuneupStep { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
     $results = @(Invoke-TuneupStep { Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir })
     $report = New-TuneupApplyReport -Run $run -Results $results -RestorePoint $restorePoint -Environment $environment
-    Invoke-TuneupStep { Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Root $run.Root -Object $report }
+    $saved = Invoke-TuneupStep { Save-TuneupApplyReport -Run $run -Report $report }
     Write-TuneupApplyReport -Report $report -Warnings $script:Warnings.ToArray() -Json:$Json
-    if ($report.summary.notApplied -or $report.summary.failed) { exit 2 }
-    exit 0
+    exit (Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved))
 } catch {
     Stop-Tuneup -Message $_.Exception.Message
 }
@@ -3654,8 +4120,8 @@ try {
 
 - [ ] **Step 6: Verificar que pasa**
 
-Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Cli.Tests.ps1`
-Expected: 14 passed.
+Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Cli.Tests.ps1`, luego `tests/Output.Tests.ps1`, `tests/Undo.Tests.ps1` y `tests/Runs.Tests.ps1`
+Expected: 29, 27, 22 y 30 passed (en un proceso elevado, 2 de las 29 quedan omitidas).
 
 - [ ] **Step 7: Prueba manual en español**
 
@@ -3668,7 +4134,7 @@ Expected: `Plan: 2 para aplicar, 0 omitidos` con las líneas `+ Prueba uno [ries
 - [ ] **Step 8: Commit**
 
 ```bash
-git add engine/Output.ps1 tuneup.ps1 tests/fixtures tests/Cli.Tests.ps1
+git add engine/Output.ps1 tuneup.ps1 tests/fixtures tests/Cli.Tests.ps1 tests/Output.Tests.ps1
 git commit -m "feat: CLI con plan, aplicar, estado, deshacer y salida JSON"
 ```
 
@@ -3688,7 +4154,7 @@ Expected: `PSScriptAnalyzer: no findings`. Si aparece un hallazgo, corregir el c
 - [ ] **Step 2: Suite completa**
 
 Run: `powershell -NoProfile -File build/test.ps1`
-Expected: todas las pruebas pasan (263), 0 fallidas.
+Expected: todas las pruebas pasan (306), 0 fallidas.
 
 - [ ] **Step 3: Prueba real, solo lectura, en este PC**
 

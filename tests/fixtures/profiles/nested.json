@@ -1,0 +1,6 @@
+{
+  "id": "nested", "aliases": [],
+  "title": { "es": "Anidado", "en": "Nested" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.four"], "keep": []
+}
