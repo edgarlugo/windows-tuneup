@@ -17,7 +17,7 @@ function New-TuneupRun {
         $id = '{0}-{1:D2}' -f $baseId, $counter
     }
     $dir = Join-Path $runsDir $id
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
     [pscustomobject]@{ Id = $id; Dir = $dir }
 }
 
@@ -41,8 +41,24 @@ function Add-TuneupJournalEntry {
 function Read-TuneupJournal {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
-    foreach ($line in [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)) {
-        if ($line.Trim()) { $line | ConvertFrom-Json }
+    $lines = [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)
+    $lastIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim()) { $lastIndex = $i }
+    }
+    for ($i = 0; $i -le $lastIndex; $i++) {
+        if (-not $lines[$i].Trim()) { continue }
+        try {
+            $entry = $lines[$i] | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            if ($i -eq $lastIndex) {
+                Write-Warning "Ignoring incomplete last journal line in $Path"
+                return
+            }
+            throw "Journal $Path is corrupt at line $($i + 1)"
+        }
+        $entry
     }
 }
 
@@ -50,11 +66,20 @@ function Get-TuneupRunList {
     param([string]$StateRoot)
     $runsDir = Join-Path (Get-TuneupStateRoot -StateRoot $StateRoot) 'runs'
     if (-not (Test-Path -LiteralPath $runsDir)) { return }
-    foreach ($dir in Get-ChildItem -LiteralPath $runsDir -Directory | Sort-Object Name) {
+    $byName = @{}
+    $names = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($dir in Get-ChildItem -LiteralPath $runsDir -Directory) {
+        if ($dir.Name -cmatch '^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$') {
+            $byName[$dir.Name] = $dir
+            $names.Add($dir.Name)
+        }
+    }
+    $names.Sort([System.StringComparer]::Ordinal)
+    foreach ($name in $names) {
         [pscustomobject]@{
-            Id     = $dir.Name
-            Dir    = $dir.FullName
-            Undone = (Test-Path -LiteralPath (Join-Path $dir.FullName 'undone.json'))
+            Id     = $name
+            Dir    = $byName[$name].FullName
+            Undone = (Test-Path -LiteralPath (Join-Path $byName[$name].FullName 'undone.json'))
         }
     }
 }

@@ -2448,6 +2448,85 @@ Describe 'Run state' {
         New-TuneupRun -StateRoot $Root | Out-Null
         (Resolve-TuneupRun -StateRoot $Root -RunId 'last').Id | Should -Be $old.Id
     }
+
+    It 'round trips an accented Spanish title in the journal' {
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        $title = 'Configuraci' + [char]0x00F3 + 'n de ' + [char]0x00F1 + 'and' + [char]0x00FA
+        $tweak = New-TestTweak -Id 'test.accent'
+        $tweak.title.es = $title
+        Add-TuneupJournalEntry -Path $journal -Tweak $tweak -State $null
+        $entries = @(Read-TuneupJournal -Path $journal)
+        $entries[0].tweak.title.es | Should -BeExactly $title
+        $bytes = [System.IO.File]::ReadAllBytes($journal)
+        $bytes[0] | Should -Be ([byte][char]'{')
+    }
+
+    It 'round trips nested state four levels deep' {
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        $state = [pscustomobject]@{
+            a = [pscustomobject]@{ b = [pscustomobject]@{ c = [pscustomobject]@{ d = 42; list = @(1, 2, 3) } } }
+        }
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak) -State $state
+        $entries = @(Read-TuneupJournal -Path $journal)
+        $entries[0].state.a.b.c.d | Should -Be 42
+        @($entries[0].state.a.b.c.list).Count | Should -Be 3
+    }
+
+    It 'ignores an incomplete last journal line with a warning' {
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak -Id 'test.one') -State $null
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak -Id 'test.two') -State $null
+        [System.IO.File]::AppendAllText($journal, '{"id":"test.three","tweak":{"id":"te', (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        $entries = @(Read-TuneupJournal -Path $journal -WarningVariable warned -WarningAction SilentlyContinue)
+        $entries.Count | Should -Be 2
+        ($entries | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one,test.two'
+        @($warned).Count | Should -Be 1
+        "$($warned[0])" | Should -BeLike 'Ignoring incomplete last journal line in *'
+    }
+
+    It 'throws when a middle journal line is corrupt' {
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak -Id 'test.one') -State $null
+        [System.IO.File]::AppendAllText($journal, '{"id":"broken' + [Environment]::NewLine, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        Add-TuneupJournalEntry -Path $journal -Tweak (New-TestTweak -Id 'test.three') -State $null
+        { Read-TuneupJournal -Path $journal } | Should -Throw '*is corrupt at line 2*'
+    }
+
+    It 'ignores folders that are not runs' {
+        $run = New-TuneupRun -StateRoot $Root
+        $runsDir = Split-Path -Parent $run.Dir
+        foreach ($name in 'notes', '20250101-000000-extra', '2025-01-01', 'zzz') {
+            New-Item -ItemType Directory -Path (Join-Path $runsDir $name) | Out-Null
+            Add-TuneupJournalEntry -Path (Join-Path $runsDir "$name\snapshot.jsonl") -Tweak (New-TestTweak) -State $null
+        }
+        $ids = @(Get-TuneupRunList -StateRoot $Root | ForEach-Object { $_.Id })
+        $ids.Count | Should -Be 1
+        $ids[0] | Should -Be $run.Id
+        Resolve-TuneupRun -StateRoot $Root -RunId 'notes' | Should -BeNullOrEmpty
+    }
+
+    It 'resolves an explicit run id' {
+        $first = New-TuneupRun -StateRoot $Root
+        $second = New-TuneupRun -StateRoot $Root
+        foreach ($run in $first, $second) {
+            Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak (New-TestTweak) -State $null
+        }
+        (Resolve-TuneupRun -StateRoot $Root -RunId $first.Id).Dir | Should -Be $first.Dir
+        Resolve-TuneupRun -StateRoot $Root -RunId '19990101-000000' | Should -BeNullOrEmpty
+    }
+
+    It 'picks the middle run when the newest of three is undone' {
+        $runs = @(1..3 | ForEach-Object { New-TuneupRun -StateRoot $Root })
+        foreach ($run in $runs) {
+            Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak (New-TestTweak) -State $null
+        }
+        Save-TuneupJson -Path (Join-Path $runs[2].Dir 'undone.json') -Object ([pscustomobject]@{ undoneAt = 'now' })
+        (Resolve-TuneupRun -StateRoot $Root -RunId 'last').Id | Should -Be $runs[1].Id
+    }
 }
 ```
 
@@ -2479,7 +2558,7 @@ function New-TuneupRun {
         $id = '{0}-{1:D2}' -f $baseId, $counter
     }
     $dir = Join-Path $runsDir $id
-    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null
     [pscustomobject]@{ Id = $id; Dir = $dir }
 }
 
@@ -2503,8 +2582,24 @@ function Add-TuneupJournalEntry {
 function Read-TuneupJournal {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return }
-    foreach ($line in [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)) {
-        if ($line.Trim()) { $line | ConvertFrom-Json }
+    $lines = [System.IO.File]::ReadAllLines($Path, $script:Utf8NoBom)
+    $lastIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i].Trim()) { $lastIndex = $i }
+    }
+    for ($i = 0; $i -le $lastIndex; $i++) {
+        if (-not $lines[$i].Trim()) { continue }
+        try {
+            $entry = $lines[$i] | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            if ($i -eq $lastIndex) {
+                Write-Warning "Ignoring incomplete last journal line in $Path"
+                return
+            }
+            throw "Journal $Path is corrupt at line $($i + 1)"
+        }
+        $entry
     }
 }
 
@@ -2512,11 +2607,20 @@ function Get-TuneupRunList {
     param([string]$StateRoot)
     $runsDir = Join-Path (Get-TuneupStateRoot -StateRoot $StateRoot) 'runs'
     if (-not (Test-Path -LiteralPath $runsDir)) { return }
-    foreach ($dir in Get-ChildItem -LiteralPath $runsDir -Directory | Sort-Object Name) {
+    $byName = @{}
+    $names = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($dir in Get-ChildItem -LiteralPath $runsDir -Directory) {
+        if ($dir.Name -cmatch '^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$') {
+            $byName[$dir.Name] = $dir
+            $names.Add($dir.Name)
+        }
+    }
+    $names.Sort([System.StringComparer]::Ordinal)
+    foreach ($name in $names) {
         [pscustomobject]@{
-            Id     = $dir.Name
-            Dir    = $dir.FullName
-            Undone = (Test-Path -LiteralPath (Join-Path $dir.FullName 'undone.json'))
+            Id     = $name
+            Dir    = $byName[$name].FullName
+            Undone = (Test-Path -LiteralPath (Join-Path $byName[$name].FullName 'undone.json'))
         }
     }
 }
@@ -2537,7 +2641,7 @@ Nota: el sufijo usa dos dígitos (`-02`, `-03`…) para que el orden alfabético
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/State.Tests.ps1`
-Expected: 4 passed.
+Expected: 11 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -2545,6 +2649,8 @@ Expected: 4 passed.
 git add engine/State.ps1 tests/State.Tests.ps1
 git commit -m "feat: corridas y diario en disco"
 ```
+
+Seguimiento (mismo contenido final ya incluido arriba): `git commit -m "fix: diario tolerante a cortes y listado de corridas estricto"`.
 
 ---
 
