@@ -7,6 +7,7 @@
   "err.unknownProfile": "Perfil desconocido: {0}",
   "err.unknownTweak": "Ajuste desconocido: {0}",
   "err.tweakNotInRun": "El ajuste {0} no está en esa corrida.",
+  "err.runNotFound": "No existe la corrida {0}.",
   "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
   "err.badArgs": "Combinación de parámetros no válida: {0}",
   "undo.none": "No hay corridas para deshacer.",

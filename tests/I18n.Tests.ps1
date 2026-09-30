@@ -23,6 +23,14 @@ Describe 'i18n' {
         $mismatches -join '; ' | Should -BeNullOrEmpty
     }
 
+    It 'keeps the English texts in plain ASCII separators' {
+        $en = Get-Content -LiteralPath (Join-Path $I18nRoot 'en.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $offenders = foreach ($property in $en.PSObject.Properties) {
+            if ([string]$property.Value -match [regex]::Escape([string][char]0x00B7)) { $property.Name }
+        }
+        $offenders -join ', ' | Should -BeNullOrEmpty
+    }
+
     It 'formats texts with arguments' {
         Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
         Get-TuneupText -Key 'plan.header' -Format 3, 1 | Should -Be 'Plan: 3 to apply, 1 skipped'

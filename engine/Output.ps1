@@ -1,8 +1,3 @@
-function ConvertTo-TuneupList {
-    param([AllowEmptyCollection()][string[]]$Value = @())
-    @($Value | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-}
-
 function ConvertTo-TuneupPlanView {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan)
     foreach ($item in $Plan) {

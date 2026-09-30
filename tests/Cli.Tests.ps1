@@ -10,9 +10,9 @@ BeforeAll {
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:SubKey = 'HKCU:\Software\windows-tuneup-test\Sub'
     $script:PowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en') {
+    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en', [string]$Catalog = (Join-Path $Fixtures 'catalog')) {
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
-            -CatalogPath (Join-Path $Fixtures 'catalog') -ProfilesPath (Join-Path $Fixtures 'profiles') `
+            -CatalogPath $Catalog -ProfilesPath (Join-Path $Fixtures 'profiles') `
             -StateRoot $script:Root -Force -Lang $Lang @Arguments
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
@@ -42,12 +42,6 @@ BeforeAll {
     function Remove-TestKey {
         if (Test-Path -LiteralPath $SubKey) { Set-TestSetValueDeny -Remove }
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-    }
-}
-
-Describe 'ConvertTo-TuneupList' {
-    It 'splits comma separated values from a single argument' {
-        (ConvertTo-TuneupList -Value @('base, extra', 'dev')) -join '|' | Should -Be 'base|extra|dev'
     }
 }
 
@@ -152,6 +146,44 @@ Describe 'tuneup.ps1' {
         $json.summary.restored | Should -Be 2
         $json.summary.failed | Should -Be 1
         (Get-ItemProperty -LiteralPath $SubKey).Four | Should -Be 1
+    }
+
+    It 'reports status and undoes a run without reading the catalog' -TestCases @(
+        @{ Kind = 'broken' }
+        @{ Kind = 'missing' }
+    ) {
+        param($Kind)
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        if ($Kind -eq 'broken') {
+            $catalog = Join-Path $TestDrive 'broken-catalog'
+            New-Item -ItemType Directory -Path $catalog | Out-Null
+            [System.IO.File]::WriteAllText((Join-Path $catalog 'bad.json'), '{ broken')
+        } else {
+            $catalog = Join-Path $TestDrive 'no-such-catalog'
+        }
+        $status = Invoke-Tuneup @('-Status', '-Json') -Catalog $catalog
+        $status.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $status.Output
+        $json.command | Should -Be 'status'
+        Get-Ids $json.items | Should -Be 'test.one,test.two'
+        $undo = Invoke-Tuneup @('-Undo', 'last', '-Json') -Catalog $catalog
+        $undo.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $undo.Output).summary.restored | Should -Be 2
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'says the run does not exist for an unknown run id' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        $result = Invoke-Tuneup @('-Undo', '19990101-000000', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'Run 19990101-000000 does not exist.'
+        (Invoke-Tuneup @('-Undo', '19990101-000000') -Lang 'es').Output | Should -Match 'No existe la corrida 19990101-000000\.'
+    }
+
+    It 'says there is nothing to undo for last without runs' {
+        $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'There are no runs to undo.'
     }
 
     It 'skips a tweak that was already undone and refuses to undo a run twice' {

@@ -64,9 +64,9 @@ function Stop-Tuneup {
     exit 1
 }
 
-$ProfileName = @(ConvertTo-TuneupList -Value $ProfileName)
-$Include = @(ConvertTo-TuneupList -Value $Include)
-$Exclude = @(ConvertTo-TuneupList -Value $Exclude)
+$ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
+$Include = @(Get-TuneupCleanList ($Include -split ','))
+$Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
 
 $conflict = $null
 if ($Tweak -and -not $Undo) { $conflict = '-Tweak (-Undo)' }
@@ -89,18 +89,7 @@ try {
     $CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $PSScriptRoot 'catalog' })
     $ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $PSScriptRoot 'profiles' })
 
-    $catalog = @(Invoke-TuneupStep { Import-TuneupCatalog -Path $CatalogPath })
-    $profileSet = @(Invoke-TuneupStep { Import-TuneupProfileSet -Path $ProfilesPath })
-    $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
-    if ($problems.Count) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.catalog') -Details $problems }
-
     $environment = Invoke-TuneupStep { Get-TuneupEnvironment }
-    if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
-    if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {
-        Stop-Tuneup -Message (Get-TuneupText -Key 'err.unsupported')
-    }
-    # Server supports every policy that Enterprise supports.
-    if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
 
     if ($Status) {
         $items = @(Invoke-TuneupStep { Get-TuneupStatus -StateRoot $StateRoot })
@@ -110,7 +99,10 @@ try {
 
     if ($Undo) {
         $run = Invoke-TuneupStep { Resolve-TuneupRun -StateRoot $StateRoot -RunId $Undo }
-        if (-not $run) { Stop-Tuneup -Message (Get-TuneupText -Key 'undo.none') }
+        if (-not $run) {
+            $missing = $(if ($Undo -eq 'last') { Get-TuneupText -Key 'undo.none' } else { Get-TuneupText -Key 'err.runNotFound' -Format $Undo })
+            Stop-Tuneup -Message $missing
+        }
         # Machine-folder runs always need elevation; a -StateRoot run only for its machine tweaks.
         $needsAdmin = ($run.Root -eq 'machine')
         if (-not $needsAdmin) {
@@ -122,6 +114,18 @@ try {
         Write-TuneupUndoReport -RunId $run.Id -Results $undoResults -Warnings $script:Warnings.ToArray() -Json:$Json
         exit (Get-TuneupUndoExitCode -Results $undoResults)
     }
+
+    if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
+    if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {
+        Stop-Tuneup -Message (Get-TuneupText -Key 'err.unsupported')
+    }
+    # Server supports every policy that Enterprise supports.
+    if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
+
+    $catalog = @(Invoke-TuneupStep { Import-TuneupCatalog -Path $CatalogPath })
+    $profileSet = @(Invoke-TuneupStep { Import-TuneupProfileSet -Path $ProfilesPath })
+    $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
+    if ($problems.Count) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.catalog') -Details $problems }
 
     $plan = @(Invoke-TuneupStep {
         New-TuneupPlan -Catalog $catalog -Profiles $profileSet -ProfileIds $ProfileName `

@@ -21,6 +21,15 @@ Describe 'New-TuneupRestorePoint' {
         New-TuneupRestorePoint -Description 'test' | Should -Be 'created'
     }
 
+    It 'reports created when the newest point advances even if old ones were pruned' {
+        Mock -ModuleName Tuneup Checkpoint-Computer { $script:Points = @(2) }
+        Mock -ModuleName Tuneup Get-ComputerRestorePoint {
+            [pscustomobject]@{ SequenceNumber = $script:Points[-1] }
+        }
+        $script:Points = @(1)
+        New-TuneupRestorePoint -Description 'test' | Should -Be 'created'
+    }
+
     It 'reports skipped-recent when Windows keeps the last one' {
         Mock -ModuleName Tuneup Checkpoint-Computer { }
         New-TuneupRestorePoint -Description 'test' | Should -Be 'skipped-recent'
