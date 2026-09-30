@@ -46,7 +46,7 @@ function Invoke-TuneupPlan {
             continue
         }
         try {
-            Set-TuneupDesired -Tweak $tweak
+            $null = Set-TuneupDesired -Tweak $tweak
             if ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
                 New-TuneupResult -Item $item -Status 'applied'
             } else {

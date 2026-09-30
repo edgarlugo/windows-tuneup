@@ -22,6 +22,7 @@ Describe 'Invoke-TuneupPlan' {
     It 'applies the plan, journals each tweak first and reports the result' {
         $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
         ($results | ForEach-Object { $_.status }) -join ',' | Should -Be 'applied,applied'
+        $results[0].rebootRequired | Should -BeFalse
         $results[1].rebootRequired | Should -BeTrue
         $journal = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl'))
         $journal.Count | Should -Be 2
@@ -52,10 +53,34 @@ Describe 'Invoke-TuneupPlan' {
         $results[1].status | Should -Be 'applied'
     }
 
-    It 'applies nothing once the journal cannot be written' {
-        Mock -ModuleName Tuneup Add-TuneupJournalEntry { throw 'disk full' }
+    It 'stops applying once the journal cannot be written' {
+        Mock -ModuleName Tuneup Add-TuneupJournalEntry { throw 'disk full' } -ParameterFilter { $Tweak.id -eq 'test.one' }
         $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        ($results | ForEach-Object { $_.status }) -join ',' | Should -Be 'skipped,skipped'
         ($results | ForEach-Object { $_.reason }) -join ',' | Should -Be 'journal-error,journal-error'
+        $results[0].error | Should -Be 'disk full'
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'fails a tweak whose state cannot be read, without journaling or applying it' {
+        $plan = @(New-TestPlan)
+        Mock -ModuleName Tuneup Get-RegistryTweakState { throw 'cannot read' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan $plan -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'failed'
+        $results[0].error | Should -Be 'cannot read'
+        $results[1].status | Should -Be 'applied'
+        $journal = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl'))
+        $journal.Count | Should -Be 1
+        $journal[0].id | Should -Be 'test.two'
+        Should -Invoke -ModuleName Tuneup Set-RegistryTweakDesired -Times 0 -ParameterFilter { $Tweak.id -eq 'test.one' }
+    }
+
+    It 'does not leak handler output into the results' {
+        $plan = @(New-TestPlan)
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { 'noise' }
+        $results = @(Invoke-TuneupPlan -Plan $plan -RunDir $Run.Dir)
+        $results.Count | Should -Be 2
+        @($results | Where-Object { $_ -is [string] }).Count | Should -Be 0
     }
 }
