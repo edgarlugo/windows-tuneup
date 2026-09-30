@@ -1284,11 +1284,11 @@ BeforeAll {
     }
 }
 
-AfterEach {
-    if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
-}
-
 Describe 'Registry handler' {
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
     It 'captures a missing value and the nearest existing ancestor' {
         $tweak = New-RegTweak "$Key\Sub" 'A' 'DWord' 1
         Test-RegistryTweakState -Tweak $tweak | Should -Be 'not-applied'
