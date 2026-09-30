@@ -28,6 +28,7 @@
   "reason.not-present": "not present on this machine",
   "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
+  "reason.already-undone": "already undone",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",
   "status.failed": "failed",

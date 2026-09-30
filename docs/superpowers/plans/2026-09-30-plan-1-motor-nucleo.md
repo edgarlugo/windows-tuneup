@@ -506,6 +506,7 @@ function Get-TuneupTitle {
   "reason.not-present": "no existe en este equipo",
   "reason.state-unreadable": "no se pudo leer su estado actual",
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
+  "reason.already-undone": "ya se había deshecho",
   "status.applied": "aplicado",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
   "status.failed": "falló",
@@ -563,6 +564,7 @@ function Get-TuneupTitle {
   "reason.not-present": "not present on this machine",
   "reason.state-unreadable": "its current state could not be read",
   "reason.journal-error": "the backup could not be saved, so it was not applied",
+  "reason.already-undone": "already undone",
   "status.applied": "applied",
   "status.not-applied": "no effect (Windows or a policy reverted it)",
   "status.failed": "failed",
@@ -2668,6 +2670,7 @@ Describe 'Undo and status' {
     }
 
     AfterEach {
+        $env:TUNEUP_TEST_FAIL_RESTORE = $null
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
@@ -2749,6 +2752,108 @@ Describe 'Undo and status' {
             -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
         @($plan | Where-Object { $_.Action -eq 'apply' }).Count | Should -Be 0
     }
+
+    It 'keeps the run pending when a restore fails and finishes it on retry' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'restore broke' } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:failed,test.one:restored'
+        $results[0].error | Should -BeLike '*restore broke*'
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeTrue
+        (Get-Item -LiteralPath $Key).GetValueNames() -contains 'One' | Should -BeFalse
+        (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
+        Should -Invoke -ModuleName Tuneup Restore-TuneupState -Times 1 -Exactly -ParameterFilter { $Tweak.id -eq 'test.two' }
+    }
+
+    It 'retries the failed tweaks through the last pending run and then marks it undone' {
+        $run = Invoke-TestApply $Root
+        $env:TUNEUP_TEST_FAIL_RESTORE = '1'
+        Mock -ModuleName Tuneup Restore-TuneupState {
+            if ($env:TUNEUP_TEST_FAIL_RESTORE) { throw 'restore broke' }
+            Restore-RegistryTweakState -Tweak $Tweak -State $State
+        } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        Invoke-TuneupUndo -Run $run | Out-Null
+        $env:TUNEUP_TEST_FAIL_RESTORE = $null
+        $last = Resolve-TuneupRun -StateRoot $Root -RunId 'last'
+        $last.Id | Should -Be $run.Id
+        $results = @(Invoke-TuneupUndo -Run $last)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:restored'
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        (Get-Item -LiteralPath $Key).GetValueNames() -contains 'Two' | Should -BeFalse
+        $null -eq (Resolve-TuneupRun -StateRoot $Root -RunId 'last') | Should -BeTrue
+    }
+
+    It 'skips a tweak that was already undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 7
+        $results = @(Invoke-TuneupUndo -Run $run -TweakId 'test.one')
+        $results.Count | Should -Be 1
+        $results[0].status | Should -Be 'skipped'
+        $results[0].reason | Should -Be 'already-undone'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 7
+    }
+
+    It 'does not restore again a tweak undone on its own when the whole run is undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 7
+        $results = @(Invoke-TuneupUndo -Run $run)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:restored'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 7
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'marks the run undone once every tweak was undone one by one' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        Invoke-TuneupUndo -Run $run -TweakId 'test.two' | Out-Null
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        @(Get-TuneupStatus -StateRoot $Root).Count | Should -Be 0
+    }
+
+    It 'leaves out of the status a tweak whose apply failed' {
+        $run = Invoke-TestApply $Root
+        $results = @(
+            [pscustomobject]@{ id = 'test.one'; status = 'failed' },
+            [pscustomobject]@{ id = 'test.two'; status = 'applied' }
+        )
+        Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object ([pscustomobject]@{ results = $results })
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.two'
+    }
+
+    It 'counts the journaled tweaks of a run that was cut before its result' {
+        $run = Invoke-TestApply $Root
+        Remove-Item -LiteralPath (Join-Path $run.Dir 'result.json')
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id } | Sort-Object) -join ',' | Should -Be 'test.one,test.two'
+    }
+
+    It 'takes the definition from the latest run for the same tweak' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'OneB' -PropertyType DWord -Value 1 | Out-Null
+        $first = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'One'; kind = 'DWord'; value = 1 })
+        $second = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'OneB'; kind = 'DWord'; value = 1 })
+        New-RunFolder -Root $Root -Id '20250101-000001' -Tweaks @($first) | Out-Null
+        New-RunFolder -Root $Root -Id '20250101-000002' -Tweaks @($second) | Out-Null
+        $status = @(Get-TuneupStatus -StateRoot $Root)
+        $status.Count | Should -Be 1
+        $status[0].runId | Should -Be '20250101-000002'
+        $status[0].status | Should -Be 'ok'
+    }
+
+    It 'reports unknown when the state cannot be read' {
+        Invoke-TestApply $Root | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupState { throw 'cannot read' }
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'unknown'
+    }
+
+    It 'reports not-present when the handler says so' {
+        Invoke-TestApply $Root | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupState { 'not-present' }
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'not-present'
+    }
 }
 ```
 
@@ -2765,39 +2870,45 @@ function Invoke-TuneupUndo {
     param([Parameter(Mandatory)]$Run, [string]$TweakId)
     Assert-TuneupRunUndoable -Run $Run
     $journal = Get-TuneupRunJournal -Run $Run
+    $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
     if ($TweakId) {
         $entries = @($entries | Where-Object { $_.id -eq $TweakId })
         if (-not $entries.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
+        if ($alreadyUndone -contains $TweakId) {
+            # Restoring again would overwrite whatever the tweak holds now with a stale value.
+            return [pscustomobject]@{ id = $TweakId; title = Get-TuneupTitle -Tweak $entries[0].tweak; status = 'skipped'; reason = 'already-undone'; error = $null }
+        }
     } else {
-        $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
         $entries = @($entries | Where-Object { $alreadyUndone -notcontains $_.id })
     }
     [array]::Reverse($entries)
     $results = @(foreach ($entry in $entries) {
         try {
             Restore-TuneupState -Tweak $entry.tweak -State $entry.state
-            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'restored'; error = $null }
+            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'restored'; reason = $null; error = $null }
         } catch {
-            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; error = $_.Exception.Message }
+            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; reason = $null; error = $_.Exception.Message }
         }
     })
     # The values are already restored; an unrecorded undo would leave the run pending, so it is reported.
-    # A run that still holds another user's entries stays pending for that user: only the tweaks
-    # restored here are marked, never the whole run.
+    # The whole run is marked only when every one of its tweaks is restored. Anything left (a failed
+    # restore, or entries of another user) keeps the run pending, and only the tweaks restored here are
+    # noted, so a retry or the other user picks up the rest.
     $restoredIds = @($results | Where-Object { $_.status -eq 'restored' } | ForEach-Object { $_.id })
+    $doneIds = @($alreadyUndone) + $restoredIds
+    $runIds = @(@($journal.Entries | ForEach-Object { $_.id }) + @($journal.Skipped))
+    $pendingIds = @($runIds | Where-Object { $doneIds -notcontains $_ })
     try {
-        if ($TweakId -or @($journal.Skipped).Count) {
-            if ($restoredIds.Count) {
-                Write-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Root $Run.Root -Append `
-                    -Text (($restoredIds -join [Environment]::NewLine) + [Environment]::NewLine)
-            }
-        } else {
+        if ($pendingIds.Count -eq 0) {
             Save-TuneupJson -Path (Join-Path $Run.Dir 'undone.json') -Root $Run.Root `
                 -Object ([pscustomobject]@{ undoneAt = (Get-Date).ToString('s'); results = $results })
+        } elseif ($restoredIds.Count) {
+            Write-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Root $Run.Root -Append `
+                -Text (($restoredIds -join [Environment]::NewLine) + [Environment]::NewLine)
         }
     } catch {
-        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; error = "The undo could not be recorded: $($_.Exception.Message)" }
+        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; reason = $null; error = "The undo could not be recorded: $($_.Exception.Message)" }
     }
     $results
 }
@@ -2836,12 +2947,12 @@ Nota: si una corrida se cortó antes de escribir `result.json`, `$touchedIds` qu
 
 Nota: todo lo que se lee de una corrida pasa por los lectores de la Task 9: `Get-TuneupRunJournal` (confianza de la carpeta de máquina, sin entradas de máquina en la de usuario; las entradas de usuario de otra persona quedan en `Skipped`), `Read-TuneupTrustedJson` para `result.json`, `Get-TuneupUndoneTweakId` para `undone-tweaks.txt` y `Undone` del listado para `undone.json`. Las marcas se escriben con `Save-TuneupJson`/`Write-TuneupStateFile`, que en la carpeta de máquina crean el archivo ya protegido. `Assert-TuneupRunUndoable` exige elevación para cualquier corrida de la carpeta de máquina.
 
-Nota: `undone.json` se escribe solo si esta persona pudo tomar todas las entradas de la corrida. Si hubo entradas de otro usuario, se anotan en `undone-tweaks.txt` solo las restauradas y la corrida sigue pendiente para su dueño; un deshacer completo posterior salta las ya anotadas.
+Nota: `undone.json` se escribe solo cuando todos los ajustes de la corrida quedaron restaurados (ya anotados antes o restaurados ahora). Si alguno falló o es de otro usuario, se anotan en `undone-tweaks.txt` solo los restaurados y la corrida sigue pendiente: `-Undo last` reintenta lo que falta y un deshacer completo posterior salta los ya anotados. `-TweakId` sobre un ajuste ya deshecho no restaura de nuevo: devuelve `skipped` con `reason = 'already-undone'`. Al deshacer ajuste por ajuste, cuando el último queda anotado también se escribe `undone.json`.
 
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: 10 passed.
+Expected: 20 passed.
 
 - [ ] **Step 5: Commit**
 

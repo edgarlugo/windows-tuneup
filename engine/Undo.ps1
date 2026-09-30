@@ -2,39 +2,45 @@ function Invoke-TuneupUndo {
     param([Parameter(Mandatory)]$Run, [string]$TweakId)
     Assert-TuneupRunUndoable -Run $Run
     $journal = Get-TuneupRunJournal -Run $Run
+    $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)
     if ($TweakId) {
         $entries = @($entries | Where-Object { $_.id -eq $TweakId })
         if (-not $entries.Count) { throw (Get-TuneupText -Key 'err.tweakNotInRun' -Format $TweakId) }
+        if ($alreadyUndone -contains $TweakId) {
+            # Restoring again would overwrite whatever the tweak holds now with a stale value.
+            return [pscustomobject]@{ id = $TweakId; title = Get-TuneupTitle -Tweak $entries[0].tweak; status = 'skipped'; reason = 'already-undone'; error = $null }
+        }
     } else {
-        $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
         $entries = @($entries | Where-Object { $alreadyUndone -notcontains $_.id })
     }
     [array]::Reverse($entries)
     $results = @(foreach ($entry in $entries) {
         try {
             Restore-TuneupState -Tweak $entry.tweak -State $entry.state
-            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'restored'; error = $null }
+            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'restored'; reason = $null; error = $null }
         } catch {
-            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; error = $_.Exception.Message }
+            [pscustomobject]@{ id = $entry.id; title = Get-TuneupTitle -Tweak $entry.tweak; status = 'failed'; reason = $null; error = $_.Exception.Message }
         }
     })
     # The values are already restored; an unrecorded undo would leave the run pending, so it is reported.
-    # A run that still holds another user's entries stays pending for that user: only the tweaks
-    # restored here are marked, never the whole run.
+    # The whole run is marked only when every one of its tweaks is restored. Anything left (a failed
+    # restore, or entries of another user) keeps the run pending, and only the tweaks restored here are
+    # noted, so a retry or the other user picks up the rest.
     $restoredIds = @($results | Where-Object { $_.status -eq 'restored' } | ForEach-Object { $_.id })
+    $doneIds = @($alreadyUndone) + $restoredIds
+    $runIds = @(@($journal.Entries | ForEach-Object { $_.id }) + @($journal.Skipped))
+    $pendingIds = @($runIds | Where-Object { $doneIds -notcontains $_ })
     try {
-        if ($TweakId -or @($journal.Skipped).Count) {
-            if ($restoredIds.Count) {
-                Write-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Root $Run.Root -Append `
-                    -Text (($restoredIds -join [Environment]::NewLine) + [Environment]::NewLine)
-            }
-        } else {
+        if ($pendingIds.Count -eq 0) {
             Save-TuneupJson -Path (Join-Path $Run.Dir 'undone.json') -Root $Run.Root `
                 -Object ([pscustomobject]@{ undoneAt = (Get-Date).ToString('s'); results = $results })
+        } elseif ($restoredIds.Count) {
+            Write-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Root $Run.Root -Append `
+                -Text (($restoredIds -join [Environment]::NewLine) + [Environment]::NewLine)
         }
     } catch {
-        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; error = "The undo could not be recorded: $($_.Exception.Message)" }
+        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; reason = $null; error = "The undo could not be recorded: $($_.Exception.Message)" }
     }
     $results
 }

@@ -28,6 +28,7 @@
   "reason.not-present": "no existe en este equipo",
   "reason.state-unreadable": "no se pudo leer su estado actual",
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
+  "reason.already-undone": "ya se había deshecho",
   "status.applied": "aplicado",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
   "status.failed": "falló",

@@ -20,6 +20,7 @@ Describe 'Undo and status' {
     }
 
     AfterEach {
+        $env:TUNEUP_TEST_FAIL_RESTORE = $null
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
@@ -100,5 +101,107 @@ Describe 'Undo and status' {
         $plan = @(New-TuneupPlan -Catalog @($One, $Two) -Profiles @(New-TestProfile -Id 'base' -Include @('test.one', 'test.two')) `
             -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
         @($plan | Where-Object { $_.Action -eq 'apply' }).Count | Should -Be 0
+    }
+
+    It 'keeps the run pending when a restore fails and finishes it on retry' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'restore broke' } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:failed,test.one:restored'
+        $results[0].error | Should -BeLike '*restore broke*'
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeTrue
+        (Get-Item -LiteralPath $Key).GetValueNames() -contains 'One' | Should -BeFalse
+        (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
+        Should -Invoke -ModuleName Tuneup Restore-TuneupState -Times 1 -Exactly -ParameterFilter { $Tweak.id -eq 'test.two' }
+    }
+
+    It 'retries the failed tweaks through the last pending run and then marks it undone' {
+        $run = Invoke-TestApply $Root
+        $env:TUNEUP_TEST_FAIL_RESTORE = '1'
+        Mock -ModuleName Tuneup Restore-TuneupState {
+            if ($env:TUNEUP_TEST_FAIL_RESTORE) { throw 'restore broke' }
+            Restore-RegistryTweakState -Tweak $Tweak -State $State
+        } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        Invoke-TuneupUndo -Run $run | Out-Null
+        $env:TUNEUP_TEST_FAIL_RESTORE = $null
+        $last = Resolve-TuneupRun -StateRoot $Root -RunId 'last'
+        $last.Id | Should -Be $run.Id
+        $results = @(Invoke-TuneupUndo -Run $last)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:restored'
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        (Get-Item -LiteralPath $Key).GetValueNames() -contains 'Two' | Should -BeFalse
+        $null -eq (Resolve-TuneupRun -StateRoot $Root -RunId 'last') | Should -BeTrue
+    }
+
+    It 'skips a tweak that was already undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 7
+        $results = @(Invoke-TuneupUndo -Run $run -TweakId 'test.one')
+        $results.Count | Should -Be 1
+        $results[0].status | Should -Be 'skipped'
+        $results[0].reason | Should -Be 'already-undone'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 7
+    }
+
+    It 'does not restore again a tweak undone on its own when the whole run is undone' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 7
+        $results = @(Invoke-TuneupUndo -Run $run)
+        ($results | ForEach-Object { $_.id + ':' + $_.status }) -join ',' | Should -Be 'test.two:restored'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 7
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'marks the run undone once every tweak was undone one by one' {
+        $run = Invoke-TestApply $Root
+        Invoke-TuneupUndo -Run $run -TweakId 'test.one' | Out-Null
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        Invoke-TuneupUndo -Run $run -TweakId 'test.two' | Out-Null
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        @(Get-TuneupStatus -StateRoot $Root).Count | Should -Be 0
+    }
+
+    It 'leaves out of the status a tweak whose apply failed' {
+        $run = Invoke-TestApply $Root
+        $results = @(
+            [pscustomobject]@{ id = 'test.one'; status = 'failed' },
+            [pscustomobject]@{ id = 'test.two'; status = 'applied' }
+        )
+        Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object ([pscustomobject]@{ results = $results })
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.two'
+    }
+
+    It 'counts the journaled tweaks of a run that was cut before its result' {
+        $run = Invoke-TestApply $Root
+        Remove-Item -LiteralPath (Join-Path $run.Dir 'result.json')
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id } | Sort-Object) -join ',' | Should -Be 'test.one,test.two'
+    }
+
+    It 'takes the definition from the latest run for the same tweak' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'OneB' -PropertyType DWord -Value 1 | Out-Null
+        $first = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'One'; kind = 'DWord'; value = 1 })
+        $second = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'OneB'; kind = 'DWord'; value = 1 })
+        New-RunFolder -Root $Root -Id '20250101-000001' -Tweaks @($first) | Out-Null
+        New-RunFolder -Root $Root -Id '20250101-000002' -Tweaks @($second) | Out-Null
+        $status = @(Get-TuneupStatus -StateRoot $Root)
+        $status.Count | Should -Be 1
+        $status[0].runId | Should -Be '20250101-000002'
+        $status[0].status | Should -Be 'ok'
+    }
+
+    It 'reports unknown when the state cannot be read' {
+        Invoke-TestApply $Root | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupState { throw 'cannot read' }
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'unknown'
+    }
+
+    It 'reports not-present when the handler says so' {
+        Invoke-TestApply $Root | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupState { 'not-present' }
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.status } | Select-Object -Unique) -join ',' | Should -Be 'not-present'
     }
 }

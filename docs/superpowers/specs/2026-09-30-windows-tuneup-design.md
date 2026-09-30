@@ -409,6 +409,11 @@ reporte de medición adjunto.
   carpeta de máquina, las entradas de máquina de la carpeta de usuario y las entradas de
   usuario de corridas de otro usuario.
 - Si `-Undo` restaura pero no puede registrarlo, lo informa como fallo (código `2`).
+- `-Undo` marca la corrida como deshecha solo cuando restauró todos sus ajustes; si alguno falla
+  (o es de otro usuario) la corrida sigue pendiente y `-Undo last` reintenta solo lo que falta.
+- Deshacer una corrida que se volvió a aplicar restaura el valor que había antes de *esa* corrida
+  (que puede ser un valor ya desviado); las corridas anteriores siguen pendientes hasta que se
+  deshagan.
 - Todo queda local; no se envía nada a ningún servidor.
 
 ## 8. Skill de Claude
