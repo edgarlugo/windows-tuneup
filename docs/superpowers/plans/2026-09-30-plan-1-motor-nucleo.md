@@ -93,7 +93,7 @@ windows-tuneup/
 
 Run (en Windows PowerShell 5.1):
 ```powershell
-powershell -NoProfile -Command "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null; Install-Module Pester -MinimumVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck; Install-Module PSScriptAnalyzer -Scope CurrentUser -Force; Get-Module -ListAvailable Pester, PSScriptAnalyzer | Select-Object Name, Version"
+powershell -NoProfile -Command "Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null; Install-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck; Install-Module PSScriptAnalyzer -Scope CurrentUser -Force; Get-Module -ListAvailable Pester, PSScriptAnalyzer | Select-Object Name, Version"
 ```
 Expected: aparece `Pester 5.x` y `PSScriptAnalyzer 1.x` (además del Pester 3.4.0 del sistema, que no se usa).
 
@@ -169,7 +169,7 @@ Licencia / License: MIT
 param([string]$Path)
 
 $ErrorActionPreference = 'Stop'
-Import-Module Pester -MinimumVersion 5.6.0
+Import-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99
 
 $root = Split-Path $PSScriptRoot -Parent
 $resultsDir = Join-Path $root 'TestResults'
@@ -230,8 +230,8 @@ Describe 'Repository hygiene' {
     }
 
     It 'keeps PowerShell files ASCII so Windows PowerShell 5.1 reads them correctly' {
-        $files = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Include '*.ps1', '*.psm1', '*.psd1' |
-            Where-Object { $_.FullName -notmatch '\\\.git\\' }
+        $files = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File |
+            Where-Object { $_.Extension -in '.ps1', '.psm1', '.psd1' -and $_.FullName -notmatch '\\\.git\\' }
         $bad = foreach ($file in $files) {
             $bytes = [System.IO.File]::ReadAllBytes($file.FullName)
             if ([Array]::Exists($bytes, [Predicate[byte]] { param($b) $b -gt 127 })) { $file.FullName }
@@ -266,7 +266,7 @@ jobs:
         shell: powershell
         run: |
           Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          Install-Module Pester -MinimumVersion 5.6.0 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
       - name: Lint
         shell: powershell

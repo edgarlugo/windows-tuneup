@@ -1,7 +1,7 @@
 param([string]$Path)
 
 $ErrorActionPreference = 'Stop'
-Import-Module Pester -MinimumVersion 5.6.0
+Import-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99
 
 $root = Split-Path $PSScriptRoot -Parent
 $resultsDir = Join-Path $root 'TestResults'
