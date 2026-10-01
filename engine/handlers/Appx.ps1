@@ -19,7 +19,7 @@ function Test-AppxTweakDefinition {
     if ([string]$set.name -cnotmatch $script:AppxNamePattern) { 'has an invalid appx package name' }
     if ([string]$set.storeId -cnotmatch $script:StoreIdPattern) { 'needs a Microsoft Store id (12 capital letters or digits) in set.storeId' }
     if ($set.action -cne 'remove') { "has an invalid appx action '$($set.action)'" }
-    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
 }
 
 function Get-TuneupAppxPackage {

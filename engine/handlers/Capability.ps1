@@ -44,7 +44,7 @@ function Test-CapabilityTweakDefinition {
     $set = $Tweak.set
     if ([string]$set.name -cnotmatch $script:CapabilityNamePattern) { 'has an invalid capability name (expected Name~~~~Version)' }
     if ($script:CapabilityStates -cnotcontains $set.state) { "has an invalid capability state '$($set.state)'" }
-    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
 }
 
 function Get-CapabilityTweakState {

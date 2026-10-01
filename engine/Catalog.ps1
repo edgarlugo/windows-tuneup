@@ -52,7 +52,7 @@ function Test-TuneupTweak {
         }
     }
     if ($script:TweakRisks -notcontains $Tweak.risk) { $errors.Add("$id has an invalid risk '$($Tweak.risk)'") }
-    if ($script:TweakScopes -notcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
+    if ($script:TweakScopes -cnotcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
     if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
     if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
 

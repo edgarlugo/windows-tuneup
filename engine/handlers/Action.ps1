@@ -149,7 +149,7 @@ function Get-TuneupActionCommand {
 function Test-ActionTweakDefinition {
     param([Parameter(Mandatory)]$Tweak)
     $name = [string]$Tweak.set.script
-    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
     if ($name -cnotmatch $script:ActionNamePattern) { "has an invalid action script name '$name'" }
     elseif (-not $script:TuneupActionScripts.ContainsKey($name)) {
         $problem = $script:TuneupActionLoadErrors[$name]

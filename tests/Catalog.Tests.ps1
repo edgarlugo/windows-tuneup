@@ -112,6 +112,54 @@ Describe 'Test-TuneupTweak' {
     }
 }
 
+Describe 'Test-TuneupTweak case rules' {
+    It 'rejects a registry <Field> that differs only in case (<Value>)' -TestCases @(
+        @{ Field = 'kind'; Value = 'dword'; Set = @{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'dword'; value = 1 }; Message = 'invalid registry kind' }
+        @{ Field = 'kind'; Value = 'string'; Set = @{ path = 'HKCU:\Software\Example'; name = 'A'; kind = 'string'; value = 'x' }; Message = 'invalid registry kind' }
+        @{ Field = 'path'; Value = 'hkcu:'; Set = @{ path = 'hkcu:\Software\Example'; name = 'A'; kind = 'DWord'; value = 1 }; Message = 'invalid registry path' }
+    ) {
+        param($Set, $Message)
+        $tweak = New-TestTweak -Set ([pscustomobject]$Set)
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match $Message
+    }
+
+    It 'rejects a service start type that differs only in case' {
+        $set = [pscustomobject]@{ name = 'RetailDemo'; startType = 'disabled'; stop = $false }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'service' -Scope 'machine' -Set $set)) -join '; ' | Should -Match "invalid startType 'disabled'"
+    }
+
+    It 'rejects a task state that differs only in case' {
+        $set = [pscustomobject]@{ path = '\Microsoft\Windows'; name = 'X'; state = 'disabled' }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'task' -Scope 'machine' -Set $set)) -join '; ' | Should -Match "invalid task state 'disabled'"
+    }
+
+    It 'rejects a scope that differs only in case for every machine type (<Type>)' -TestCases @(
+        @{ Type = 'service'; Set = @{ name = 'RetailDemo'; startType = 'Disabled'; stop = $false } }
+        @{ Type = 'task'; Set = @{ path = '\Microsoft\Windows'; name = 'X'; state = 'Disabled' } }
+        @{ Type = 'appx'; Set = @{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' } }
+        @{ Type = 'capability'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' } }
+        @{ Type = 'feature'; Set = @{ name = 'Printing-XPSServices-Features'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = New-TestTweak -Type $Type -Scope 'Machine' -Set ([pscustomobject]$Set)
+        $problems = (Test-TuneupTweak -Tweak $tweak) -join '; '
+        $problems | Should -Match "invalid scope 'Machine'"
+        $problems | Should -Match 'must use scope machine'
+    }
+
+    It 'rejects the user scope written in another case' {
+        $tweak = New-TestTweak -Scope 'User'
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match "invalid scope 'User'"
+    }
+
+    It 'keeps the exact spelling that the shipped catalog and the fixtures use valid' {
+        foreach ($folder in (Join-Path $RepoRoot 'catalog'), (Join-Path $PSScriptRoot 'fixtures\catalog')) {
+            $catalog = @(Import-TuneupCatalog -Path $folder)
+            @(Test-TuneupCatalog -Catalog $catalog | Where-Object { $_ -notlike "*action script*" -and $_ -notlike "*actions folder*" }) -join '; ' | Should -BeNullOrEmpty
+        }
+    }
+}
+
 Describe 'Test-TuneupCatalog' {
     It 'does not report duplicate ids for load errors' {
         $first = [pscustomobject]@{ id = $null; sourceFile = 'a.json'; loadError = 'file a.json has no tweaks array' }

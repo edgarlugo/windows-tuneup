@@ -146,7 +146,7 @@ function Set-TuneupPowerSettingIndex {
 function Test-PowercfgTweakDefinition {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
-    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
     switch -CaseSensitive ([string]$set.kind) {
         'scheme' {
             if ([string]$set.scheme -notmatch $script:GuidPattern) { 'needs the GUID of the power scheme in set.scheme' }

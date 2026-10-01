@@ -13,14 +13,14 @@ function Test-TuneupRegistryValue {
 function Test-RegistryTweakDefinition {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
-    if ([string]$set.path -notmatch '^(HKLM|HKCU):\\.+') {
+    if ([string]$set.path -cnotmatch '^(HKLM|HKCU):\\.+') {
         'has an invalid registry path'
-    } elseif (([string]$set.path -match '^HKCU:') -ne ($Tweak.scope -eq 'user')) {
+    } elseif (([string]$set.path -cmatch '^HKCU:') -ne ($Tweak.scope -ceq 'user')) {
         'scope does not match its registry hive'
     }
     if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
     if ($null -ne $set.value) {
-        if ($script:RegistryKinds -notcontains $set.kind) {
+        if ($script:RegistryKinds -cnotcontains $set.kind) {
             "has an invalid registry kind '$($set.kind)'"
         } elseif (-not (Test-TuneupRegistryValue -Kind $set.kind -Value $set.value)) {
             "has a value that does not match kind $($set.kind)"

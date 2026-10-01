@@ -45,7 +45,7 @@ function Test-FeatureTweakDefinition {
     $set = $Tweak.set
     if ([string]$set.name -cnotmatch $script:FeatureNamePattern) { 'has an invalid feature name' }
     if ($script:FeatureStates -cnotcontains $set.state) { "has an invalid feature state '$($set.state)'" }
-    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
 }
 
 function Get-FeatureTweakState {
