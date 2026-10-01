@@ -1,0 +1,28 @@
+{
+  "id": "work",
+  "aliases": ["trabajo"],
+  "title": { "es": "Trabajo", "en": "Work" },
+  "description": {
+    "es": "Solo ajustes de tu usuario, sin políticas, para equipos de una organización. Conserva Teams, Outlook, OneDrive y Microsoft 365.",
+    "en": "Only settings of your user, no policies, for machines of an organization. Keeps Teams, Outlook, OneDrive and Microsoft 365."
+  },
+  "include": [
+    "privacy.app-launch-tracking-off",
+    "privacy.online-speech-off",
+    "privacy.inking-typing-improve-off",
+    "privacy.input-personalization-text-off",
+    "privacy.input-personalization-ink-off",
+    "privacy.language-list-off",
+    "ads.start-recent-files-off",
+    "ads.bing-search-off",
+    "ads.search-history-off",
+    "ai.copilot-button-off"
+  ],
+  "keep": [
+    "apps.msteams",
+    "apps.outlook-new",
+    "apps.onedrive",
+    "apps.office-hub",
+    "apps.power-automate"
+  ]
+}

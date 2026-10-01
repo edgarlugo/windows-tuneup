@@ -1,0 +1,28 @@
+{
+  "id": "gaming",
+  "aliases": ["juegos"],
+  "title": { "es": "Juegos", "en": "Gaming" },
+  "description": {
+    "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y servicios de Xbox.",
+    "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and services."
+  },
+  "include": [
+    "gaming.game-mode-on",
+    "gaming.game-dvr-off",
+    "gaming.app-capture-off",
+    "gaming.background-recording-off",
+    "gaming.gamebar-controller-off",
+    "gaming.mouse-accel-off",
+    "gaming.mouse-accel-threshold-1",
+    "gaming.mouse-accel-threshold-2",
+    "gaming.windowed-optimizations",
+    "gaming.hags-on",
+    "power.high-performance-plan",
+    "power.usb-selective-suspend-ac-off"
+  ],
+  "keep": [
+    "apps.xbox-gaming-app",
+    "apps.xbox-game-bar",
+    "tasks.xbox-game-save"
+  ]
+}

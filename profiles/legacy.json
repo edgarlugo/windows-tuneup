@@ -1,0 +1,42 @@
+{
+  "id": "legacy",
+  "aliases": ["equipo-antiguo", "antiguo"],
+  "title": { "es": "Equipo antiguo", "en": "Older PC" },
+  "description": {
+    "es": "Para equipos lentos o con disco mecánico: sin transparencia ni animaciones, menos tareas de fondo y menos apps preinstaladas.",
+    "en": "For slow machines or hard disks: no transparency or animations, fewer background tasks and fewer preinstalled apps."
+  },
+  "include": [
+    "ui.transparency-off",
+    "ui.window-animations-off",
+    "ui.listview-shadow-off",
+    "ui.listview-alpha-select-off",
+    "ui.aero-peek-off",
+    "ui.widgets-off",
+    "ui.news-interests-win10",
+    "performance.explorer-folder-type-general",
+    "performance.background-apps-off",
+    "performance.delivery-optimization-http-only",
+    "edge.startup-boost-off",
+    "edge.background-mode-off",
+    "services.wia",
+    "services.maps-broker",
+    "tasks.maps-toast",
+    "tasks.maps-update",
+    "tasks.power-efficiency-analyze",
+    "tasks.disk-footprint-diagnostics",
+    "tasks.work-folders-logon",
+    "tasks.work-folders-maintenance",
+    "tasks.winsat",
+    "tasks.recommended-troubleshooting",
+    "tasks.speech-model-download",
+    "apps.clipchamp",
+    "apps.bing-news",
+    "apps.bing-weather",
+    "apps.bing-finance",
+    "apps.messaging",
+    "apps.mixed-reality-portal",
+    "apps.movies-tv"
+  ],
+  "keep": []
+}

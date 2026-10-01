@@ -6218,7 +6218,7 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
 - [ ] **Step 4: Verificar que pasa**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/CatalogQuality.Tests.ps1`
-Expected: PASS (`Tests Passed: 28, Failed: 0`).
+Expected: PASS (`Tests Passed: 39, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1`
 Expected: PASS (`Failed: 0`), incluida `Shipped catalog and profiles` de `tests/Catalog.Tests.ps1`.
@@ -6228,7 +6228,7 @@ Expected: PASS (`Failed: 0`), incluida `Shipped catalog and profiles` de `tests/
 Con PowerShell sin elevar, en la raíz del repo:
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File tuneup.ps1 -Profile base,dev,gaming,privacy,laptop,legacy,work,lite -WhatIf -Json -StateRoot $env:TEMP\tuneup-plan3-check`
-Expected: un documento JSON con `"command": "plan"` y ningún `reason` igual a `state-unreadable`. En el equipo de verificación: 167 elementos, 58 por aplicar (15 con `unverified-needs-admin`, las apps), 68 ya aplicados, 19 que piden confirmación, 11 conservados por un perfil, 6 incompatibles (directivas de Enterprise/Education y de Windows 10), 4 que no existen en ese build y 1 que no corresponde al hardware (`power.high-performance-plan`: el equipo tiene batería).
+Expected: un documento JSON con `"command": "plan"` y ningún `reason` igual a `state-unreadable`. En el equipo de verificación: 162 elementos, 55 por aplicar (13 con `unverified-needs-admin`, las apps), 65 ya aplicados, 22 que piden confirmación, 8 conservados por un perfil, 7 incompatibles (directivas de Enterprise/Education y de Windows 10), 4 que no existen en ese build y 1 que no corresponde al hardware (`power.high-performance-plan`: el equipo tiene batería).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File tuneup.ps1 -Profile portátil -WhatIf -StateRoot $env:TEMP\tuneup-plan3-check`
 Expected: el plan de `laptop` (el alias con tilde funciona).

@@ -1,0 +1,18 @@
+{
+  "id": "dev",
+  "aliases": ["desarrollo"],
+  "title": { "es": "Desarrollo", "en": "Development" },
+  "description": {
+    "es": "Modo desarrollador, rutas largas, archivos ocultos visibles y \"Finalizar tarea\" en la barra. No toca WSL, Hyper-V ni contenedores.",
+    "en": "Developer Mode, long paths, hidden files shown and \"End task\" in the taskbar. Leaves WSL, Hyper-V and containers alone."
+  },
+  "include": [
+    "ui.show-hidden-files",
+    "ui.taskbar-end-task",
+    "dev.developer-mode",
+    "dev.long-paths",
+    "dev.sudo-enable",
+    "power.usb-selective-suspend-ac-off"
+  ],
+  "keep": []
+}

@@ -222,3 +222,86 @@ Describe 'Shipped profiles' {
         }
     }
 }
+
+Describe 'The eight profiles' {
+    BeforeAll {
+        $script:NotApplied = { param($tweak) 'not-applied' }
+        function Get-Plan([string[]]$ProfileIds, $Environment = (New-TestEnvironment), [string[]]$Include = @()) {
+            @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -ProfileIds $ProfileIds -Include $Include -Environment $Environment -TestState $NotApplied)
+        }
+    }
+
+    It 'ships exactly base, dev, gaming, privacy, laptop, legacy, work and lite with their aliases' {
+        @($Profiles | ForEach-Object { $_.id } | Sort-Object) -join ',' | Should -Be 'base,dev,gaming,laptop,legacy,lite,privacy,work'
+        $expected = @{ dev = 'desarrollo'; gaming = 'juegos'; privacy = 'privacidad'; laptop = 'portatil,port' + [char]0x00E1 + 'til'
+            legacy = 'equipo-antiguo,antiguo'; work = 'trabajo'; lite = 'liviano'; base = '' }
+        foreach ($profileData in $Profiles) { @($profileData.aliases) -join ',' | Should -Be $expected[$profileData.id] -Because $profileData.id }
+    }
+
+    It 'resolves every alias to its profile' {
+        foreach ($profileData in $Profiles) {
+            foreach ($alias in @($profileData.aliases)) { Resolve-TuneupProfileId -Profiles $Profiles -Name $alias | Should -Be $profileData.id }
+        }
+    }
+
+    It 'plans every profile on <Name> without errors, listing every tweak it includes' -TestCases @(
+        @{ Name = 'Home with a battery'; Edition = 'Home'; Battery = $true; Managed = $false; Family = '11'; Build = 26100 }
+        @{ Name = 'Pro without a battery'; Edition = 'Pro'; Battery = $false; Managed = $false; Family = '11'; Build = 26100 }
+        @{ Name = 'Enterprise managed by an organization'; Edition = 'Enterprise'; Battery = $true; Managed = $true; Family = '11'; Build = 26100 }
+        @{ Name = 'Windows 10 Education'; Edition = 'Education'; Battery = $false; Managed = $false; Family = '10'; Build = 19045 }
+    ) {
+        param($Edition, $Battery, $Managed, $Family, $Build)
+        $environment = New-TestEnvironment -Edition $Edition -HasBattery $Battery -IsManaged $Managed -Family $Family -Build $Build
+        $known = @('excluded', 'kept-by-profile', 'incompatible', 'not-applicable-hardware', 'managed-device', 'high-risk-not-requested', 'needs-confirmation')
+        foreach ($profileData in $Profiles) {
+            $plan = Get-Plan -ProfileIds $profileData.id -Environment $environment
+            foreach ($tweakId in @($profileData.include)) { @($plan | ForEach-Object { $_.Id }) | Should -Contain $tweakId -Because "$($profileData.id) on $Edition" }
+            foreach ($item in $plan | Where-Object { $_.Action -eq 'skip' }) {
+                $known | Should -Contain $item.Reason -Because "$($profileData.id): $($item.Id)"
+                Get-TuneupText -Key "reason.$($item.Reason)" | Should -Not -Be "reason.$($item.Reason)"
+            }
+        }
+    }
+
+    It 'asks before every tweak marked ask, unless it is requested by name' {
+        $plan = Get-Plan -ProfileIds 'lite', 'privacy', 'gaming', 'dev', 'laptop'
+        foreach ($item in $plan | Where-Object { $_.Tweak.ask -and $_.Reason -ne 'incompatible' -and $_.Reason -ne 'not-applicable-hardware' -and $_.Reason -ne 'kept-by-profile' }) {
+            $item.Reason | Should -Be 'needs-confirmation' -Because $item.Id
+        }
+        (Get-Plan -ProfileIds 'lite' -Include 'apps.onedrive' | Where-Object { $_.Id -eq 'apps.onedrive' }).Action | Should -Be 'apply'
+    }
+
+    It 'keeps the Xbox apps and task when gaming is combined with lite' {
+        $plan = Get-Plan -ProfileIds 'gaming', 'lite'
+        foreach ($tweakId in 'apps.xbox-gaming-app', 'apps.xbox-game-bar', 'tasks.xbox-game-save') {
+            ($plan | Where-Object { $_.Id -eq $tweakId }).Reason | Should -Be 'kept-by-profile' -Because $tweakId
+        }
+    }
+
+    It 'keeps Teams, Outlook, OneDrive and Microsoft 365 when work is combined with lite' {
+        $plan = Get-Plan -ProfileIds 'work', 'lite'
+        foreach ($tweakId in 'apps.msteams', 'apps.outlook-new', 'apps.onedrive', 'apps.office-hub', 'apps.power-automate') {
+            ($plan | Where-Object { $_.Id -eq $tweakId }).Reason | Should -Be 'kept-by-profile' -Because $tweakId
+        }
+    }
+
+    It 'gives work only user settings that are not policies' {
+        foreach ($tweakId in @((Get-ProfileById 'work').include)) {
+            Test-TuneupUserScopedTweak -Tweak $ById[$tweakId] | Should -BeTrue -Because $tweakId
+            Test-TuneupPolicyTweak -Tweak $ById[$tweakId] | Should -BeFalse -Because $tweakId
+            Test-TuneupTweakNeedsAdmin -Tweak $ById[$tweakId] | Should -BeFalse -Because $tweakId
+        }
+    }
+
+    It 'removes in lite what LTSC does not ship' {
+        $lite = @((Get-ProfileById 'lite').include)
+        foreach ($tweakId in 'apps.copilot', 'apps.msteams', 'apps.xbox-gaming-app', 'apps.phone-link', 'apps.onedrive', 'apps.widgets-web-experience', 'ui.widgets-off', 'ads.bing-search-off') {
+            $lite | Should -Contain $tweakId
+        }
+    }
+
+    It 'leaves the plan of a machine with a battery free of the desktop power plan' {
+        $plan = Get-Plan -ProfileIds 'gaming' -Environment (New-TestEnvironment -HasBattery $true)
+        ($plan | Where-Object { $_.Id -eq 'power.high-performance-plan' }).Reason | Should -Be 'not-applicable-hardware'
+    }
+}

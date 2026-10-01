@@ -1,0 +1,19 @@
+{
+  "id": "laptop",
+  "aliases": ["portatil", "portátil"],
+  "title": { "es": "Portátil", "en": "Laptop" },
+  "description": {
+    "es": "Más batería: apps de la Store sin correr en segundo plano, Edge sin procesos precargados y sin red en suspensión con batería.",
+    "en": "More battery: Store apps do not run in the background, Edge keeps no preloaded processes and no network in standby on battery."
+  },
+  "include": [
+    "performance.background-apps-off",
+    "performance.delivery-optimization-http-only",
+    "edge.startup-boost-off",
+    "edge.background-mode-off",
+    "services.wia",
+    "services.maps-broker",
+    "power.standby-network-off-battery"
+  ],
+  "keep": []
+}
