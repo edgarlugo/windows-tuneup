@@ -119,6 +119,9 @@ try {
         Invoke-TuneupStep { Write-TuneupActionsPathWarning }
         Invoke-TuneupStep { Import-TuneupActionLibrary -Path $ActionsPath }
     }
+    # Scripts of the repository folder or of -ActionsPath that could not be loaded: a warning here,
+    # and an error in the catalog check only for the tweaks that use them.
+    Invoke-TuneupStep { Write-TuneupActionLoadWarning }
 
     $environment = Invoke-TuneupStep { Get-TuneupEnvironment }
 

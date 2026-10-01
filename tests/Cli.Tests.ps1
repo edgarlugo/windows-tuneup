@@ -63,13 +63,56 @@ Describe 'tuneup.ps1' {
         $json.requiresAdmin | Should -BeTrue
     }
 
-    It 'refuses an actions folder with a script that runs code' {
+    It 'reports an actions folder script that runs code as a warning and keeps -Status working' {
         $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $actions | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $actions 'bad-one.ps1'), 'Write-Output hello')
         $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $actions
         $result.ExitCode | Should -Be 1
-        (ConvertFrom-PureJson $result.Output).message | Should -Match 'may only define functions'
+        $json = ConvertFrom-PureJson $result.Output
+        # The fixture catalog has an action tweak whose script is not in this folder.
+        @($json.warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+        $result = Invoke-Tuneup @('-Status', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 0
+        @((ConvertFrom-PureJson $result.Output).warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+    }
+
+    It 'fails the catalog check only for the tweaks whose action script could not be loaded' {
+        $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $actions | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $actions 'fixture-toggle.ps1'), 'Write-Output hello')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        @($json.details) -join ' ' | Should -Match "test.action action script 'fixture-toggle' could not be loaded: .*may only define functions"
+    }
+
+    It 'keeps -Status, -Undo, -Health and -Measure working when a script of the repository actions folder is broken' {
+        $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $copy | Out-Null
+        foreach ($item in 'tuneup.ps1', 'engine', 'i18n') { Copy-Item -LiteralPath (Join-Path $Repo $item) -Destination (Join-Path $copy $item) -Recurse }
+        New-Item -ItemType Directory -Path (Join-Path $copy 'actions') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $copy 'actions') 'bad-one.ps1'), 'Write-Output hi')
+        $run = {
+            param([string[]]$Arguments)
+            $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $copy 'tuneup.ps1') -StateRoot $script:Root -Lang en -Json @Arguments
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
+        }
+        $status = & $run @('-Status')
+        $status.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $status.Output
+        $json.command | Should -Be 'status'
+        @($json.warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+        $undo = & $run @('-Undo', 'last')
+        $undo.ExitCode | Should -Be 1
+        $undoJson = ConvertFrom-PureJson $undo.Output
+        $undoJson.message | Should -Match 'no runs to undo'
+        @($undoJson.warnings) -join ' ' | Should -Match 'bad-one.ps1'
+        $measure = & $run @('-Measure')
+        $measure.ExitCode | Should -Be 0
+        $measureJson = ConvertFrom-PureJson $measure.Output
+        $measureJson.command | Should -Be 'measure'
+        @($measureJson.warnings) -join ' ' | Should -Match 'bad-one.ps1'
     }
 
     It 'says when the actions folder does not exist' {

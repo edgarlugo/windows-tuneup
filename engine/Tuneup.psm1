@@ -13,5 +13,6 @@ foreach ($folder in @($engineRoot, (Join-Path $engineRoot 'handlers'))) {
 $engineFunctions = @(Get-ChildItem -LiteralPath Function:\ |
     Where-Object { $_.Module -eq $ExecutionContext.SessionState.Module } | ForEach-Object { $_.Name })
 # Action scripts are parsed, never run: only their functions are defined (handlers/Action.ps1).
+# A script that cannot be loaded never stops the import: it is kept as a load error and reported.
 Import-TuneupActionLibrary -Path (Join-Path (Split-Path $engineRoot -Parent) 'actions')
 Export-ModuleMember -Function $engineFunctions

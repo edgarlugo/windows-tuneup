@@ -18,6 +18,11 @@ BeforeAll {
             "function Restore-${Pascal}ActionState { param(`$Tweak, `$State) }"
         ) -join "`r`n"
     }
+    # A script that cannot be loaded does not throw: the problem is kept, per script name.
+    function Get-ActionLoadMessage([string]$Dir, [string]$Name) {
+        Import-TuneupActionLibrary -Path $Dir
+        (@(Get-TuneupActionLoadError) | Where-Object { $_.name -eq $Name } | Select-Object -Last 1).message
+    }
     $script:Contract = @'
 function Get-BadOneActionState { param($Tweak) $null }
 function Test-BadOneActionState { param($Tweak) 'applied' }
@@ -53,29 +58,92 @@ Describe 'Action library' {
     It 'never runs code while loading a script' {
         $marker = Join-Path $TestDrive 'ran.txt'
         $dir = New-ActionFolder @{ 'bad-one.ps1' = ($Contract + "`r`n[System.IO.File]::WriteAllText('$marker', 'x')") }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*bad-one.ps1 may only define functions*'
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike '*bad-one.ps1 may only define functions*'
         Test-Path -LiteralPath $marker | Should -BeFalse
     }
 
     It 'refuses a function outside the name space of its script' {
         $dir = New-ActionFolder @{ 'bad-one.ps1' = ($Contract + "`r`nfunction Test-TuneupTrustedItem { param(`$Path) `$true }") }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*defines Test-TuneupTrustedItem*'
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike '*defines Test-TuneupTrustedItem*'
         (& (Get-Module Tuneup) { Test-TuneupTrustedItem -Path 'C:\no\such\path' }) | Should -BeFalse
     }
 
     It 'refuses names reserved for the engine' {
         $dir = New-ActionFolder @{ 'tuneup.ps1' = 'function Get-TuneupActionCommand { param($Tweak) }' }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*reserved for the engine*'
+        Get-ActionLoadMessage $dir 'tuneup' | Should -BeLike '*reserved for the engine*'
+    }
+
+    It 'keeps loading the other scripts of the folder when one cannot be loaded' {
+        $dir = New-ActionFolder @{ 'broken-one.ps1' = 'Write-Output hi'; 'fine-one.ps1' = (New-ContractFor 'FineOne') }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Not -Throw
+        $problem = @(Get-TuneupActionLoadError | Where-Object { $_.name -eq 'broken-one' })
+        $problem.Count | Should -Be 1
+        $problem[0].file | Should -Be 'broken-one.ps1'
+        $problem[0].message | Should -BeLike '*may only define functions*'
+        @(Get-TuneupActionLoadError | Where-Object { $_.name -eq 'fine-one' }).Count | Should -Be 0
+        $fine = New-TestTweak -Id 'test.fine' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'fine-one' })
+        Test-TuneupState -Tweak $fine | Should -Be 'applied'
+    }
+
+    It 'drops the load error once the script loads' {
+        $dir = New-ActionFolder @{ 'later-one.ps1' = 'Write-Output hi' }
+        Import-TuneupActionLibrary -Path $dir
+        @(Get-TuneupActionLoadError | Where-Object { $_.name -eq 'later-one' }).Count | Should -Be 1
+        [System.IO.File]::WriteAllText((Join-Path $dir 'later-one.ps1'), (New-ContractFor 'LaterOne'))
+        Import-TuneupActionLibrary -Path $dir
+        @(Get-TuneupActionLoadError | Where-Object { $_.name -eq 'later-one' }).Count | Should -Be 0
+    }
+
+    It 'keeps a script that loaded when another file of the same name is refused' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'kept-one.ps1' = (New-ContractFor 'KeptOne') })
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'kept-one.ps1' = (New-ContractFor 'KeptOne') })
+        $tweak = New-TestTweak -Id 'test.kept' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'kept-one' })
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -BeNullOrEmpty
+    }
+
+    It 'says in the catalog check why the script of a tweak could not be loaded' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'broken-two.ps1' = 'Write-Output hi' })
+        $tweak = New-TestTweak -Id 'test.broken' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'broken-two' })
+        $problems = @(Test-TuneupTweak -Tweak $tweak)
+        $problems.Count | Should -Be 1
+        $problems[0] | Should -BeLike "test.broken action script 'broken-two' could not be loaded: *may only define functions*"
+    }
+
+    It 'says why a script that failed to load cannot run' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'broken-three.ps1' = 'Write-Output hi' })
+        $tweak = New-TestTweak -Id 'test.broken3' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'broken-three' })
+        { Get-TuneupState -Tweak $tweak } | Should -Throw "*Action script 'broken-three' could not be loaded: *may only define functions*"
+    }
+
+    It 'warns once for each script that could not be loaded' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'broken-four.ps1' = 'Write-Output hi' })
+        $warnings = @(Write-TuneupActionLoadWarning 3>&1 | ForEach-Object { $_.Message })
+        @($warnings | Where-Object { $_ -like '*broken-four.ps1*may only define functions*' }).Count | Should -Be 1
+    }
+
+    It 'imports the module even when the actions folder holds a script that cannot load' {
+        $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $copy | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\engine') -Destination (Join-Path $copy 'engine') -Recurse
+        $actions = Join-Path $copy 'actions'
+        New-Item -ItemType Directory -Path $actions | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $actions 'bad-one.ps1'), 'Write-Output hi')
+        [System.IO.File]::WriteAllText((Join-Path $actions 'good-one.ps1'), (New-ContractFor 'GoodOne'))
+        $module = Join-Path $copy 'engine\Tuneup.psm1'
+        $command = "Import-Module '$module'; (Get-TuneupActionLoadError).name; '--'; & (Get-Module Tuneup) { Get-GoodOneActionState -Tweak 1 | Out-Null; 'loaded' }"
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -Command $command)
+        $output[0] | Should -Be 'bad-one'
+        $output -contains 'loaded' | Should -BeTrue
     }
 
     It 'refuses a script without the four contract functions' {
         $dir = New-ActionFolder @{ 'bad-one.ps1' = 'function Get-BadOneActionState { param($Tweak) $null }' }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*does not define Test-BadOneActionState*'
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike '*does not define Test-BadOneActionState*'
     }
 
     It 'refuses a file name that is not kebab case' {
         $dir = New-ActionFolder @{ 'Bad_One.ps1' = $Contract }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw "*Invalid action script name 'Bad_One'*"
+        Get-ActionLoadMessage $dir 'Bad_One' | Should -BeLike "*Invalid action script name 'Bad_One'*"
     }
 
     It 'refuses parameters declared outside a param block' {
@@ -86,33 +154,33 @@ function Set-BadOneActionDesired { param($Tweak) }
 function Restore-BadOneActionState { param($Tweak, $State) }
 '@
         $dir = New-ActionFolder @{ 'bad-one.ps1' = $inline }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*param() block*'
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike '*param() block*'
     }
 
     It 'refuses reserved names whatever their case' {
         $dir = New-ActionFolder @{ 'tune-up.ps1' = (New-ContractFor 'TuneUp') + "`r`nfunction Get-TuneUpActionCommand { param(`$Tweak) 1 }" }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*reserved for the engine*'
+        Get-ActionLoadMessage $dir 'tune-up' | Should -BeLike '*reserved for the engine*'
         $dir = New-ActionFolder @{ 'tuneup-two.ps1' = (New-ContractFor 'TuneupTwo') }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*reserved for the engine*'
+        Get-ActionLoadMessage $dir 'tuneup-two' | Should -BeLike '*reserved for the engine*'
     }
 
     It 'refuses a function that another action script already defines' {
         Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'a-b.ps1' = (New-ContractFor 'AB') })
         $dir = New-ActionFolder @{ 'ab.ps1' = (New-ContractFor 'Ab') }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw "*defines Get-AbActionState, which action script 'a-b' already defines*"
+        Get-ActionLoadMessage $dir 'ab' | Should -BeLike "*defines Get-AbActionState, which action script 'a-b' already defines*"
     }
 
     It 'refuses a function that is a contract name of another action script' {
         Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'foo-action-x.ps1' = (New-ContractFor 'FooActionX') })
         $dir = New-ActionFolder @{ 'foo.ps1' = ((New-ContractFor 'Foo') + "`r`nfunction Set-FooActionXActionDesired { param(`$Tweak) }") }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*defines Set-FooActionXActionDesired*'
+        Get-ActionLoadMessage $dir 'foo' | Should -BeLike '*defines Set-FooActionXActionDesired*'
     }
 
     It 'refuses a function that would shadow an existing command' {
         function global:Get-ShadowOneActionHelperRead { 'global' }
         try {
             $dir = New-ActionFolder @{ 'shadow-one.ps1' = ((New-ContractFor 'ShadowOne') + "`r`nfunction Get-ShadowOneActionHelperRead { param() 1 }") }
-            { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*Get-ShadowOneActionHelperRead, which is already a command*'
+            Get-ActionLoadMessage $dir 'shadow-one' | Should -BeLike '*Get-ShadowOneActionHelperRead, which is already a command*'
         } finally {
             Remove-Item -LiteralPath 'Function:\global:Get-ShadowOneActionHelperRead'
         }
@@ -138,13 +206,13 @@ function Restore-BadOneActionState { param($Tweak, $State) }
     ) {
         param($Name)
         $dir = New-ActionFolder @{ 'bad-one.ps1' = ($Contract + "`r`nfunction $Name { param() }") }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw "*defines $Name*"
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike "*defines $Name*"
     }
 
     It 'refuses a function with a dynamicparam block' {
         $dynamic = $Contract + "`r`nfunction Get-BadOneActionHelperDyn { dynamicparam { } }"
         $dir = New-ActionFolder @{ 'bad-one.ps1' = $dynamic }
-        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*dynamicparam*'
+        Get-ActionLoadMessage $dir 'bad-one' | Should -BeLike '*dynamicparam*'
     }
 
     It 'only takes files whose extension is exactly .ps1' {
@@ -173,7 +241,7 @@ function Restore-BadOneActionState { param($Tweak, $State) }
     It 'refuses to load a script of the same name from another file' {
         Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'same-name.ps1' = (New-ContractFor 'SameName') })
         $other = New-ActionFolder @{ 'same-name.ps1' = (New-ContractFor 'SameName') }
-        { Import-TuneupActionLibrary -Path $other } | Should -Throw "*Action script 'same-name' is already loaded from*"
+        Get-ActionLoadMessage $other 'same-name' | Should -BeLike "*Action script 'same-name' is already loaded from*"
     }
 
     It 'exports every engine function even when the session already has one of that name' {
