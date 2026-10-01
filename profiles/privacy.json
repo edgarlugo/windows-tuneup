@@ -1,0 +1,8 @@
+{
+  "id": "privacy",
+  "aliases": ["privacidad"],
+  "title": { "es": "Privacidad", "en": "Privacy" },
+  "description": { "es": "Menos datos enviados a Microsoft y a los anunciantes.", "en": "Less data sent to Microsoft and advertisers." },
+  "include": ["privacy.tailored-experiences", "tasks.ceip-consolidator"],
+  "keep": []
+}

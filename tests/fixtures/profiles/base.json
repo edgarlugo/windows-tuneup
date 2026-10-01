@@ -1,0 +1,6 @@
+{
+  "id": "base", "aliases": [],
+  "title": { "es": "Base", "en": "Base" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.one", "test.two"], "keep": []
+}

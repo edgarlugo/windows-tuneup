@@ -1,0 +1,17 @@
+{
+  "tweaks": [
+    {
+      "id": "services.retail-demo",
+      "title": { "es": "Desactivar el servicio de demostración para tiendas", "en": "Disable the retail demo service" },
+      "why": { "es": "Solo se usa en equipos de exhibición en tiendas.", "en": "Only used on store display machines." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "service",
+      "scope": "machine",
+      "set": { "name": "RetailDemo", "startType": "Disabled", "stop": true },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server"]
+    }
+  ]
+}

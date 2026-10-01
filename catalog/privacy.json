@@ -1,0 +1,30 @@
+{
+  "tweaks": [
+    {
+      "id": "privacy.advertising-id",
+      "title": { "es": "Desactivar el ID de publicidad", "en": "Disable the advertising ID" },
+      "why": { "es": "Las apps lo usan para mostrarte anuncios personalizados.", "en": "Apps use it to show you personalized ads." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\AdvertisingInfo", "name": "Enabled", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/windows/privacy/manage-connections-from-windows-operating-system-components-to-microsoft-services"]
+    },
+    {
+      "id": "privacy.tailored-experiences",
+      "title": { "es": "Desactivar experiencias personalizadas con datos de diagnóstico", "en": "Disable tailored experiences based on diagnostic data" },
+      "why": { "es": "Evita que Microsoft use tus datos de diagnóstico para sugerencias y anuncios.", "en": "Stops Microsoft from using your diagnostic data for tips and ads." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Privacy", "name": "TailoredExperiencesWithDiagnosticDataEnabled", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/windows/privacy/manage-connections-from-windows-operating-system-components-to-microsoft-services"]
+    }
+  ]
+}

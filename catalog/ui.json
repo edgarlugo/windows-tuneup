@@ -1,0 +1,17 @@
+{
+  "tweaks": [
+    {
+      "id": "ui.show-file-extensions",
+      "title": { "es": "Mostrar las extensiones de archivo", "en": "Show file extensions" },
+      "why": { "es": "Permite distinguir un documento de un ejecutable disfrazado (factura.pdf.exe).", "en": "Lets you tell a document from a disguised executable (invoice.pdf.exe)." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "HideFileExt", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "sources": ["https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Show_Extensions_For_Known_File_Types.reg"]
+    }
+  ]
+}

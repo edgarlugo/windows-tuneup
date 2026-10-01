@@ -1,0 +1,8 @@
+{
+  "id": "base",
+  "aliases": [],
+  "title": { "es": "Base", "en": "Base" },
+  "description": { "es": "Lo seguro para cualquier equipo. Siempre se aplica.", "en": "Safe for any machine. Always applied." },
+  "include": ["ui.show-file-extensions", "privacy.advertising-id", "services.retail-demo"],
+  "keep": []
+}

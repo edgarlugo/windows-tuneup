@@ -1,0 +1,6 @@
+{
+  "id": "extra", "aliases": ["adicional"],
+  "title": { "es": "Extra", "en": "Extra" },
+  "description": { "es": "Prueba", "en": "Test" },
+  "include": ["test.three"], "keep": []
+}

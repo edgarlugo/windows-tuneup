@@ -1,0 +1,17 @@
+{
+  "tweaks": [
+    {
+      "id": "tasks.ceip-consolidator",
+      "title": { "es": "Desactivar la tarea de consolidación del Programa de mejora de la experiencia", "en": "Disable the Customer Experience Improvement Program consolidator task" },
+      "why": { "es": "Recopila y envía datos de uso a Microsoft.", "en": "Collects and sends usage data to Microsoft." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "task",
+      "scope": "machine",
+      "set": { "path": "\\Microsoft\\Windows\\Customer Experience Improvement Program\\", "name": "Consolidator", "state": "Disabled" },
+      "rebootRequired": false,
+      "sources": ["https://github.com/Raphire/Win11Debloat/blob/master/Scripts/Features/Telemetry-ScheduledTasks.ps1"]
+    }
+  ]
+}

@@ -88,6 +88,7 @@ Un perfil **Base** siempre activo, más **objetivos combinables**, por ejemplo
    juegos, a cambio de menos protección contra drivers maliciosos).
 2. **Conflictos:** un perfil declara `keep` (mantener) y `remove`/`apply`. `keep` gana siempre.
    Gaming + Liviano deja Xbox instalado.
+   Un `-Include` explícito anula `keep` (el usuario lo pidió por nombre).
 3. **Compatibilidad:** cada ajuste declara build mínimo, sistema (10/11) y ediciones. Una
    política que Home ignora no se aplica en Home y el plan lo dice; no se finge éxito.
 4. **Preguntas en el menú:** los ajustes marcados `ask: true` (OneDrive, Store, Teams, Outlook,
@@ -159,10 +160,13 @@ Cada manejador implementa el mismo contrato:
 
 | Función | Qué hace |
 |---|---|
-| `Get-Current` | Lee el estado actual (para el snapshot y para `-Status`) |
-| `Test-Applied` | ¿Ya está en el valor deseado? |
-| `Set-Desired` | Aplica |
-| `Restore-Previous` | Devuelve el valor guardado en el snapshot |
+| `Get-<Tipo>TweakState` | Lee el estado actual (para el snapshot y para `-Status`) |
+| `Test-<Tipo>TweakState` | ¿Ya está en el valor deseado? Devuelve `applied`, `not-applied` o `not-present` |
+| `Set-<Tipo>TweakDesired` | Aplica |
+| `Restore-<Tipo>TweakState` | Devuelve el valor guardado en el snapshot |
+
+`<Tipo>` es el nombre del manejador (`Registry`, `Service`, `Task`); `engine/Dispatch.ps1` elige
+la función según el `type` del ajuste.
 
 | Tipo | Estado que guarda | Reversa |
 |---|---|---|
@@ -227,16 +231,99 @@ Cada manejador implementa el mismo contrato:
 
 ### Estado en disco
 
-`%ProgramData%\windows-tuneup\runs\<yyyyMMdd-HHmmss>\`
+Hay dos carpetas de estado y cada corrida usa una según cómo se ejecute:
+
+| Carpeta | Cuándo | Qué guarda |
+|---|---|---|
+| `%ProgramData%\windows-tuneup\` (máquina) | Proceso elevado | Cualquier ajuste |
+| `%LOCALAPPDATA%\windows-tuneup\` (usuario) | Sin elevar | Solo ajustes `scope: user` (registro en `HKCU:`) |
+
+Dentro de cada una, la corrida vive en `runs\<yyyyMMdd-HHmmss>\`:
 
 | Archivo | Contenido |
 |---|---|
+| `run.json` | Quién la creó: `schemaVersion`, `userSid`, `machine`, `createdAt` |
 | `plan.json` | Lo que se iba a hacer y los motivos de cada omisión |
 | `snapshot.jsonl` | Diario: una línea por ajuste, escrita **antes** de tocarlo |
 | `result.json` | Resultado por ajuste y conteos (esquema versionado) |
-| `transcript.log` | Salida completa |
+| `undone.json`, `undone-tweaks.txt` | Marcas de lo que ya se deshizo |
+| `transcript.log` | Salida completa (Plan 4: todavía no se escribe) |
 
-Queda fuera de la carpeta del script, así que deshacer funciona aunque se borre la descarga.
+Las rutas salen de `GetFolderPath('CommonApplicationData')` y
+`GetFolderPath('LocalApplicationData')`, no de variables de entorno. Queda fuera de la carpeta
+del script, así que deshacer funciona aunque se borre la descarga. `-Status` y `-Undo` leen
+las dos carpetas y ordenan las corridas por id; una corrida con el diario vacío no cuenta para
+`-Undo last`.
+
+`-StateRoot <carpeta>` es solo para pruebas y desarrollo (los runners de CI son
+administradores y las pruebas lo usan): usa esa carpeta sin ACL ni ninguna revisión de
+confianza, así que **no debe usarse en un equipo real**. En un proceso elevado lo recuerda con
+una advertencia. Con `-Json` las advertencias no se escriben sueltas, porque `powershell.exe` las
+escribe en la salida estándar y romperían el JSON: van dentro del documento, en el arreglo
+`warnings` que llevan todas las salidas JSON (plan, aplicar, estado, deshacer y error).
+
+**Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
+registro, servicio o tarea), así que el diario decide qué se toca con permisos de
+administrador. En `C:\ProgramData` cualquier usuario puede crear carpetas y archivos: un
+usuario estándar podría plantar un diario, o crear `windows-tuneup` antes que la
+herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
+
+- **ACL de la carpeta de máquina.** Dueño Administradores, sin herencia de `ProgramData`,
+  SYSTEM y Administradores con control total, Usuarios con lectura y ejecución y OWNER RIGHTS
+  (`S-1-3-4`) con lectura y ejecución, heredable a carpetas y archivos; OWNER RIGHTS quita al
+  dueño el permiso implícito de cambiar la ACL. Se usan SID (`S-1-5-18`, `S-1-5-32-544`,
+  `S-1-5-32-545`, `S-1-3-4`), no nombres, porque cambian con el idioma de Windows.
+- **Creación atómica.** `windows-tuneup`, `runs` y cada corrida se crean con
+  `Directory.CreateDirectory(ruta, DirectorySecurity)`; `snapshot.jsonl`, `run.json` y los
+  demás archivos, con un `FileStream` en modo `CreateNew` que recibe la `FileSecurity`. Nacen
+  con dueño Administradores y la ACL puesta, sin un instante con los permisos heredados y
+  aunque la directiva "Propietario predeterminado de objetos creados por miembros del grupo
+  Administradores" esté en "Creador del objeto". Si `windows-tuneup` o `runs` ya existían y
+  son confiables, un proceso elevado vuelve a aplicarles la ACL.
+- **Carpeta base confiable.** Antes de confiar en `windows-tuneup` se revisa la carpeta que
+  la contiene (`C:\ProgramData`): no puede ser un punto de reanálisis, su dueño tiene que ser
+  SYSTEM, TrustedInstaller o Administradores, y ninguna entrada que permite (salvo las solo de
+  herencia, como CREATOR OWNER) puede dar a otro SID borrar, borrar hijos, cambiar permisos,
+  tomar posesión o control genérico. Que Usuarios pueda crear carpetas y anexar, como en
+  `C:\ProgramData`, es aceptable. Si falla, no se crea nada y no se lee la carpeta de máquina.
+- **Nada ajeno.** Si la carpeta no es confiable (incluso recién creada, por si otro la creó
+  primero), se detiene con "State folder … is not trusted. Delete it as administrator and run
+  again." No se adueña de carpetas ajenas: su dueño podría cambiarlas por una unión justo
+  antes y la ACL caería en otra carpeta.
+- **Confiable = dueño, DACL y enlaces.** Un elemento es confiable si su dueño es
+  Administradores o SYSTEM, ninguna entrada que permite da a otro SID escritura, anexar,
+  borrar, cambiar permisos, tomar posesión, escribir atributos o escritura/control genéricos
+  (las que deniegan no cuentan), no es un punto de reanálisis y, si es archivo, no tiene otro
+  enlace físico. Los archivos de la carpeta de máquina se abren una sola vez: dueño, DACL y
+  cantidad de enlaces se validan sobre ese mismo identificador, que se lee o se anexa. Quien
+  escribe no deja entrar a otros escritores; quien lee comparte con un escritor, así que
+  `-Status` funciona durante una corrida. Un archivo bloqueado se informa como "en uso", no
+  como no confiable.
+- **Solo corridas confiables.** Al leer la carpeta de máquina se ignora, con advertencia,
+  toda corrida cuya carpeta o diario no sea confiable, y también `run.json`, `result.json`,
+  `undone.json` y `undone-tweaks.txt` que no lo sean; si `windows-tuneup` o `runs` no son
+  confiables se ignora la carpeta entera.
+- **La carpeta de usuario no toca la máquina.** No se escribe en ella un ajuste que no sea de
+  usuario, y al leerla se descarta, con advertencia, toda entrada que no sea `scope: user` de
+  tipo `registry` con ruta `HKCU:\` (la misma regla que valida el catálogo). Así, lo que un
+  proceso sin elevar deja ahí no puede tocar el equipo cuando un administrador deshace.
+- **Cada usuario deshace lo suyo.** Las entradas de usuario guardan valores de `HKCU` de quien
+  creó la corrida; `-Undo` y `-Status` ignoran, con advertencia, las de una corrida cuyo
+  `userSid` no es el del usuario actual (o que no lo dice). En la carpeta de usuario, una
+  corrida sin `run.json` legible se considera del usuario actual.
+- **Qué elige `-Undo`.** Deshacer cualquier corrida de la carpeta de máquina, también con un id
+  explícito, exige elevación. Sin elevar, `-Undo last` solo considera corridas de la carpeta de
+  usuario. Elevado, considera las de máquina creadas por el mismo usuario o sin entradas de
+  usuario, y las de la carpeta de usuario del usuario actual.
+- **Marcas de deshacer.** `undone.json` se escribe solo si se tomaron todas las entradas de la
+  corrida. Si hubo entradas de otro usuario, en `undone-tweaks.txt` se anotan solo las
+  restauradas y la corrida sigue pendiente para su dueño; un deshacer completo posterior salta
+  lo ya anotado. Si después de restaurar no se puede escribir la marca, el resultado incluye un
+  fallo y el código de salida es `2`.
+- **Qué pueden ver otros.** Usuarios puede leer diarios y resultados de la carpeta de
+  máquina; solo contienen los valores anteriores de los ajustes, no datos personales.
+- **Bloqueo posible.** Un usuario puede crear `windows-tuneup` en `ProgramData` antes que la
+  herramienta; las corridas elevadas se detienen hasta que un administrador borre esa carpeta.
 
 ### Parámetros
 
@@ -254,6 +341,19 @@ Queda fuera de la carpeta del script, así que deshacer funciona aunque se borre
 | `-Json` | Salida estructurada (para la skill) |
 | `-Lang es\|en` | Idioma de los mensajes |
 | `-Force` | Permite builds no soportados; nunca salta la lista negra |
+
+Combinaciones que no tienen sentido se rechazan antes de leer nada (código `1`): `-Tweak` sin
+`-Undo`, `-Status` con `-Undo`, y `-Status` o `-Undo` junto a `-Profile`, `-Include`,
+`-Exclude`, `-WhatIf` o `-Yes`. Las rutas relativas de `-StateRoot`, `-CatalogPath` y
+`-ProfilesPath` se resuelven contra la ubicación actual de PowerShell.
+
+Con `-Json` la salida estándar es un solo documento JSON en ASCII (todo carácter no ASCII va
+como `\uXXXX`, así que la página de códigos de la consola no lo altera), con las claves en
+camelCase y el arreglo `warnings`. El plan indica `requiresAdmin` cuando tiene cambios de
+sistema; sin `-Json` y sin elevar, `-WhatIf` lo recuerda con una línea. Un error anterior a que
+el script cargue su módulo y sus textos (por ejemplo, un parámetro desconocido o un `-Lang`
+fuera de `es`/`en`) lo informa PowerShell por la salida de errores, sin documento JSON, con
+código `1`.
 
 ### Medición
 
@@ -294,8 +394,14 @@ reporte de medición adjunto.
 
 ### Antes de cambiar nada (se detiene)
 
-- No es administrador (con `pwsh` se relanza con `powershell.exe`).
+- Hay ajustes de máquina en el plan y no es administrador (con `pwsh` se relanza con
+  `powershell.exe`). Un plan con cualquier cambio de sistema se rechaza entero: hay que elevar o
+  dejar esos ajustes fuera con `-Exclude`. Un plan solo de usuario corre sin elevar y su diario va
+  a la carpeta de usuario.
 - Windows Server o build no soportado (salvo `-Force`).
+- La carpeta de estado de máquina no es confiable (ver "Estado en disco"): pide borrarla como
+  administrador. Si la que no es confiable es la carpeta que la contiene, no se crea nada.
+- `-Undo` de una corrida de la carpeta de máquina sin ser administrador.
 - No se puede escribir el diario: sin datos para deshacer no se aplica nada.
 
 ### Avisa y pide confirmación
@@ -315,9 +421,28 @@ reporte de medición adjunto.
 
 ### Después
 
-- Códigos de salida: `0` todo aplicado, `2` parcial, `1` abortado antes de cambiar.
-- `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar.
-- `-Undo` sigue ante errores y lista lo que no pudo restaurar con la instrucción manual.
+- Códigos de salida: `0` todo hecho; `2` no todo se completó, puede haberse cambiado algo: hay que
+  leer el resumen (algún ajuste falló, no tuvo efecto o no se pudo guardar su diario, o no se pudo
+  guardar `result.json`); `1` abortado antes de cambiar nada. Un ajuste que no se aplicó porque no
+  se pudo escribir su diario cuenta como no hecho: si no se cambió nada es `1`, si algo sí, `2`.
+  Si se intentó aplicar y todo falló (o no tuvo efecto), también es `2`, aunque no haya cambiado
+  nada. En `-Undo`: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (quedan fallos o
+  ajustes de otro usuario), `1` nada restaurado.
+- `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar
+  (Plan 4: hoy solo informa la deriva).
+- `-Undo` sigue ante errores y lista lo que no pudo restaurar (Plan 4: la instrucción manual
+  para cada uno todavía no se da).
+- `-Undo` y `-Status` ignoran, con advertencia, las corridas y marcas no confiables de la
+  carpeta de máquina, las entradas de máquina de la carpeta de usuario y las entradas de
+  usuario de corridas de otro usuario.
+- Si `-Undo` restaura pero no puede registrarlo, lo informa como fallo (código `2`).
+- `-Undo` marca la corrida como deshecha solo cuando restauró todos sus ajustes; si alguno falla
+  (o es de otro usuario) la corrida sigue pendiente y `-Undo last` reintenta solo lo que falta.
+- Deshacer una corrida que se volvió a aplicar restaura el valor que había antes de *esa* corrida
+  (que puede ser un valor ya desviado); las corridas anteriores siguen pendientes hasta que se
+  deshagan.
+- Deshacer ajustes sueltos fuera de orden puede dejar una clave de registro vacía que creó la
+  corrida; solo deshacer en orden inverso la elimina. Una corrida ya deshecha no se deshace otra vez.
 - Todo queda local; no se envía nada a ningún servidor.
 
 ## 8. Skill de Claude
