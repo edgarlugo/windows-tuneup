@@ -170,6 +170,37 @@ function Restore-BadOneActionState { param($Tweak, $State) }
         ($output | Where-Object { $_ -like '*FixtureToggle*' }) | Should -BeNullOrEmpty
     }
 
+    It 'refuses to load a script of the same name from another file' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'same-name.ps1' = (New-ContractFor 'SameName') })
+        $other = New-ActionFolder @{ 'same-name.ps1' = (New-ContractFor 'SameName') }
+        { Import-TuneupActionLibrary -Path $other } | Should -Throw "*Action script 'same-name' is already loaded from*"
+    }
+
+    It 'exports every engine function even when the session already has one of that name' {
+        $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $copy | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\engine') -Destination (Join-Path $copy 'engine') -Recurse
+        $module = Join-Path $copy 'engine\Tuneup.psm1'
+        $command = "function global:Get-TuneupState { 'global' }; Import-Module '$module'; (Get-Module Tuneup).ExportedFunctions.Keys"
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -Command $command)
+        $output -contains 'Get-TuneupState' | Should -BeTrue
+        $output -contains 'Set-TuneupDesired' | Should -BeTrue
+    }
+
+    It 'exports everything from a second copy imported in the same session' {
+        $copies = foreach ($index in 1, 2) {
+            $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path $copy | Out-Null
+            Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\engine') -Destination (Join-Path $copy 'engine') -Recurse
+            Join-Path $copy 'engine\Tuneup.psm1'
+        }
+        $command = "Import-Module '$($copies[0])'; Import-Module '$($copies[1])'; " +
+            "(Get-Module Tuneup | Where-Object { `$_.Path -eq '$($copies[1])' }).ExportedFunctions.Count; (Get-Command Get-TuneupState).Module.Path"
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -Command $command)
+        [int]$output[0] | Should -BeGreaterThan 20
+        $output[1] | Should -Be $copies[1]
+    }
+
     It 'ignores a folder that does not exist' {
         { Import-TuneupActionLibrary -Path (Join-Path $TestDrive 'none') } | Should -Not -Throw
     }

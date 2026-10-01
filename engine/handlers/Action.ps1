@@ -27,6 +27,10 @@ function Import-TuneupActionLibrary {
         $name = $file.BaseName
         $pascal = ConvertTo-TuneupPascalName -Name $name
         if ($pascal -like 'Tuneup*') { throw "Action script $($file.Name): names starting with tuneup are reserved for the engine" }
+        $loadedFrom = $script:TuneupActionScripts[$name]
+        if ($null -ne $loadedFrom -and $loadedFrom -ne $file.FullName) {
+            throw "Action script '$name' is already loaded from $loadedFrom; $($file.FullName) cannot replace it"
+        }
         $tokens = $null
         $parseErrors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
