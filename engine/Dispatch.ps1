@@ -8,6 +8,7 @@ $script:TuneupHandlers = [ordered]@{
     task       = [pscustomobject]@{ Name = 'Task'; ReadNeedsAdmin = $false }
     appx       = [pscustomobject]@{ Name = 'Appx'; ReadNeedsAdmin = $true }
     capability = [pscustomobject]@{ Name = 'Capability'; ReadNeedsAdmin = $true }
+    feature    = [pscustomobject]@{ Name = 'Feature'; ReadNeedsAdmin = $true }
 }
 
 function Get-TuneupHandlerType {
