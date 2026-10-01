@@ -239,3 +239,26 @@ Describe 'power catalog' {
         $null -eq $usb.set.PSObject.Properties['dc'] | Should -BeTrue
     }
 }
+
+Describe 'gaming catalog' {
+    It 'ships the gaming tweaks in this order' {
+        $expected = @(
+            'gaming.game-mode-on',
+            'gaming.game-dvr-off',
+            'gaming.app-capture-off',
+            'gaming.background-recording-off',
+            'gaming.gamebar-controller-off',
+            'gaming.mouse-accel-off',
+            'gaming.mouse-accel-threshold-1',
+            'gaming.mouse-accel-threshold-2',
+            'gaming.windowed-optimizations',
+            'gaming.hags-on',
+            'gaming.memory-integrity-off'
+        ) -join ','
+        Get-CategoryId 'gaming' | Should -Be $expected
+    }
+
+    It 'leaves memory integrity as the only high-risk gaming tweak' {
+        @(Get-CategoryTweak 'gaming' | Where-Object { $_.risk -eq 'high' } | ForEach-Object { $_.id }) -join ',' | Should -Be 'gaming.memory-integrity-off'
+    }
+}
