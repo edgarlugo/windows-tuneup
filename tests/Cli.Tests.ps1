@@ -422,6 +422,20 @@ Describe 'tuneup.ps1' {
         (Invoke-Tuneup @('-Profile', 'system', '-WhatIf')).Output | Should -Match 'To apply the system changes, open PowerShell as administrator'
     }
 
+    It 'treats a policy value under HKCU as needing elevation' {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-Include', 'test.policy', '-WhatIf', '-Json')).Output
+        ($json.items | Where-Object { $_.id -eq 'test.policy' }).scope | Should -Be 'user'
+        ($json.items | Where-Object { $_.id -eq 'test.policy' }).action | Should -Be 'apply'
+        $json.requiresAdmin | Should -BeTrue
+    }
+
+    It 'refuses a policy value under HKCU without elevation, writing nothing' -Skip:$Elevated {
+        $result = Invoke-Tuneup @('-Include', 'test.policy', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'The plan has system changes: open PowerShell as administrator.'
+        Test-Path -LiteralPath "$Key\Policies" | Should -BeFalse
+    }
+
     It 'refuses system changes without elevation' -Skip:$Elevated {
         $result = Invoke-Tuneup @('-Profile', 'system', '-Yes', '-Json')
         $result.ExitCode | Should -Be 1
@@ -483,6 +497,15 @@ Describe 'tuneup.ps1' {
         $result = Invoke-Tuneup @('-Status')
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'incomplete last journal line'
+    }
+
+    It 'refuses to undo a run with a policy value under HKCU when not elevated' -Skip:$Elevated {
+        $run = New-TuneupRun -StateRoot $script:Root -WarningAction SilentlyContinue
+        $policy = New-TestTweak -Id 'test.policy' -Scope 'user' -Set ([pscustomobject]@{ path = 'HKCU:\Software\windows-tuneup-test\Policies\Sub'; name = 'Policy'; kind = 'DWord'; value = 1 })
+        Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak $policy -State ([pscustomobject]@{ exists = $false }) -Root 'custom'
+        $result = Invoke-Tuneup @('-Undo', $run.Id, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'administrator'
     }
 
     It 'refuses to undo a run with a machine-scope entry when not elevated' -Skip:$Elevated {

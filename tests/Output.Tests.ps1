@@ -427,3 +427,13 @@ Describe 'Write-TuneupMeasureReport' {
         @($json.warnings) -join ',' | Should -Be 'careful'
     }
 }
+
+Describe 'Write-TuneupPlanReport with a policy value under HKCU' {
+    It 'requires elevation, because the policy keys of HKCU are read-only for a standard user' {
+        $tweak = New-TestTweak -Id 'test.policy' -Scope 'user' -Set ([pscustomobject]@{ path = 'HKCU:\Software\Policies\windows-tuneup-test'; name = 'X'; kind = 'DWord'; value = 1 })
+        $plan = @([pscustomobject]@{ Id = $tweak.id; Tweak = $tweak; Action = 'apply'; Reason = $null })
+        (Write-TuneupPlanReport -Plan $plan -Environment (New-TestEnvironment) -Json | ConvertFrom-Json).requiresAdmin | Should -BeTrue
+        $skipped = @([pscustomobject]@{ Id = $tweak.id; Tweak = $tweak; Action = 'skip'; Reason = 'already-applied' })
+        (Write-TuneupPlanReport -Plan $skipped -Environment (New-TestEnvironment) -Json | ConvertFrom-Json).requiresAdmin | Should -BeFalse
+    }
+}

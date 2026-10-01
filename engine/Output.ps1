@@ -53,7 +53,7 @@ function Write-TuneupPlanReport {
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
-    $requiresAdmin = @($items | Where-Object { $_.action -eq 'apply' -and $_.scope -eq 'machine' }).Count -gt 0
+    $requiresAdmin = @($Plan | Where-Object { $_.Action -eq 'apply' -and (Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak) }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1

@@ -56,6 +56,17 @@
       "sources": ["https://example.com/test"]
     },
     {
+      "id": "test.policy",
+      "title": { "es": "Prueba de directiva de usuario", "en": "User policy test" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry", "scope": "user",
+      "set": { "path": "HKCU:\\Software\\windows-tuneup-test\\Policies\\Sub", "name": "Policy", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
+    },
+    {
       "id": "test.action",
       "title": { "es": "Prueba de acción", "en": "Action test" },
       "why": { "es": "Prueba", "en": "Test" },

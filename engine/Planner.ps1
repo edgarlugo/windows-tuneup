@@ -37,6 +37,15 @@ function Test-TuneupPolicyTweak {
     ($Tweak.type -eq 'registry') -and ([string]$Tweak.set.path -match '\\Policies\\')
 }
 
+function Test-TuneupTweakNeedsAdmin {
+    param([Parameter(Mandatory)]$Tweak)
+    # A machine-scope tweak does. So does a policy value under HKCU: the ACL of HKCU\Software\Policies
+    # and of CurrentVersion\Policies only lets a standard user read them. Such a tweak keeps scope user
+    # because the data is the user's, but an elevated process applies it and writes the HKCU of the
+    # account that is elevated.
+    ($Tweak.scope -ceq 'machine') -or (Test-TuneupPolicyTweak -Tweak $Tweak)
+}
+
 function Get-TuneupCleanList {
     param([AllowEmptyCollection()][AllowNull()][string[]]$Values)
     @($Values | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })

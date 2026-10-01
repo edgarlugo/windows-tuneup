@@ -133,7 +133,7 @@ try {
         $needsAdmin = ($run.Root -eq 'machine')
         if (-not $needsAdmin) {
             # Its warnings come again, once, from the undo itself.
-            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue } | Where-Object { $_.tweak.scope -eq 'machine' }).Count -gt 0
+            $needsAdmin = @(Invoke-TuneupStep { Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue } | Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.tweak }).Count -gt 0
         }
         if ($needsAdmin -and -not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin') }
         $undoResults = @(Invoke-TuneupStep { Invoke-TuneupUndo -Run $run -TweakId $Tweak })
@@ -190,7 +190,7 @@ try {
         Write-TuneupPlanReport -Plan $plan -Environment $environment -Warnings $script:Warnings.ToArray() -Json:$Json
         exit 0
     }
-    $machineChanges = @($toApply | Where-Object { $_.Tweak.scope -eq 'machine' }).Count
+    $machineChanges = @($toApply | Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak }).Count
     if ($machineChanges -and -not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.notAdmin') }
     if (-not $Yes) {
         if ($Json) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.jsonNeedsYes') }

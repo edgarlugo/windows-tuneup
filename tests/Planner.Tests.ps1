@@ -225,3 +225,23 @@ Describe 'New-TuneupPlan with hardware requirements' {
         Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     }
 }
+
+Describe 'Test-TuneupTweakNeedsAdmin' {
+    It 'is true for a machine tweak and for a policy value under HKCU, whatever the case of the path' -TestCases @(
+        @{ Scope = 'machine'; Path = 'HKLM:\SOFTWARE\windows-tuneup-test'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Policies\Microsoft\Windows\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\SOFTWARE\POLICIES\Microsoft\Windows\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Expected = $false }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\PoliciesNot\X'; Expected = $false }
+    ) {
+        param($Scope, $Path, $Expected)
+        $tweak = New-TestTweak -Scope $Scope -Set ([pscustomobject]@{ path = $Path; name = 'X'; kind = 'DWord'; value = 1 })
+        Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -Be $Expected
+    }
+
+    It 'is false for a tweak of another type, even with Policies in its name' {
+        $tweak = New-TestTweak -Type 'service' -Scope 'user' -Set ([pscustomobject]@{ name = 'Policies'; startup = 'Disabled' })
+        Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -BeFalse
+    }
+}
