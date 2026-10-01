@@ -103,3 +103,21 @@ Describe 'ui catalog' {
         Get-CategoryId 'ui' | Should -Be $expected
     }
 }
+
+Describe 'ai catalog' {
+    It 'ships the ai tweaks in this order' {
+        $expected = @(
+            'ai.copilot-button-off',
+            'ai.copilot-policy-off',
+            'ai.recall-snapshots-off',
+            'ai.recall-unavailable',
+            'ai.click-to-do-off',
+            'ai.notepad-ai-off',
+            'ai.paint-cocreator-off',
+            'ai.paint-image-creator-off',
+            'ai.paint-generative-fill-off',
+            'ai.fabric-service-manual'
+        ) -join ','
+        Get-CategoryId 'ai' | Should -Be $expected
+    }
+}
