@@ -12,7 +12,7 @@
 
 **Planes anteriores:** `docs/superpowers/plans/2026-09-30-plan-1-motor-nucleo.md`, `docs/superpowers/plans/2026-09-30-plan-2-manejadores-salud-medicion.md` y `docs/superpowers/plans/2026-10-01-plan-3-catalogo-perfiles.md`. Como dicen sus encabezados, **los archivos del repositorio son la fuente de verdad**. Este plan se escribió leyendo `feat/plan-3` (`db1bcf0`, PR #2) y se ejecuta sobre `main` después de mergear ese PR.
 
-**Evidencia:** todo el código de este plan se ejecutó en una copia del repositorio (`feat/plan-3`, `db1bcf0`) en un Windows 11 Pro 26H2 (build 26300) **sin elevar**, aplicando las tareas en orden; el texto de cada archivo de este plan se generó desde esa copia y se comprobó que aplicar las tareas sobre `db1bcf0` da exactamente esos archivos. Resultado sobre esa copia rearmada desde el plan: suite completa en verde (`Tests Passed: 1152, Failed: 0, Skipped: 1`) y PSScriptAnalyzer sin hallazgos. Lo que se probó de verdad y lo que queda sin verificar está en la sección final "Qué se probó y qué no".
+**Evidencia:** todo el código de este plan se ejecutó en una copia del repositorio (`feat/plan-3`, `db1bcf0`) en un Windows 11 Pro 26H2 (build 26300) **sin elevar**, aplicando las tareas en orden; el texto de cada archivo de este plan se generó desde esa copia y se comprobó que aplicar las tareas sobre `db1bcf0` da exactamente esos archivos. Resultado sobre esa copia rearmada desde el plan: suite completa en verde (`Tests Passed: 1178, Failed: 0, Skipped: 1`) y PSScriptAnalyzer sin hallazgos. Lo que se probó de verdad y lo que queda sin verificar está en la sección final "Qué se probó y qué no".
 
 ---
 
@@ -25,7 +25,7 @@ Se heredan las de los Planes 1 a 3:
 - **Las funciones emiten elementos; quien llama envuelve con `@()`.** `ConvertTo-Json` siempre con `-Depth 10`. Comparaciones con null: `$null -eq $x`.
 - **Los fallos se lanzan, nunca se tragan.** Un `catch` solo existe para convertir el error en otro más claro, en un resultado explícito o en un aviso.
 - Pruebas con **Pester 5.9.1** en Windows PowerShell 5.1: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 [-Path tests/X.Tests.ps1]`. `BeforeEach`/`AfterEach` solo dentro de un `Describe`.
-- **Las pruebas nunca modifican el sistema real.** El registro solo se escribe bajo `HKCU:\Software\windows-tuneup-test` (también con `reg.exe` en `tests/ManualHint.Tests.ps1`), el estado va a `$TestDrive` con `-StateRoot`, y lo que tocaría el sistema (Restaurar sistema, SFC, DISM, la lectura de Restaurar sistema) se simula con `Mock -ModuleName Tuneup`. Nuevo: `tests/Interrupt.Tests.ps1` abre PowerShell en consolas ocultas para probar Ctrl+C, y `tests/Package.Tests.ps1` arma zips e instala en `$TestDrive` (nunca en `Program Files`: la prueba que instala sin `-Destination` se salta elevada).
+- **Las pruebas nunca modifican el sistema real.** El registro solo se escribe bajo `HKCU:\Software\windows-tuneup-test` (también con `New-ItemProperty` y `Remove-ItemProperty` ejecutados en un PowerShell hijo en `tests/ManualHint.Tests.ps1`), el estado va a `$TestDrive` con `-StateRoot`, y lo que tocaría el sistema (Restaurar sistema, SFC, DISM, la lectura de Restaurar sistema) se simula con `Mock -ModuleName Tuneup`. Nuevo: `tests/Interrupt.Tests.ps1` abre PowerShell en consolas ocultas para probar Ctrl+C, y `tests/Package.Tests.ps1` arma zips e instala en `$TestDrive` (nunca en `Program Files`: la prueba que instala sin `-Destination` se salta elevada).
 - Lint: `powershell -NoProfile -ExecutionPolicy Bypass -File build/lint.ps1`. Verbo aprobado, sustantivo en singular, `PSReviewUnusedParameter` activo.
 - Commits **sin** `Co-Authored-By`. **Nunca `git add -A` ni `git add .`**: cada paso de commit nombra sus archivos.
 - Directorio del repo: `C:\Users\Edgar\Documents\GitHub\windows-tuneup` (comandos relativos a esa raíz, rama `main` o una rama nueva desde `main`).
@@ -160,13 +160,13 @@ Agregar al final de `docs/superpowers/specs/2026-09-30-windows-tuneup-design.md`
 
 Decisiones tomadas al planificar el menú, los avisos antes de aplicar, Ctrl+C, `transcript.log`, la reaplicación, la distribución y la prueba de extremo a extremo. Donde contradicen secciones anteriores, manda esta.
 
-1. **Comandos compartidos.** La orquestación sale de `tuneup.ps1` a `engine/Commands.ps1`: `Invoke-TuneupCli` (revisa los parámetros, resuelve las carpetas y despacha), `Invoke-TuneupApplyCommand`, `Invoke-TuneupStatusCommand`, `Invoke-TuneupUndoCommand`, `Invoke-TuneupHealthCommand`, `Invoke-TuneupMeasureCommand` y la parte común de aplicar, `Invoke-TuneupPlannedApply`. Reciben un contexto (`New-TuneupContext`: `-Json`, carpetas, avisos, `Io`, código de salida y último resultado), escriben su reporte (el JSON sale por la salida estándar) y dejan el código en `$Context.ExitCode`; nunca llaman a `exit`. Un ayudante que devuelve valores no escribe reportes (con `-Json` el reporte se mezclaría con lo que devuelve). `tuneup.ps1` queda en los parámetros, el relanzamiento desde `pwsh`, la carga del módulo y los textos, y `exit $context.ExitCode` en un `finally`. En las funciones del motor `-WhatIf` se llama `-PlanOnly` (un parámetro `WhatIf` es de ShouldProcess).
+1. **Comandos compartidos.** La orquestación sale de `tuneup.ps1` a `engine/Commands.ps1`: `Invoke-TuneupCli` (revisa los parámetros, resuelve las carpetas y despacha), `Invoke-TuneupApplyCommand`, `Invoke-TuneupStatusCommand`, `Invoke-TuneupUndoCommand`, `Invoke-TuneupHealthCommand`, `Invoke-TuneupMeasureCommand` y la parte común de aplicar, `Invoke-TuneupPlannedApply`. Reciben un contexto (`New-TuneupContext`: `-Json`, carpetas, avisos, `Io`, código de salida y último resultado), escriben su reporte (el JSON sale por la salida estándar) y dejan el código en `$Context.ExitCode`; nunca llaman a `exit`. Un ayudante que devuelve valores no escribe reportes (con `-Json` el reporte se mezclaría con lo que devuelve). `tuneup.ps1` queda en los parámetros, el relanzamiento desde `pwsh`, la carga del módulo y los textos, y `exit $context.ExitCode` en un `finally`. El código de salida del contexto **arranca en `1`** y cada comando pone `0` al terminar bien, así un comando que muere antes de informar nunca parece exitoso; `Invoke-TuneupGuarded` convierte lo que lance un comando en un informe de error con código `1` (lo pone antes de escribir el informe, por si el informe también falla). Las líneas de texto de los comandos (cancelado, esperas y fases de salud) salen por `Io.Write`, igual que las preguntas. En las funciones del motor `-WhatIf` se llama `-PlanOnly` (un parámetro `WhatIf` es de ShouldProcess).
 2. **Menú.** `tuneup.ps1` sin comando ni opciones de aplicar, y sin `-Json`, abre el menú (`engine/Menu.ps1`); con `-Json` y nada más sigue siendo el plan de `base`. Toda respuesta es una línea (número, letra o Enter solo), leída con `Read-Host` a través de `$Context.Io`, así funciona en la consola de Windows PowerShell, en Windows Terminal y con la entrada redirigida (el fin de la entrada es volver, hasta salir). Las pruebas pasan un `Io` con respuestas guionadas que falla si se le pide una más. Opciones: Optimizar (perfiles con `[x]`, `(administrador)` y `(siempre)` para `base`; ajustes de riesgo alto solo si se pide verlos y escribiendo la palabra de confirmación completa; una pregunta por ajuste `ask` del plan con sí, no, sí a todos los que quedan y no a todos los que quedan, que quedan omitidos con el motivo `declined`; el plan; si necesita administrador y no lo es, se muestra y se vuelve), Estado (y `r` para volver a aplicar lo revertido), Deshacer (las 15 corridas más nuevas con su estado; toda la corrida o un ajuste), Salud (pide confirmar; si la revisión recomienda reparar, ofrece hacerlo sin revisar otra vez: `Invoke-TuneupHealth -Previous`) y Medir (segundos de espera y comparar con la última). Las marcas son texto, nunca solo color. El código de salida del menú es `0`.
 3. **Avisos antes de aplicar** (`engine/Preflight.ps1`): `pending-reboot`, `low-disk` (menos de 2 GB libres en el disco del sistema), `restore-disabled` / `restore-blocked` (solo para cambios de sistema y elevado: se lee `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SPP\Clients`, que solo pueden leer los administradores, y la directiva `DisableSR`/`DisableConfig`), `managed-device` y `untrusted-location` (elevado y corriendo desde una carpeta que otras cuentas pueden cambiar, con `Test-TuneupTrustedExecutable`). **Ninguno detiene la corrida**: con confirmación se muestran junto al plan; con `-Yes` se muestran y se sigue; con `-Json` van en el arreglo `preflight` (`id`, `message`) del plan y del resultado de aplicar (y de `result.json`). Solo `restore-disabled` tiene algo que hacer: en modo interactivo se pregunta si activar Restaurar sistema en el disco del sistema (`Enable-ComputerRestore`) antes de la confirmación; nunca con `-Yes` ni `-Json`. Activarlo no se anota en el diario (no es un ajuste).
 4. **Ctrl+C** (`engine/Interrupt.ps1`). Mientras se aplica, `[Console]::TreatControlCAsInput` convierte Ctrl+C en una tecla, que se busca antes de cada ajuste (`Invoke-TuneupPlan -StopRequested`): el ajuste en curso termina y los que faltan quedan `skipped` con el motivo `interrupted`, sin entrada en el diario. El resumen los cuenta aparte (`summary.interrupted`, `interrupted`), y el código es `2` (o `1` si se detuvo antes del primer ajuste). Un programa nativo (cmd, sc.exe, DISM, winget) vuelve a activar el Ctrl+C normal de la consola, así que cada revisión vuelve a poner la trampa; si Ctrl+C llega mientras corre uno de ellos, PowerShell se detiene en el acto: el `finally` de aplicar guarda `result.json` con lo hecho, el ajuste cortado como `failed` (su entrada del diario permite deshacerlo) y el resto como `interrupted`, y `tuneup.ps1` sale con ese código desde su `finally`. Sin consola propia (entrada redirigida) no hay trampa. Probado con una consola oculta que recibe la tecla (WriteConsoleInput) o la señal (GenerateConsoleCtrlEvent).
 5. **`transcript.log`** (`engine/Transcript.ps1`). Lo escribe la herramienta, no `Start-Transcript` (que guarda cuenta, equipo y línea de comandos, y Usuarios puede leer la carpeta de máquina): encabezado con versión, corrida y hora, lo pedido (perfiles y listas, o reaplicar), el plan con sus avisos, el reporte y los avisos; cada `-Undo` de esa corrida agrega su reporte. Siempre en texto para personas, también con `-Json`. Se escribe con `Write-TuneupStateFile` (las mismas reglas de confianza); si falla, es un aviso y la corrida sigue.
 6. **`-Status -Reapply`.** `-Reapply` exige `-Status`, y con él `-Status` acepta `-Yes` y `-WhatIf` (no `-Profile`, `-Include` ni `-Exclude`). Planifica con el catálogo actual solo los ajustes en `drift`, por nombre (`New-TuneupPlan -NoBase -Include`): un ajuste `ask` o conservado por un perfil se vuelve a aplicar; la compatibilidad sigue rigiendo. Un ajuste revertido que ya no está en el catálogo se deja fuera con un aviso. Es una corrida nueva; los documentos `plan` y `apply` llevan `source` (`profiles` o `reapply`).
-7. **Deshacer a mano.** Cada resultado de `-Undo` lleva `manual` (líneas para restaurar a mano cuando falló: `reg.exe add|delete`, `sc.exe config|start`, `schtasks.exe /Change`, `DISM.exe /Add-Capability|/Enable-Feature`, `powercfg.exe`, `winget install`; para una acción, una frase) y `signOutRequired`; el documento `undo` suma `signOutRequired`.
+7. **Deshacer a mano.** Cada resultado de `-Undo` lleva `manual` y `signOutRequired`; el documento `undo` suma `signOutRequired`. `manual` son líneas de **PowerShell** (para pegar en PowerShell como administrador) que restauran a mano un ajuste que falló, armadas con la definición y el estado guardado; cada nombre y valor va en un literal entre comillas simples con las comillas dobladas (también las tipográficas) y un salto de línea como `[char]`, así nada se expande ni se ejecuta al pegar. Por tipo: registro, `New-ItemProperty -LiteralPath … -Name … -PropertyType <tipo> -Value … -Force` (DWORD con signo; binarios `([byte[]](0x01,0x02))` y `([byte[]]@())`; MultiString `@('a','b')`; `[Microsoft.Win32.Registry]::SetValue` para los tipos None y Unknown), o `Remove-ItemProperty` si el valor no existía, más un `Remove-Item` por cada clave que el ajuste creó, que solo borra la clave si quedó vacía y si no lo avisa; servicio, `Set-Service -StartupType Automatic|Manual|Disabled` (`sc.exe config … start= delayed-auto` solo para un nombre de una palabra, porque Windows PowerShell 5.1 no tiene inicio retrasado) y `Start-Service` si corría; tarea, `Enable-ScheduledTask` o `Disable-ScheduledTask`; capacidad, `Add-WindowsCapability` o `Remove-WindowsCapability`; característica, `Enable-WindowsOptionalFeature` o `Disable-WindowsOptionalFeature` con `-NoRestart`; energía, `powercfg.exe /setactive`, `/setacvalueindex` y `/setdcvalueindex` (solo con GUID y números validados) y `/setactive SCHEME_CURRENT`; Appx, `winget install --id <id> --source msstore` (una sola fuente, `Get-TuneupWingetManualCommand`, que también usa la nota de la restauración); para una acción, una frase. Si las líneas no se pueden armar (un valor raro en el estado guardado), `manual` queda vacío y el fallo de la restauración se informa igual. `signOutRequired` es verdadero solo en un ajuste restaurado cuya definición lo pide, nunca en uno que falló o se omitió.
 8. **Versión.** `engine/Version.ps1` (`Get-TuneupVersion`, hoy `0.1.0`). Todo documento JSON lleva `toolVersion` y `run.json` también.
 9. **Distribución.** `build/package.ps1` arma `windows-tuneup-<versión>.zip` (carpeta `windows-tuneup-<versión>/` con `tuneup.ps1`, `engine`, `i18n`, `catalog/*.json`, `profiles`, `actions`, `docs/es`, `docs/en`, `README.md` y `LICENSE`; en un checkout de git, solo archivos seguidos), con entradas ordenadas y fechadas con el último commit (el mismo commit da el mismo zip en la misma máquina), `install.ps1` con la versión y el SHA256 del zip escritos, `SHA256SUMS` (formato de `sha256sum`) y `release-notes.md`. `install.ps1` comprueba el SHA256 antes de extraer, rechaza entradas fuera de su carpeta, instala elevado en `%ProgramFiles%\windows-tuneup` (reemplaza solo una copia anterior de windows-tuneup) y sin elevar en la carpeta actual con una advertencia; corre en su propio ámbito y lanza errores, nunca `exit`, así `irm | iex` no deja nada en la sesión ni la cierra. Sus mensajes están en inglés. `.github/workflows/release.yml`: una etiqueta `v*` igual a `Get-TuneupVersion` corre lint y pruebas, empaqueta y deja un **borrador** de release; se publica a mano tras adjuntar los reportes.
 10. **CI sin elevar.** Un segundo trabajo corre la suite con `build/test-standard-user.ps1`: desde un proceso elevado la lanza con `runas /trustlevel:0x20000` (la misma cuenta con un token de usuario básico) y espera sus archivos de resultado; falla si el proceso sigue elevado o no arranca.
@@ -298,7 +298,7 @@ git commit -m "feat: versión de la herramienta en el JSON y en run.json"
 - Modify: `tuneup.ps1` (reemplazo completo), `tests/TestHelpers.ps1`
 - Test: `tests/Commands.Tests.ps1`, `tests/Cli.Tests.ps1` (sin cambios: tiene que seguir en verde)
 
-Diseño: `New-TuneupContext` guarda lo que comparte una invocación (`Json`, carpetas, `Force`, avisos, `Io`, `ExitCode`, `Result`). Cada comando escribe su reporte y deja el código en el contexto; con `-Json` el documento sale por la salida estándar de la función y llega a la de `tuneup.ps1`. Los errores que terminan un comando se escriben con `Write-TuneupCommandError` (código `1`). `Invoke-TuneupCli` tiene los mismos parámetros que `tuneup.ps1` salvo `-Lang` y `-Json`, y `-WhatIf` se llama `-PlanOnly`. El comportamiento no cambia: `tests/Cli.Tests.ps1` (59 pruebas y 1 salto sin elevar) es la red de seguridad, y sus pruebas corren `tuneup.ps1` en otro proceso.
+Diseño: `New-TuneupContext` guarda lo que comparte una invocación (`Json`, carpetas, `Force`, avisos, `Io`, `ExitCode`, `Result`). Cada comando escribe su reporte y deja el código en el contexto; con `-Json` el documento sale por la salida estándar de la función y llega a la de `tuneup.ps1`. Los errores que terminan un comando se escriben con `Write-TuneupCommandError` (código `1`). El código de salida del contexto arranca en `1` y cada comando pone `0` al terminar bien: un comando que lanza una excepción antes de informar (por ejemplo, un disco lleno al escribir el JSON) no sale con `0`. `Invoke-TuneupGuarded` ejecuta la línea de comandos de `tuneup.ps1`, pone el `1` antes de escribir el informe de error y deja que lance un informe que tampoco se puede escribir. Las líneas de texto de los comandos (cancelado, espera de la medición, salud) salen por `Io.Write`, no por `Write-Host`. `Invoke-TuneupCli` tiene los mismos parámetros que `tuneup.ps1` salvo `-Lang` y `-Json`, y `-WhatIf` se llama `-PlanOnly`. El comportamiento no cambia: `tests/Cli.Tests.ps1` (59 pruebas y 1 salto sin elevar) es la red de seguridad, y sus pruebas corren `tuneup.ps1` en otro proceso.
 
 Dos trampas que la copia de prueba encontró: (1) `Import-TuneupContextDefinition` primero escribía el error del catálogo y devolvía `$null`, pero con `-Json` el documento de error salía junto con el valor devuelto y el comando seguía con un "catálogo" que era un texto JSON (por eso ahora devuelve `Problems` y el comando escribe el error); (2) PSScriptAnalyzer marcaba como sin usar los parámetros que solo aparecen dentro del bloque de un paso (por eso las tablas `$undoArguments`, `$healthArguments`, `$planArguments`).
 
@@ -382,6 +382,7 @@ Describe 'Commands' {
         Invoke-TuneupApplyCommand -Context $context 6>$null
         $context.ExitCode | Should -Be 1
         $context.Io.Output -join "`n" | Should -Match 'Apply 2 changes\? \(y/n\)'
+        $context.Io.Output -join "`n" | Should -Match 'Cancelled'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
 
@@ -447,6 +448,62 @@ Describe 'Commands' {
         $context.ExitCode | Should -Be 0
     }
 
+    It 'starts with exit code 1, so a command that fails to report never looks successful' {
+        (New-TuneupContext).ExitCode | Should -Be 1
+        $context = New-TestContext -Json
+        Mock -ModuleName Tuneup Write-TuneupJson { throw 'disk full' }
+        { Invoke-TuneupStatusCommand -Context $context } | Should -Throw 'disk full'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'turns what a command throws into an error document and exit code 1' {
+        $context = New-TestContext -Json
+        $context.ExitCode = 0
+        $documents = @(Get-JsonOutput { Invoke-TuneupGuarded -Context $context -Command { throw 'boom' } })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'error'
+        $documents[0].message | Should -Be 'boom'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'leaves exit code 1 when the error report cannot be written either' {
+        $context = New-TestContext -Json
+        $context.ExitCode = 0
+        Mock -ModuleName Tuneup Write-TuneupJson { throw 'disk full' }
+        { Invoke-TuneupGuarded -Context $context -Command { throw 'boom' } } | Should -Throw 'disk full'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'leaves what a command wrote and its code alone when nothing is thrown' {
+        $context = New-TestContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupStatusCommand -Context $context } })
+        $documents[0].command | Should -Be 'status'
+        $context.ExitCode | Should -Be 0
+    }
+
+    It 'shows the waiting line of a measurement through Io' {
+        $context = New-TestContext
+        Mock -ModuleName Tuneup Measure-TuneupSystem { [pscustomobject]@{ schemaVersion = 1 } }
+        Mock -ModuleName Tuneup Save-TuneupMeasurement { [pscustomobject]@{ Id = 'm1' } }
+        Mock -ModuleName Tuneup New-TuneupMeasureReport { [pscustomobject]@{ schemaVersion = 1; command = 'measure' } }
+        Mock -ModuleName Tuneup Write-TuneupMeasureReport { }
+        Invoke-TuneupMeasureCommand -Context $context -IdleSeconds 5
+        $context.Io.Output -join "`n" | Should -Match 'Waiting 5 seconds idle'
+        $context.ExitCode | Should -Be 0
+    }
+
+    It 'shows the health lines through Io' {
+        $context = New-TestContext
+        $context.Environment = New-TestEnvironment -IsAdmin $true
+        Mock -ModuleName Tuneup Invoke-TuneupHealth { & $OnPhase 'sfc'; [pscustomobject]@{ recommendation = 'none' } }
+        Mock -ModuleName Tuneup Write-TuneupHealthReport { }
+        Invoke-TuneupHealthCommand -Context $context
+        $text = $context.Io.Output -join "`n"
+        $text | Should -Match 'Checking the health of Windows'
+        $text | Should -Match 'Running SFC: it checks'
+        $context.ExitCode | Should -Be 0
+    }
+
     It 'carries the version of the tool in every JSON document' {
         $context = New-TestContext -Json
         @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context })[0].toolVersion | Should -Be (Get-TuneupVersion)
@@ -482,7 +539,7 @@ Describe 'Invoke-TuneupCli' {
 - [ ] **Step 2: Verificar que fallan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
-Expected: FAIL: `New-TuneupContext` no se reconoce (12 pruebas).
+Expected: FAIL: `New-TuneupContext` no se reconoce (18 pruebas).
 
 - [ ] **Step 3: Preguntas y respuestas**
 
@@ -536,7 +593,8 @@ Crear `engine/Commands.ps1`:
 # ends it is written as an error report with exit code 1.
 
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
-# collected so far, the questions and answers (Io), the exit code and the last result.
+# collected so far, the questions and answers (Io), the exit code and the last result. The exit code
+# starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
 function New-TuneupContext {
     param([switch]$Json, $Io)
     [pscustomobject]@{
@@ -549,7 +607,7 @@ function New-TuneupContext {
         Warnings     = New-Object System.Collections.Generic.List[string]
         Environment  = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
-        ExitCode     = 0
+        ExitCode     = 1
         Result       = $null
     }
 }
@@ -564,6 +622,18 @@ function Write-TuneupCommandError {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [AllowEmptyCollection()][string[]]$Details = @())
     Write-TuneupErrorReport -Message $Message -Details $Details -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = 1
+}
+
+# Runs a command line; whatever it throws becomes an error report and exit code 1. The code is set
+# before the report is written, so if the report cannot be written either, the failure still counts.
+function Invoke-TuneupGuarded {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][scriptblock]$Command)
+    try {
+        & $Command
+    } catch {
+        $Context.ExitCode = 1
+        Write-TuneupCommandError -Context $Context -Message $_.Exception.Message
+    }
 }
 
 function Get-TuneupContextEnvironment {
@@ -617,10 +687,13 @@ function Invoke-TuneupHealthCommand {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
         return
     }
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'health.running') }
     # One line per phase for people; with -Json nothing but the document goes to the output.
     $healthArguments = @{ Repair = $Repair }
-    if (-not $Context.Json) { $healthArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+    if (-not $Context.Json) {
+        $io = $Context.Io
+        $healthArguments.OnPhase = { param($Name) Write-TuneupIoLine -Io $io -Text (Get-TuneupText -Key "health.phase.$Name") }.GetNewClosure()
+    }
     $report = Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupHealth @healthArguments }
     $Context.Result = $report
     Write-TuneupHealthReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
@@ -640,7 +713,7 @@ function Invoke-TuneupMeasureCommand {
             return
         }
     }
-    if ($IdleSeconds -gt 0 -and -not $Context.Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
+    if ($IdleSeconds -gt 0 -and -not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
     $measurement = Invoke-TuneupContextStep -Context $Context -Step { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupMeasurement -Measurement $measurement -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
     $report = New-TuneupMeasureReport -Saved $saved -Against $against
@@ -746,7 +819,7 @@ function Invoke-TuneupPlannedApply {
         }
         Write-TuneupPlanReport -Plan $Plan -Environment $environment
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
@@ -855,7 +928,7 @@ function Invoke-TuneupCli {
 - [ ] **Step 5: Verificar que pasan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
-Expected: PASS (`Tests Passed: 12, Failed: 0`).
+Expected: PASS (`Tests Passed: 18, Failed: 0`).
 
 - [ ] **Step 6: `tuneup.ps1` delgado**
 
@@ -927,9 +1000,7 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
 }
 $context = New-TuneupContext -Json:$Json
 try {
-    Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments
-} catch {
-    Write-TuneupCommandError -Context $context -Message $_.Exception.Message
+    Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments }
 } finally {
     exit $context.ExitCode
 }
@@ -958,10 +1029,10 @@ git commit -m "refactor: comandos compartidos en el motor y tuneup.ps1 delgado"
 
 **Files:**
 - Create: `engine/ManualHint.ps1`, `tests/ManualHint.Tests.ps1`
-- Modify: `engine/Undo.ps1` (`Invoke-TuneupUndo`), `engine/Output.ps1` (`Write-TuneupUndoReport`), `i18n/es.json`, `i18n/en.json`
+- Modify: `engine/Undo.ps1` (`Invoke-TuneupUndo`), `engine/Output.ps1` (`Write-TuneupUndoReport`), `engine/handlers/Appx.ps1` (`Get-TuneupWingetManualCommand`), `i18n/es.json`, `i18n/en.json`
 - Test: `tests/ManualHint.Tests.ps1`, `tests/Undo.Tests.ps1`, `tests/Output.Tests.ps1`
 
-Cada resultado de `-Undo` suma `signOutRequired` (el ajuste restaurado se nota al volver a iniciar sesión; arrastre de la sección 11, 4e) y `manual`: para un ajuste que no se pudo restaurar, las líneas que lo hacen a mano, armadas con la definición y el estado guardado (`reg.exe add|delete`, `sc.exe config|start`, `schtasks.exe /Change`, `DISM.exe`, `powercfg.exe`, `winget install`; una acción recibe una frase). El documento `undo` suma `signOutRequired`. Una prueba corre de verdad las líneas de `reg.exe` sobre la clave de prueba: así se comprobó que `reg.exe` acepta el DWORD sin signo (`4294967294` para `-2`) y que `Get-ItemProperty` devuelve ese valor como `UInt32` (por eso la prueba lee con `GetValue`).
+Cada resultado de `-Undo` suma `signOutRequired` (el ajuste restaurado se nota al volver a iniciar sesión; arrastre de la sección 11, 4e; solo es verdadero en un ajuste restaurado: falso si falló o se omitió) y `manual`: para un ajuste que no se pudo restaurar, las líneas de **PowerShell** que lo hacen a mano, armadas con la definición y el estado guardado (sección 12, punto 7: `New-ItemProperty`/`Remove-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `Enable-WindowsOptionalFeature`, `powercfg.exe` y `winget install`; una acción recibe una frase). Todo nombre y valor va en un literal entre comillas simples con las comillas dobladas, así nada se expande al pegarlo; los GUID y números de `powercfg.exe` se validan y un nombre de servicio solo llega a `sc.exe` si es de una palabra. Si armar las líneas falla, `manual` queda vacío (`Get-TuneupManualRestoreLine`) y el fallo de la restauración se informa igual. Las pruebas corren de verdad las líneas, cada una en su propio PowerShell (`-EncodedCommand`) sobre la clave de prueba, con valores con espacios, barra final, comillas, `& | % $` y la comilla invertida, y leen el valor con `GetValue` para comprobar que vuelve exacto.
 
 - [ ] **Step 1: Pruebas que fallan**
 
@@ -975,6 +1046,14 @@ BeforeAll {
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     # The lines of a hint, joined with | so that one line stays a string.
     function Get-Hint($Tweak, $State) { @(Get-TuneupManualRestoreHint -Tweak $Tweak -State $State) -join '|' }
+    # Runs one line of a hint in its own PowerShell, like a person pasting it. The line goes encoded, so
+    # nothing but the line itself decides what runs. Gives the exit code and what it wrote.
+    function Invoke-HintLine([string]$Line) {
+        $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('$ErrorActionPreference = ''Stop''; ' + $Line))
+        $output = & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -NonInteractive -EncodedCommand $encoded 2>&1 | Out-String
+        [pscustomobject]@{ Code = $LASTEXITCODE; Output = $output }
+    }
+    function Get-StoredValue([string]$Name) { (Get-Item -LiteralPath $Key).GetValue($Name, $null, 'DoNotExpandEnvironmentNames') }
 }
 
 Describe 'Get-TuneupManualRestoreHint' {
@@ -982,62 +1061,147 @@ Describe 'Get-TuneupManualRestoreHint' {
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
-    It 'gives reg.exe lines that put a registry value back, or delete it, and they work' {
+    It 'gives PowerShell lines that put a registry value back, or delete it, and they work' {
         $tweak = New-TestTweak -Set ([pscustomobject]@{ path = $Key; name = 'Hint'; kind = 'DWord'; value = 1 })
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'Hint' -PropertyType DWord -Value ([int]-2) | Out-Null
         $hint = Get-Hint $tweak (Get-RegistryTweakState -Tweak $tweak)
-        $hint | Should -Be 'reg.exe add "HKCU\Software\windows-tuneup-test" /v "Hint" /t REG_DWORD /d 4294967294 /f'
+        $hint | Should -Be "New-ItemProperty -LiteralPath 'HKCU:\Software\windows-tuneup-test' -Name 'Hint' -PropertyType DWord -Value -2 -Force | Out-Null"
         Set-ItemProperty -LiteralPath $Key -Name 'Hint' -Value 7
-        & cmd.exe /c $hint | Out-Null
-        $LASTEXITCODE | Should -Be 0
-        (Get-Item -LiteralPath $Key).GetValue('Hint') | Should -Be -2
+        (Invoke-HintLine $hint).Code | Should -Be 0
+        Get-StoredValue 'Hint' | Should -Be -2
         $absent = [pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $false; kind = $null; value = $null }
         $delete = Get-Hint $tweak $absent
-        $delete | Should -Be 'reg.exe delete "HKCU\Software\windows-tuneup-test" /v "Hint" /f'
-        & cmd.exe /c $delete | Out-Null
-        $LASTEXITCODE | Should -Be 0
+        $delete | Should -Be "Remove-ItemProperty -LiteralPath 'HKCU:\Software\windows-tuneup-test' -Name 'Hint'"
+        (Invoke-HintLine $delete).Code | Should -Be 0
         (Get-Item -LiteralPath $Key).GetValueNames() | Should -Not -Contain 'Hint'
     }
 
-    It 'escapes a double quote inside a name or a value' {
-        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = $Key; name = 'Say "hi"'; kind = 'String'; value = 'x' })
-        Get-Hint $tweak ([pscustomobject]@{ exists = $true; kind = 'String'; value = 'a "b"' }) |
-            Should -Be 'reg.exe add "HKCU\Software\windows-tuneup-test" /v "Say \"hi\"" /t REG_SZ /d "a \"b\"" /f'
-    }
-
-    It 'writes strings, lists and bytes in the form reg.exe takes' -TestCases @(
-        @{ Kind = 'String'; Value = 'a b'; Expected = '/t REG_SZ /d "a b"' }
-        @{ Kind = 'ExpandString'; Value = '%TEMP%\x'; Expected = '/t REG_EXPAND_SZ /d "%TEMP%\x"' }
-        @{ Kind = 'MultiString'; Value = @('one', 'two'); Expected = '/t REG_MULTI_SZ /d "one\0two"' }
-        @{ Kind = 'Binary'; Value = @(1, 171); Expected = '/t REG_BINARY /d 01ab' }
-        @{ Kind = 'QWord'; Value = 5; Expected = '/t REG_QWORD /d 5' }
+    It 'gives back exactly the value that was saved, whatever characters it has' -TestCases @(
+        @{ Kind = 'DWord'; Value = -2; Expected = -2 }
+        @{ Kind = 'DWord'; Value = 1; Expected = 1 }
+        @{ Kind = 'QWord'; Value = 5000000000; Expected = 5000000000 }
+        @{ Kind = 'String'; Value = 'a b'; Expected = 'a b' }
+        @{ Kind = 'String'; Value = 'C:\Program Files\x\'; Expected = 'C:\Program Files\x\' }
+        @{ Kind = 'String'; Value = ''; Expected = '' }
+        @{ Kind = 'String'; Value = 'it''s "quoted"'; Expected = 'it''s "quoted"' }
+        @{ Kind = 'String'; Value = 'a & b | c % d $env:USERNAME $(1+1) ; `n'; Expected = 'a & b | c % d $env:USERNAME $(1+1) ; `n' }
+        @{ Kind = 'String'; Value = ('x' + [char]0x2019 + 'y' + [char]0x2018 + 'z'); Expected = ('x' + [char]0x2019 + 'y' + [char]0x2018 + 'z') }
+        @{ Kind = 'String'; Value = "line1`r`nline2"; Expected = "line1`r`nline2" }
+        @{ Kind = 'ExpandString'; Value = '%TEMP%\x $env:TEMP'; Expected = '%TEMP%\x $env:TEMP' }
+        @{ Kind = 'MultiString'; Value = @('one', 'two'); Expected = 'one|two' }
+        @{ Kind = 'MultiString'; Value = @('it''s', '$x', 'a & b'); Expected = 'it''s|$x|a & b' }
+        @{ Kind = 'MultiString'; Value = @(); Expected = '' }
+        @{ Kind = 'Binary'; Value = @(1, 171, 255); Expected = '1|171|255' }
+        @{ Kind = 'Binary'; Value = @(7); Expected = '7' }
+        @{ Kind = 'Binary'; Value = @(); Expected = '' }
+        @{ Kind = 'None'; Value = @(1, 2); Expected = '1|2' }
     ) {
         param($Kind, $Value, $Expected)
-        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\X'; name = 'V'; kind = $Kind; value = $Value })
-        $state = [pscustomobject]@{ exists = $true; kind = $Kind; value = $Value }
-        Get-Hint $tweak $state | Should -Be "reg.exe add `"HKLM\SOFTWARE\X`" /v `"V`" $Expected /f"
+        $name = 'Say ''hi'' & "bye" $x'
+        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = $Key; name = $name; kind = 'String'; value = 'x' })
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name $name -PropertyType String -Value 'something else' | Out-Null
+        $hint = Get-Hint $tweak ([pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $true; kind = $Kind; value = $Value })
+        $result = Invoke-HintLine $hint
+        $result.Code | Should -Be 0 -Because $result.Output
+        $item = Get-Item -LiteralPath $Key
+        $item.GetValueKind($name).ToString() | Should -Be $Kind
+        $stored = $item.GetValue($name, $null, 'DoNotExpandEnvironmentNames')
+        $item.Close()
+        if ($Kind -in 'MultiString', 'Binary', 'None') { ($stored -join '|') | Should -Be $Expected }
+        else { $stored | Should -Be $Expected }
+    }
+
+    It 'removes the keys that the tweak created, only while they are empty' {
+        $deep = "$Key\a\b"
+        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = $deep; name = 'Hint'; kind = 'DWord'; value = 1 })
+        $state = [pscustomobject]@{ keyExisted = $false; existingAncestor = $Key; exists = $false; kind = $null; value = $null }
+        $lines = @(Get-TuneupManualRestoreHint -Tweak $tweak -State $state)
+        $lines.Count | Should -Be 3
+        $lines[1] | Should -BeLike "*'HKCU:\Software\windows-tuneup-test\a\b'*"
+        $lines[2] | Should -BeLike "*'HKCU:\Software\windows-tuneup-test\a'*"
+        New-Item -Path $deep -Force | Out-Null
+        New-ItemProperty -LiteralPath $deep -Name 'Hint' -PropertyType DWord -Value 1 | Out-Null
+        foreach ($line in $lines) { (Invoke-HintLine $line).Code | Should -Be 0 }
+        Test-Path -LiteralPath "$Key\a" | Should -BeFalse
+        Test-Path -LiteralPath $Key | Should -BeTrue
+        # A key that holds something else stays, and the line says so.
+        New-Item -Path $deep -Force | Out-Null
+        New-ItemProperty -LiteralPath $deep -Name 'Hint' -PropertyType DWord -Value 1 | Out-Null
+        New-ItemProperty -LiteralPath "$Key\a" -Name 'Other' -PropertyType DWord -Value 1 | Out-Null
+        $outputs = @(foreach ($line in $lines) { (Invoke-HintLine $line).Output })
+        Test-Path -LiteralPath $deep | Should -BeFalse
+        Test-Path -LiteralPath "$Key\a" | Should -BeTrue
+        $outputs -join '' | Should -Match 'Not removed'
+    }
+
+    It 'only removes the value when it does not know which keys the tweak created' {
+        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = "$Key\a"; name = 'Hint'; kind = 'DWord'; value = 1 })
+        $old = [pscustomobject]@{ exists = $false }
+        @(Get-TuneupManualRestoreHint -Tweak $tweak -State $old).Count | Should -Be 1
+    }
+
+    It 'doubles every quote of a literal and writes a line break as a character' {
+        ConvertTo-TuneupPsLiteral -Text 'a''b' | Should -Be '''a''''b'''
+        ConvertTo-TuneupPsLiteral -Text ('a' + [char]0x2019 + 'b') | Should -Be ('''a' + [char]0x2019 + [char]0x2019 + 'b''')
+        ConvertTo-TuneupPsLiteral -Text "a`r`nb" | Should -Be "('a' + [char]13 + '' + [char]10 + 'b')"
+        ConvertTo-TuneupPsLiteral -Text '' | Should -Be ''''''
+    }
+
+    It 'writes a value of an unknown kind with the .NET call, and nothing for a kind it cannot write' {
+        $tweak = New-TestTweak -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\X'; name = 'V'; kind = 'Binary'; value = @(1) })
+        Get-Hint $tweak ([pscustomobject]@{ exists = $true; kind = 'Unknown'; value = @(1, 2) }) |
+            Should -Be "[Microsoft.Win32.Registry]::SetValue('HKEY_LOCAL_MACHINE\SOFTWARE\X', 'V', ([byte[]](0x01,0x02)), [Microsoft.Win32.RegistryValueKind]::None)"
+        Get-Hint $tweak ([pscustomobject]@{ exists = $true; kind = 'Mystery'; value = 1 }) | Should -BeNullOrEmpty
     }
 
     It 'gives the start type of a service, and starts it if it was running' {
         $tweak = New-TestTweak -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ name = 'DiagTrack'; startType = 'Disabled' })
-        Get-Hint $tweak ([pscustomobject]@{ present = $true; startType = 'AutomaticDelayed'; running = $true }) | Should -Be 'sc.exe config "DiagTrack" start= delayed-auto|sc.exe start "DiagTrack"'
+        Get-Hint $tweak ([pscustomobject]@{ present = $true; startType = 'AutomaticDelayed'; running = $true }) | Should -Be "sc.exe config 'DiagTrack' start= delayed-auto|Start-Service -Name 'DiagTrack'"
+        Get-Hint $tweak ([pscustomobject]@{ present = $true; startType = 'Manual'; running = $false }) | Should -Be "Set-Service -Name 'DiagTrack' -StartupType Manual"
+        Get-Hint $tweak ([pscustomobject]@{ present = $true; startType = 'Automatic'; running = $false }) | Should -Be "Set-Service -Name 'DiagTrack' -StartupType Automatic"
+        Get-Hint $tweak ([pscustomobject]@{ present = $true; startType = 'Disabled'; running = $false }) | Should -Be "Set-Service -Name 'DiagTrack' -StartupType Disabled"
         Get-Hint $tweak ([pscustomobject]@{ present = $false; startType = $null; running = $false }) | Should -BeNullOrEmpty
     }
 
-    It 'gives schtasks, DISM, winget and powercfg lines for the other types' {
+    It 'gives sc.exe only for a service name it can take as one word' {
+        $odd = New-TestTweak -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Odd$(1) name'; startType = 'Disabled' })
+        Get-Hint $odd ([pscustomobject]@{ present = $true; startType = 'AutomaticDelayed'; running = $false }) | Should -BeNullOrEmpty
+        Get-Hint $odd ([pscustomobject]@{ present = $true; startType = 'Manual'; running = $false }) | Should -Be "Set-Service -Name 'Odd`$(1) name' -StartupType Manual"
+    }
+
+    It 'gives the task, capability and feature lines, in both directions' {
         $task = New-TestTweak -Type 'task' -Scope 'machine' -Set ([pscustomobject]@{ path = '\Microsoft\Windows\X\'; name = 'Y'; state = 'Disabled' })
-        Get-Hint $task ([pscustomobject]@{ present = $true; enabled = $true }) | Should -Be 'schtasks.exe /Change /TN "\Microsoft\Windows\X\Y" /ENABLE'
+        Get-Hint $task ([pscustomobject]@{ present = $true; enabled = $true }) | Should -Be "Enable-ScheduledTask -TaskPath '\Microsoft\Windows\X\' -TaskName 'Y'"
+        Get-Hint $task ([pscustomobject]@{ present = $true; enabled = $false }) | Should -Be "Disable-ScheduledTask -TaskPath '\Microsoft\Windows\X\' -TaskName 'Y'"
+        Get-Hint $task ([pscustomobject]@{ present = $false; enabled = $null }) | Should -BeNullOrEmpty
         $capability = New-TestTweak -Type 'capability' -Scope 'machine' -Set ([pscustomobject]@{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' })
-        Get-Hint $capability ([pscustomobject]@{ present = $true; state = 'Installed' }) | Should -Be 'DISM.exe /Online /Add-Capability /CapabilityName:App.StepsRecorder~~~~0.0.1.0'
+        Get-Hint $capability ([pscustomobject]@{ present = $true; state = 'Installed' }) | Should -Be "Add-WindowsCapability -Online -Name 'App.StepsRecorder~~~~0.0.1.0'"
+        Get-Hint $capability ([pscustomobject]@{ present = $true; state = 'NotPresent' }) | Should -Be "Remove-WindowsCapability -Online -Name 'App.StepsRecorder~~~~0.0.1.0'"
         $feature = New-TestTweak -Type 'feature' -Scope 'machine' -Set ([pscustomobject]@{ name = 'WorkFolders-Client'; state = 'Disabled' })
-        Get-Hint $feature ([pscustomobject]@{ present = $true; state = 'Enabled' }) | Should -Be 'DISM.exe /Online /Enable-Feature /FeatureName:WorkFolders-Client /NoRestart'
-        $appx = New-TestTweak -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
-        Get-Hint $appx $null | Should -Be 'winget install --id 9WZDNCRFHVFW --source msstore'
+        Get-Hint $feature ([pscustomobject]@{ present = $true; state = 'Enabled' }) | Should -Be "Enable-WindowsOptionalFeature -Online -FeatureName 'WorkFolders-Client' -NoRestart"
+        Get-Hint $feature ([pscustomobject]@{ present = $true; state = 'Disabled' }) | Should -Be "Disable-WindowsOptionalFeature -Online -FeatureName 'WorkFolders-Client' -NoRestart"
+    }
+
+    It 'gives the powercfg lines only for GUIDs and numbers, and one winget line from the same source as the undo notes' {
         $scheme = New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]@{ kind = 'scheme'; scheme = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' })
         Get-Hint $scheme ([pscustomobject]@{ kind = 'scheme'; active = '381b4222-f694-41f0-9685-ff5bb260df2e'; exists = $true }) | Should -Be 'powercfg.exe /setactive 381b4222-f694-41f0-9685-ff5bb260df2e'
-        $setting = New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = 'A'; setting = 'B'; ac = 0 })
-        Get-Hint $setting ([pscustomobject]@{ kind = 'setting'; scheme = 's1'; present = $true; ac = 1200; dc = 600 }) | Should -Be 'powercfg.exe /setacvalueindex s1 a b 1200|powercfg.exe /setactive SCHEME_CURRENT'
+        Get-Hint $scheme ([pscustomobject]@{ kind = 'scheme'; active = '1; calc'; exists = $true }) | Should -BeNullOrEmpty
+        $subgroup = '4f971e89-eebd-4455-a8de-9e59040e7347'
+        $setting = '5ca83367-6e45-459f-a27b-476b1d01c936'
+        $both = New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $subgroup.ToUpper(); setting = $setting; ac = 0; dc = 1 })
+        Get-Hint $both ([pscustomobject]@{ kind = 'setting'; scheme = '381b4222-f694-41f0-9685-ff5bb260df2e'; present = $true; ac = 1200; dc = 600 }) |
+            Should -Be "powercfg.exe /setacvalueindex 381b4222-f694-41f0-9685-ff5bb260df2e $subgroup $setting 1200|powercfg.exe /setdcvalueindex 381b4222-f694-41f0-9685-ff5bb260df2e $subgroup $setting 600|powercfg.exe /setactive SCHEME_CURRENT"
+        $acOnly = New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $subgroup; setting = $setting; ac = 0 })
+        Get-Hint $acOnly ([pscustomobject]@{ kind = 'setting'; scheme = '381b4222-f694-41f0-9685-ff5bb260df2e'; present = $true; ac = 1200; dc = 600 }) |
+            Should -Be "powercfg.exe /setacvalueindex 381b4222-f694-41f0-9685-ff5bb260df2e $subgroup $setting 1200|powercfg.exe /setactive SCHEME_CURRENT"
+        Get-Hint $acOnly ([pscustomobject]@{ kind = 'setting'; scheme = 'x; y'; present = $true; ac = 1; dc = 1 }) | Should -BeNullOrEmpty
+        $appx = New-TestTweak -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
+        Get-Hint $appx $null | Should -Be 'winget install --id 9WZDNCRFHVFW --source msstore'
+        Get-Hint $appx $null | Should -Be (Get-TuneupWingetManualCommand -StoreId '9WZDNCRFHVFW')
+        $badId = New-TestTweak -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZ; calc'; action = 'remove' })
+        Get-Hint $badId $null | Should -BeNullOrEmpty
     }
 
     It 'points an action to the README and gives nothing without a saved state' {
@@ -1056,8 +1220,19 @@ En `tests/Undo.Tests.ps1`, agregar antes de `It 'keeps the run pending when a re
         Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.two' }
         $results = @(Invoke-TuneupUndo -Run $run)
         $results[0].status | Should -Be 'failed'
-        @($results[0].manual) | Should -Be @('reg.exe delete "HKCU\Software\windows-tuneup-test" /v "Two" /f')
+        @($results[0].manual) | Should -Be @("Remove-ItemProperty -LiteralPath 'HKCU:\Software\windows-tuneup-test' -Name 'Two'")
         @($results[1].manual).Count | Should -Be 0
+    }
+
+    It 'still reports a failed restore when the manual instructions cannot be built' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        Mock -ModuleName Tuneup Get-TuneupManualRestoreHint { throw 'hint broke' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].status | Should -Be 'failed'
+        $results[0].error | Should -Be 'access denied'
+        @($results[0].manual).Count | Should -Be 0
+        $results[1].status | Should -Be 'restored'
     }
 
     It 'says when a restored tweak shows only after signing in again' {
@@ -1070,17 +1245,37 @@ En `tests/Undo.Tests.ps1`, agregar antes de `It 'keeps the run pending when a re
         $results = @(Invoke-TuneupUndo -Run $run)
         $results[0].signOutRequired | Should -BeTrue
     }
+
+    It 'does not ask to sign in again for a restore that failed or was skipped' {
+        $signOut = New-TestTweak -Id 'test.signout' -Set ([pscustomobject]@{ path = $Key; name = 'SignOut'; kind = 'DWord'; value = 1 })
+        $signOut | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $other = New-TestTweak -Id 'test.other' -Set ([pscustomobject]@{ path = $Key; name = 'Other'; kind = 'DWord'; value = 1 })
+        $run = New-TuneupRun -StateRoot $Root
+        $plan = @(New-TuneupPlan -Catalog @($signOut, $other) -Profiles @(New-TestProfile -Id 'base' -Include @('test.signout', 'test.other')) `
+            -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+        Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir | Out-Null
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.signout' }
+        $failed = @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')
+        $failed[0].status | Should -Be 'failed'
+        $failed[0].signOutRequired | Should -BeFalse
+        Mock -ModuleName Tuneup Restore-TuneupState { } -ParameterFilter { $Tweak.id -eq 'test.signout' }
+        @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')[0].signOutRequired | Should -BeTrue
+        $skipped = @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')
+        $skipped[0].status | Should -Be 'skipped'
+        $skipped[0].reason | Should -Be 'already-undone'
+        $skipped[0].signOutRequired | Should -BeFalse
+    }
 ```
 
 En `tests/Output.Tests.ps1`, agregar antes de `It 'shows skipped tweaks with their reason and counts them' {`:
 
 ```powershell
     It 'shows how to restore a failed tweak by hand and asks to sign out again' {
-        $failed = [pscustomobject]@{ id = 'test.one'; title = 'One'; status = 'failed'; reason = $null; error = 'denied'; detail = $null; rebootRequired = $false; signOutRequired = $false; manual = @('reg.exe delete "HKCU\X" /v "One" /f') }
+        $failed = [pscustomobject]@{ id = 'test.one'; title = 'One'; status = 'failed'; reason = $null; error = 'denied'; detail = $null; rebootRequired = $false; signOutRequired = $false; manual = @("Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'One'") }
         $restored = [pscustomobject]@{ id = 'test.two'; title = 'Two'; status = 'restored'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true; manual = @() }
         $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) 6>&1 | Out-String)
         $text | Should -Match 'To restore it by hand, run'
-        $text | Should -Match ([regex]::Escape('reg.exe delete "HKCU\X" /v "One" /f'))
+        $text | Should -Match ([regex]::Escape("Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'One'"))
         $text | Should -Match 'Sign out and sign in again'
         $json = Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) -Json | ConvertFrom-Json
         $json.signOutRequired | Should -BeTrue
@@ -1094,105 +1289,191 @@ Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path t
 Expected: FAIL: `Get-TuneupManualRestoreHint` no se reconoce.
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: FAIL en las dos pruebas nuevas (`manual` y `signOutRequired` no existen).
+Expected: FAIL en las pruebas nuevas (`manual`, `signOutRequired` y la guarda no existen).
 
 - [ ] **Step 3: Las líneas para restaurar a mano**
 
 Crear `engine/ManualHint.ps1`:
 
 ```powershell
-# What a person can run to put a tweak back by hand when -Undo could not: one command line per step,
-# built from the tweak and the state saved in the journal. Commands are the same in every language;
-# an action script, which can change anything, gets a sentence instead.
+# What a person can run to put a tweak back by hand when -Undo could not: one PowerShell command per
+# line, built from the tweak and the state saved in the journal. Every name and value that comes from
+# the catalog or the journal goes in a single-quoted literal with its quotes doubled, so nothing in it
+# is expanded or run when the line is pasted. Commands are the same in every language; an action
+# script, which can change anything, gets a sentence instead.
 
-$script:RegistryKindNames = @{
-    String       = 'REG_SZ'
-    ExpandString = 'REG_EXPAND_SZ'
-    MultiString  = 'REG_MULTI_SZ'
-    DWord        = 'REG_DWORD'
-    QWord        = 'REG_QWORD'
-    Binary       = 'REG_BINARY'
+$script:RegistryHiveNames = @{ HKCU = 'HKEY_CURRENT_USER'; HKLM = 'HKEY_LOCAL_MACHINE' }
+$script:ServiceStartTypeNames = @{ Automatic = 'Automatic'; Manual = 'Manual'; Disabled = 'Disabled' }
+# A service name that sc.exe takes as one word; anything else gets no sc.exe line.
+$script:ScServiceNamePattern = '^[A-Za-z0-9_.@-]+\z'
+
+# A PowerShell single-quoted literal. PowerShell reads four characters as a single quote (the ASCII
+# one and the typographic ones), so all of them are doubled; a line break is written as [char] so the
+# command stays on one line.
+function ConvertTo-TuneupPsLiteral {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    $quotes = "'" + [char]0x2018 + [char]0x2019 + [char]0x201A + [char]0x201B
+    $escaped = [regex]::Replace([string]$Text, "[$quotes]", '$0$0')
+    if ($escaped -notmatch '[\r\n]') { return "'$escaped'" }
+    $escaped = $escaped.Replace("`r", "' + [char]13 + '").Replace("`n", "' + [char]10 + '")
+    "('$escaped')"
 }
 
-function ConvertTo-TuneupRegExePath {
-    param([Parameter(Mandatory)][string]$Path)
-    $Path -replace '^(HKCU|HKLM):\\', '$1\'
-}
-
-# Quotes a value for reg.exe: a double quote inside is written as \".
-function ConvertTo-TuneupRegExeQuoted {
-    param([AllowEmptyString()][string]$Text)
-    '"' + ($Text -replace '"', '\"') + '"'
+function ConvertTo-TuneupBytesLiteral {
+    param([AllowNull()]$Value)
+    $bytes = @($Value | Where-Object { $null -ne $_ } | ForEach-Object { '0x{0:x2}' -f [int]$_ })
+    if (-not $bytes.Count) { return '([byte[]]@())' }
+    "([byte[]]($($bytes -join ',')))"
 }
 
 function Get-TuneupRegistryRestoreHint {
     param([Parameter(Mandatory)]$Set, [Parameter(Mandatory)]$State)
-    $key = ConvertTo-TuneupRegExeQuoted (ConvertTo-TuneupRegExePath -Path ([string]$Set.path))
-    $name = ConvertTo-TuneupRegExeQuoted ([string]$Set.name)
-    if (-not $State.exists) { return "reg.exe delete $key /v $name /f" }
-    $kind = [string]$State.kind
-    if (-not $script:RegistryKindNames.ContainsKey($kind)) { return $null }
-    $data = switch ($kind) {
-        'MultiString' { ConvertTo-TuneupRegExeQuoted (@($State.value) -join '\0') }
-        'Binary' { (@($State.value) | ForEach-Object { '{0:x2}' -f [int]$_ }) -join '' }
-        # The registry gives a DWORD as a signed number; reg.exe takes it unsigned.
-        'DWord' { $number = [int64]$State.value; if ($number -lt 0) { $number += 4294967296 }; [string]$number }
-        'QWord' { [string][int64]$State.value }
-        default { ConvertTo-TuneupRegExeQuoted ([string]$State.value) }
+    $path = [string]$Set.path
+    $pathText = ConvertTo-TuneupPsLiteral -Text $path
+    $nameText = ConvertTo-TuneupPsLiteral -Text ([string]$Set.name)
+    if (-not $State.exists) {
+        "Remove-ItemProperty -LiteralPath $pathText -Name $nameText"
+        # The keys that this tweak created and that are empty again go too (deepest first); a key
+        # that holds anything else stays, and the line says so.
+        $ancestor = [string]$State.existingAncestor
+        if ($ancestor) {
+            $current = $path
+            while ($current -and $current -ne $ancestor -and $current -match '^(HKCU|HKLM):\\.+') {
+                $keyText = ConvertTo-TuneupPsLiteral -Text $current
+                "`$k = Get-Item -LiteralPath $keyText -ErrorAction SilentlyContinue; if (`$k -and `$k.ValueCount -eq 0 -and `$k.SubKeyCount -eq 0) { Remove-Item -LiteralPath $keyText } else { 'Not removed: it holds other values or keys, or it is already gone.' }"
+                $current = Split-Path -Path $current -Parent
+            }
+        }
+        return
     }
-    "reg.exe add $key /v $name /t $($script:RegistryKindNames[$kind]) /d $data /f"
+    $kind = [string]$State.kind
+    $common = "-LiteralPath $pathText -Name $nameText"
+    switch -CaseSensitive ($kind) {
+        'DWord' { return "New-ItemProperty $common -PropertyType DWord -Value $([string](ConvertTo-TuneupDWord -Value $State.value)) -Force | Out-Null" }
+        'QWord' { return "New-ItemProperty $common -PropertyType QWord -Value $([string][int64]$State.value) -Force | Out-Null" }
+        'String' { return "New-ItemProperty $common -PropertyType String -Value $(ConvertTo-TuneupPsLiteral -Text ([string]$State.value)) -Force | Out-Null" }
+        'ExpandString' { return "New-ItemProperty $common -PropertyType ExpandString -Value $(ConvertTo-TuneupPsLiteral -Text ([string]$State.value)) -Force | Out-Null" }
+        'MultiString' {
+            $items = @($State.value | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-TuneupPsLiteral -Text ([string]$_) })
+            $list = $(if ($items.Count) { "@($($items -join ','))" } else { '([string[]]@())' })
+            return "New-ItemProperty $common -PropertyType MultiString -Value $list -Force | Out-Null"
+        }
+        'Binary' { return "New-ItemProperty $common -PropertyType Binary -Value $(ConvertTo-TuneupBytesLiteral -Value $State.value) -Force | Out-Null" }
+        { $_ -ceq 'None' -or $_ -ceq 'Unknown' } {
+            # PowerShell has no -PropertyType for these; the .NET call is the one that writes them.
+            if ($path -notmatch '^(?<hive>HKCU|HKLM):\\(?<sub>.+)$') { return }
+            $fullKey = ConvertTo-TuneupPsLiteral -Text "$($script:RegistryHiveNames[$Matches['hive']])\$($Matches['sub'])"
+            return "[Microsoft.Win32.Registry]::SetValue($fullKey, $nameText, $(ConvertTo-TuneupBytesLiteral -Value $State.value), [Microsoft.Win32.RegistryValueKind]::None)"
+        }
+    }
+}
+
+function Get-TuneupServiceRestoreHint {
+    param([Parameter(Mandatory)]$Set, [Parameter(Mandatory)]$State)
+    if (-not $State.present) { return }
+    $name = [string]$Set.name
+    $nameText = ConvertTo-TuneupPsLiteral -Text $name
+    $startType = [string]$State.startType
+    if ($script:ServiceStartTypeNames.ContainsKey($startType)) {
+        "Set-Service -Name $nameText -StartupType $($script:ServiceStartTypeNames[$startType])"
+    } elseif ($startType -ceq 'AutomaticDelayed' -and $name -cmatch $script:ScServiceNamePattern) {
+        # Set-Service in Windows PowerShell 5.1 has no delayed start.
+        "sc.exe config $nameText start= delayed-auto"
+    }
+    if ($State.running) { "Start-Service -Name $nameText" }
+}
+
+function Get-TuneupPowercfgRestoreHint {
+    param([Parameter(Mandatory)]$Set, [Parameter(Mandatory)]$State)
+    if ([string]$Set.kind -ceq 'scheme') {
+        if ([string]$State.active -match $script:GuidPattern) { "powercfg.exe /setactive $($State.active)" }
+        return
+    }
+    if (-not $State.present) { return }
+    $ids = @([string]$State.scheme, [string]$Set.subgroup, [string]$Set.setting)
+    if (@($ids | Where-Object { $_ -notmatch $script:GuidPattern }).Count) { return }
+    $target = Get-TuneupPowerSettingTarget -Set $Set
+    $indexes = "$($ids[0]) $(([string]$ids[1]).ToLowerInvariant()) $(([string]$ids[2]).ToLowerInvariant())"
+    foreach ($source in @(@('ac', 'setacvalueindex'), @('dc', 'setdcvalueindex'))) {
+        if ($null -eq $target.($source[0])) { continue }
+        $number = [uint32]$State.($source[0])
+        "powercfg.exe /$($source[1]) $indexes $number"
+    }
+    # Reloads the active scheme, so a change to it takes effect; another scheme is not activated.
+    'powercfg.exe /setactive SCHEME_CURRENT'
+}
+
+# The lines for a result of -Undo. A hint that cannot be built (an odd value in a saved state) gives
+# no lines and does not hide the failure that it was meant to help with.
+function Get-TuneupManualRestoreLine {
+    param([Parameter(Mandatory)]$Tweak, [AllowNull()]$State)
+    try {
+        [string[]]@(Get-TuneupManualRestoreHint -Tweak $Tweak -State $State)
+    } catch {
+        [string[]]@()
+    }
 }
 
 function Get-TuneupManualRestoreHint {
     param([Parameter(Mandatory)]$Tweak, [AllowNull()]$State)
     $set = $Tweak.set
-    if ([string]$Tweak.type -ceq 'appx') { return "winget install --id $($set.storeId) --source msstore" }
+    if ([string]$Tweak.type -ceq 'appx') {
+        if ([string]$set.storeId -cmatch $script:StoreIdPattern) { Get-TuneupWingetManualCommand -StoreId ([string]$set.storeId) }
+        return
+    }
     if ([string]$Tweak.type -ceq 'action') { return (Get-TuneupText -Key 'undo.manual.action' -Format $set.script) }
     # The other types need the saved state; without it there is nothing exact to suggest.
     if ($null -eq $State -or $State -is [string] -or $State -is [ValueType]) { return }
     switch -CaseSensitive ([string]$Tweak.type) {
         'registry' { Get-TuneupRegistryRestoreHint -Set $set -State $State }
-        'service' {
-            if ($State.present -and $script:ScStartArguments.ContainsKey([string]$State.startType)) {
-                "sc.exe config `"$($set.name)`" start= $($script:ScStartArguments[[string]$State.startType])"
-                if ($State.running) { "sc.exe start `"$($set.name)`"" }
-            }
-        }
+        'service' { Get-TuneupServiceRestoreHint -Set $set -State $State }
         'task' {
             if ($State.present) {
-                $switch = $(if ($State.enabled) { '/ENABLE' } else { '/DISABLE' })
-                "schtasks.exe /Change /TN `"$($set.path)$($set.name)`" $switch"
+                $verb = $(if ($State.enabled) { 'Enable-ScheduledTask' } else { 'Disable-ScheduledTask' })
+                "$verb -TaskPath $(ConvertTo-TuneupPsLiteral -Text ([string]$set.path)) -TaskName $(ConvertTo-TuneupPsLiteral -Text ([string]$set.name))"
             }
         }
         'capability' {
             if ($State.present) {
-                $verb = $(if ($State.state -eq 'Installed') { 'Add-Capability' } else { 'Remove-Capability' })
-                "DISM.exe /Online /$verb /CapabilityName:$($set.name)"
+                $verb = $(if ($State.state -eq 'Installed') { 'Add-WindowsCapability' } else { 'Remove-WindowsCapability' })
+                "$verb -Online -Name $(ConvertTo-TuneupPsLiteral -Text ([string]$set.name))"
             }
         }
         'feature' {
             if ($State.present) {
-                $verb = $(if ($State.state -eq 'Enabled') { 'Enable-Feature' } else { 'Disable-Feature' })
-                "DISM.exe /Online /$verb /FeatureName:$($set.name) /NoRestart"
+                $verb = $(if ($State.state -eq 'Enabled') { 'Enable-WindowsOptionalFeature' } else { 'Disable-WindowsOptionalFeature' })
+                "$verb -Online -FeatureName $(ConvertTo-TuneupPsLiteral -Text ([string]$set.name)) -NoRestart"
             }
         }
-        'powercfg' {
-            if ($set.kind -eq 'scheme') {
-                if ($State.active) { "powercfg.exe /setactive $($State.active)" }
-            } elseif ($State.present) {
-                $target = Get-TuneupPowerSettingTarget -Set $set
-                $ids = "$($State.scheme) $(([string]$set.subgroup).ToLowerInvariant()) $(([string]$set.setting).ToLowerInvariant())"
-                if ($null -ne $target.ac) { "powercfg.exe /setacvalueindex $ids $($State.ac)" }
-                if ($null -ne $target.dc) { "powercfg.exe /setdcvalueindex $ids $($State.dc)" }
-                # Reloads the active scheme, so a change to it takes effect; another scheme is not activated.
-                "powercfg.exe /setactive SCHEME_CURRENT"
-            }
-        }
+        'powercfg' { Get-TuneupPowercfgRestoreHint -Set $set -State $State }
     }
 }
 ```
 
 - [ ] **Step 4: Los resultados de deshacer y su reporte**
+
+En `engine/handlers/Appx.ps1`, agregar antes de `function Test-TuneupAppxInstalledForCurrentUser {`:
+
+```powershell
+# The line a person can run to install an app by hand: the one source for the undo notes and the
+# instructions that -Undo gives when it fails. The id is checked before it reaches here.
+function Get-TuneupWingetManualCommand {
+    param([Parameter(Mandatory)][string]$StoreId)
+    "winget install --id $StoreId --source msstore"
+}
+```
+
+y en `Restore-AppxTweakState` reemplazar:
+
+```powershell
+    $manual = "winget install --id $($Tweak.set.storeId) --source msstore"
+```
+
+por:
+
+```powershell
+    $manual = Get-TuneupWingetManualCommand -StoreId ([string]$Tweak.set.storeId)
+```
 
 En `engine/Undo.ps1`, reemplazar la función `Invoke-TuneupUndo` completa (con su comentario) por:
 
@@ -1227,7 +1508,7 @@ function Invoke-TuneupUndo {
             detail          = $(if ($outcome) { $outcome.detail } else { $null })
             rebootRequired  = $(if ($outcome) { [bool]$outcome.rebootRequired } else { $false })
             signOutRequired = ($status -eq 'restored' -and $null -ne $signOut -and $signOut.Value -eq $true)
-            manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreHint -Tweak $entry.tweak -State $entry.state })
+            manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreLine -Tweak $entry.tweak -State $entry.state })
         }
     }
     if ($TweakId) {
@@ -1328,24 +1609,24 @@ function Write-TuneupUndoReport {
 En `i18n/es.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
 
 ```json
-  "undo.manual": "Para restaurarlo a mano, ejecuta (como administrador si es un ajuste de sistema):",
+  "undo.manual": "Para restaurarlo a mano, ejecuta esto en PowerShell como administrador (un ajuste del usuario no lo necesita):",
   "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'."
 ```
 
 En `i18n/en.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
 
 ```json
-  "undo.manual": "To restore it by hand, run (as administrator for a system tweak):",
+  "undo.manual": "To restore it by hand, run this in PowerShell as administrator (a user tweak does not need it):",
   "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes."
 ```
 
 - [ ] **Step 5: Verificar que pasan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/ManualHint.Tests.ps1`
-Expected: PASS (`Tests Passed: 10, Failed: 0`).
+Expected: PASS (`Tests Passed: 28, Failed: 0`), unos 20 segundos: cada línea de las pruebas de valores se corre en su propio PowerShell.
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Undo.Tests.ps1`
-Expected: PASS (`Tests Passed: 31, Failed: 0`).
+Expected: PASS (`Tests Passed: 33, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Output.Tests.ps1`
 Expected: PASS (`Tests Passed: 62, Failed: 0`).
@@ -1915,7 +2196,7 @@ function Invoke-TuneupPlannedApply {
         }
         Write-TuneupPlanReport -Plan $Plan -Environment $environment
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
@@ -2326,7 +2607,7 @@ function Invoke-TuneupPlannedApply {
         }
         Write-TuneupPlanReport -Plan $Plan -Environment $environment
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
@@ -2488,7 +2769,7 @@ Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path t
 Expected: PASS (`Tests Passed: 4, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
-Expected: PASS (`Tests Passed: 12, Failed: 0`).
+Expected: PASS (`Tests Passed: 18, Failed: 0`).
 
 - [ ] **Step 6: Lint**
 
@@ -2932,7 +3213,8 @@ En `engine/Commands.ps1`, reemplazar la función `New-TuneupContext` completa (c
 
 ```powershell
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
-# collected so far, the questions and answers (Io), the exit code and the last result.
+# collected so far, the questions and answers (Io), the exit code and the last result. The exit code
+# starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
 function New-TuneupContext {
     param([switch]$Json, $Io)
     [pscustomobject]@{
@@ -2946,7 +3228,7 @@ function New-TuneupContext {
         Environment  = $null
         ScriptRoot   = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
-        ExitCode     = 0
+        ExitCode     = 1
         Result       = $null
     }
 }
@@ -2990,7 +3272,7 @@ function Invoke-TuneupPlannedApply {
         # The only warning with something to do about it here: System Restore can be turned on first.
         if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count) { Request-TuneupSystemRestore -Io $Context.Io | Out-Null }
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
@@ -3610,7 +3892,7 @@ function Invoke-TuneupPlannedApply {
         # The only warning with something to do about it here: System Restore can be turned on first.
         if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count) { Request-TuneupSystemRestore -Io $Context.Io | Out-Null }
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
@@ -3792,7 +4074,7 @@ Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path t
 Expected: PASS (`Tests Passed: 45, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
-Expected: PASS (`Tests Passed: 15, Failed: 0`).
+Expected: PASS (`Tests Passed: 21, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Cli.Tests.ps1`
 Expected: PASS (`Tests Passed: 63, Failed: 0, Skipped: 1`).
@@ -4235,7 +4517,8 @@ En `engine/Commands.ps1`, reemplazar la función `New-TuneupContext` completa (c
 
 ```powershell
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
-# collected so far, the questions and answers (Io), the exit code and the last result.
+# collected so far, the questions and answers (Io), the exit code and the last result. The exit code
+# starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
 function New-TuneupContext {
     param([switch]$Json, $Io)
     [pscustomobject]@{
@@ -4250,7 +4533,7 @@ function New-TuneupContext {
         ScriptRoot   = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
         InputEnded   = $false
-        ExitCode     = 0
+        ExitCode     = 1
         Result       = $null
     }
 }
@@ -4267,10 +4550,13 @@ function Invoke-TuneupHealthCommand {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
         return
     }
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'health.running') }
     # One line per phase for people; with -Json nothing but the document goes to the output.
     $healthArguments = @{ Repair = $Repair; Previous = $Previous }
-    if (-not $Context.Json) { $healthArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+    if (-not $Context.Json) {
+        $io = $Context.Io
+        $healthArguments.OnPhase = { param($Name) Write-TuneupIoLine -Io $io -Text (Get-TuneupText -Key "health.phase.$Name") }.GetNewClosure()
+    }
     $report = Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupHealth @healthArguments }
     $Context.Result = $report
     Write-TuneupHealthReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
@@ -6278,7 +6564,7 @@ Exit code: `0` everything applied (refusals and skips included); `2` something p
 | `results[].detail` | string or null | What the restore could not give back. |
 | `results[].rebootRequired` | boolean | This restore needs a restart. |
 | `results[].signOutRequired` | boolean | This restored tweak shows after signing in again. |
-| `results[].manual` | string[] | For `failed`: command lines that restore it by hand (`reg.exe`, `sc.exe`, `schtasks.exe`, `DISM.exe`, `powercfg.exe`, `winget`), or a sentence for an action; empty otherwise. |
+| `results[].manual` | string[] | For `failed`: PowerShell command lines that restore it by hand (`New-ItemProperty`, `Remove-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `Enable-WindowsOptionalFeature`, `powercfg.exe`, `winget`), or a sentence for an action; empty otherwise, and also empty when the lines cannot be built. |
 | `summary` | object | Counts. |
 | `summary.restored` | number | Restored. |
 | `summary.failed` | number | Failed: the run stays pending and `-Undo last` retries them. |
@@ -6543,8 +6829,8 @@ Without parameters, `tuneup.ps1` opens a menu in the console (Windows PowerShell
   Every run keeps `transcript.log` with what was shown (what was asked for, the plan, the warnings, the results and every later undo), written by the tool itself: no account or machine names and no command line.
 - `-Status -Reapply` (o el menú) vuelve a aplicar, como una corrida nueva, los ajustes que Windows revirtió (`drift`), con la definición del catálogo actual.
   `-Status -Reapply` (or the menu) applies again, as a new run, the tweaks that Windows reverted (`drift`), with the definition of the current catalog.
-- Si `-Undo` no puede restaurar un ajuste, muestra cómo hacerlo a mano (`reg.exe`, `sc.exe`, `schtasks.exe`, `DISM.exe`, `powercfg.exe` o `winget`); con `-Json`, en `results[].manual`.
-  When `-Undo` cannot restore a tweak, it shows how to do it by hand (`reg.exe`, `sc.exe`, `schtasks.exe`, `DISM.exe`, `powercfg.exe` or `winget`); with `-Json`, in `results[].manual`.
+- Si `-Undo` no puede restaurar un ajuste, muestra cómo hacerlo a mano con líneas de PowerShell (`New-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `powercfg.exe` o `winget`); con `-Json`, en `results[].manual`.
+  When `-Undo` cannot restore a tweak, it shows how to do it by hand with PowerShell lines (`New-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `powercfg.exe` or `winget`); with `-Json`, in `results[].manual`.
 - Idioma con `-Lang es|en`.
   Language with `-Lang es|en`.
 
@@ -6618,8 +6904,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File build\test.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File build\lint.ps1
 ```
 
-Las pruebas usan Pester 5 y el lint PSScriptAnalyzer (sobre `tuneup.ps1`, `install.ps1`, `engine/`, `actions/`, `build/` y `tests/sandbox/`). Las pruebas no instalan, quitan ni cambian nada real del sistema: Appx, DISM, winget, powercfg, sfc, el visor de eventos y el desinstalador de OneDrive se simulan. Solo escriben archivos temporales y la clave de prueba `HKCU:\Software\windows-tuneup-test` (se borra al terminar), hacen consultas de solo lectura (CIM, eventos y la consulta de capacidades de la GPU) y ejecutan `cmd.exe` con comandos inofensivos, `reg.exe` sobre esa clave de prueba y PowerShell en consolas ocultas (las pruebas de Ctrl+C).
-Tests use Pester 5 and lint uses PSScriptAnalyzer (over `tuneup.ps1`, `install.ps1`, `engine/`, `actions/`, `build/` and `tests/sandbox/`). Tests never install, remove or change anything real on the system: Appx, DISM, winget, powercfg, sfc, the event log and the OneDrive uninstaller are mocked. They only write temporary files and the test key `HKCU:\Software\windows-tuneup-test` (removed when they finish), run read-only queries (CIM, events and the GPU capability query) and run `cmd.exe` with harmless commands, `reg.exe` on that test key and PowerShell in hidden consoles (the Ctrl+C tests).
+Las pruebas usan Pester 5 y el lint PSScriptAnalyzer (sobre `tuneup.ps1`, `install.ps1`, `engine/`, `actions/`, `build/` y `tests/sandbox/`). Las pruebas no instalan, quitan ni cambian nada real del sistema: Appx, DISM, winget, powercfg, sfc, el visor de eventos y el desinstalador de OneDrive se simulan. Solo escriben archivos temporales y la clave de prueba `HKCU:\Software\windows-tuneup-test` (se borra al terminar), hacen consultas de solo lectura (CIM, eventos y la consulta de capacidades de la GPU) y ejecutan `cmd.exe` con comandos inofensivos, `reg.exe` sobre esa clave de prueba y PowerShell en consolas ocultas (las pruebas de Ctrl+C) y en procesos hijos (las líneas de deshacer a mano, sobre esa clave).
+Tests use Pester 5 and lint uses PSScriptAnalyzer (over `tuneup.ps1`, `install.ps1`, `engine/`, `actions/`, `build/` and `tests/sandbox/`). Tests never install, remove or change anything real on the system: Appx, DISM, winget, powercfg, sfc, the event log and the OneDrive uninstaller are mocked. They only write temporary files and the test key `HKCU:\Software\windows-tuneup-test` (removed when they finish), run read-only queries (CIM, events and the GPU capability query) and run `cmd.exe` with harmless commands, `reg.exe` on that test key and PowerShell in hidden consoles (the Ctrl+C tests) and in child processes (the manual-restore lines, on that key).
 
 Algunas pruebas solo corren sin elevar (`-Skip:$Elevated`). Como los runners de GitHub son administradores, CI corre la suite otra vez con `build/test-standard-user.ps1`, que la lanza con `runas /trustlevel:0x20000` (la misma cuenta con un token de usuario estándar). En tu equipo, `build/test.ps1` desde un PowerShell sin elevar ya las corre.
 Some tests only run without elevation (`-Skip:$Elevated`). Since GitHub runners are administrators, CI runs the suite again with `build/test-standard-user.ps1`, which starts it with `runas /trustlevel:0x20000` (the same account with a standard-user token). On your machine, `build/test.ps1` from a PowerShell that is not elevated already runs them.
@@ -6649,7 +6935,7 @@ Expected: `PSScriptAnalyzer: no findings`.
 - [ ] **Step 3: Suite completa**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1`
-Expected: PASS (`Tests Passed: 1152, Failed: 0, Skipped: 1`). Los saltos son pruebas que corren solo elevadas o solo sin elevar.
+Expected: PASS (`Tests Passed: 1178, Failed: 0, Skipped: 1`). Los saltos son pruebas que corren solo elevadas o solo sin elevar.
 
 - [ ] **Step 4: Las páginas generadas siguen al día**
 
@@ -6709,8 +6995,8 @@ Probado en la copia de `db1bcf0` (Windows 11 Pro 26H2, build 26300, sin elevar),
 - **`install.ps1`**: con el zip correcto instala y la copia instalada corre; con un SHA256 equivocado, sin versión o con una entrada `../` no instala nada; por `iex` (con la fuente cambiada a una carpeta local) aplica los valores del `param()` y no deja `$ErrorActionPreference` ni variables en la sesión.
 - **El zip**: 69 archivos al probarlo (con los de este plan, 71), solo de las carpetas previstas, el mismo SHA256 en dos armados seguidos.
 - **`runas /trustlevel:0x20000`** desde un proceso sin elevar con `-Restricted`: arranca, el hijo no está elevado, escribe salida y código.
-- **Lecturas reales de solo lectura**: el GUID del volumen del sistema, el espacio libre, `Test-TuneupTrustedLocation` (falso en `Documents`) y Restaurar sistema sin elevar (`unknown`: `SPP\Clients` da `SecurityException`). Las líneas de `reg.exe` de deshacer a mano, ejecutadas sobre la clave de prueba.
-- **Coherencia del plan**: aplicar las tareas en orden sobre `db1bcf0` da exactamente los archivos de la copia probada (comparación archivo por archivo; los `.json` de textos por contenido). Esa copia rearmada desde el plan pasó la suite completa (`Tests Passed: 1152, Failed: 0, Skipped: 1`) y el lint, y los estados intermedios (después de las Tasks 2 a 15) pasaron el lint y, de la Task 3 a la 10, los archivos de prueba de cada tarea con los recuentos que dice cada paso "Expected".
+- **Lecturas reales de solo lectura**: el GUID del volumen del sistema, el espacio libre, `Test-TuneupTrustedLocation` (falso en `Documents`) y Restaurar sistema sin elevar (`unknown`: `SPP\Clients` da `SecurityException`). Las líneas de PowerShell de deshacer a mano, ejecutadas en un proceso hijo sobre la clave de prueba.
+- **Coherencia del plan**: aplicar las tareas en orden sobre `db1bcf0` da exactamente los archivos de la copia probada (comparación archivo por archivo; los `.json` de textos por contenido). Esa copia rearmada desde el plan pasó la suite completa (`Tests Passed: 1178, Failed: 0, Skipped: 1`) y el lint, y los estados intermedios (después de las Tasks 2 a 15) pasaron el lint y, de la Task 3 a la 10, los archivos de prueba de cada tarea con los recuentos que dice cada paso "Expected".
 
 Sin verificar al escribir el plan:
 
