@@ -55,7 +55,7 @@ Describe 'SFC summary' {
     }
 
     It 'reads a repaired file written between double quotes' {
-        $lines = @((Get-SrLine 'Verifying 1 components'), (Get-SrLine 'Repairing corrupted file [l:7]"ci.dll" from store'))
+        $lines = @((Get-SrLine 'Verifying 1 components'), (Get-SrLine 'Repairing corrupted file [l:7]"ci.dll" from store'), (Get-SrLine 'Repair complete'))
         (Get-TuneupSfcSummary -Lines $lines).repairedFiles -join ',' | Should -Be 'ci.dll'
     }
 
@@ -71,14 +71,16 @@ Describe 'SFC summary' {
     It 'prefers the full path that SFC gives for a file it could not repair' {
         $lines = @((Get-SrLine 'Verifying 1 components'),
             (Get-SrLine "Cannot repair member file [l:7]'ci.dll' of Microsoft-Windows-CodeIntegrity, version 10.0.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"),
-            (Get-SrLine 'Could not reproject corrupted file \??\C:\WINDOWS\System32\ci.dll; source file in store is also corrupted'))
+            (Get-SrLine 'Could not reproject corrupted file \??\C:\WINDOWS\System32\ci.dll; source file in store is also corrupted'),
+            (Get-SrLine 'Repair complete'))
         (Get-TuneupSfcSummary -Lines $lines).unrepairedFiles -join ',' | Should -Be 'C:\WINDOWS\System32\ci.dll'
     }
 
     It 'keeps the copies of a file for each architecture apart' {
         $lines = @((Get-SrLine 'Verifying 2 components'),
             (Get-SrLine "Cannot repair member file [l:7]'ci.dll' of Microsoft-Windows-CodeIntegrity, version 10.0.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"),
-            (Get-SrLine "Cannot repair member file [l:7]'ci.dll' of Microsoft-Windows-CodeIntegrity, version 10.0.1, arch wow64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"))
+            (Get-SrLine "Cannot repair member file [l:7]'ci.dll' of Microsoft-Windows-CodeIntegrity, version 10.0.1, arch wow64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"),
+            (Get-SrLine 'Repair complete'))
         @((Get-TuneupSfcSummary -Lines $lines).unrepairedFiles).Count | Should -Be 2
     }
 
@@ -87,8 +89,30 @@ Describe 'SFC summary' {
         $summary = Get-TuneupSfcSummary -Lines (@(Get-CbsFixture 'sfc-modern-unrepaired.log') + $second)
         $summary.status | Should -Be 'clean'
         @($summary.unrepairedFiles).Count | Should -Be 0
-        # A run that began but did not end is the latest one too.
-        (Get-TuneupSfcSummary -Lines (@(Get-CbsFixture 'sfc-modern-unrepaired.log') + @((Get-SrLine 'Verifying 100 components')))).status | Should -Be 'clean'
+    }
+
+    It 'is unknown when only an interrupted run is left' {
+        $lines = @((Get-SrLine 'Verifying 100 components'),
+            (Get-SrLine "Cannot repair member file [l:11]'pbrpwbt.exe' of Microsoft-Windows-PbrpWBT, version 10.0.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"))
+        (Get-TuneupSfcSummary -Lines $lines).status | Should -Be 'unknown'
+    }
+
+    It 'keeps the completed run when background noise follows it' {
+        $lines = @(Get-CbsFixture 'sfc-modern-unrepaired.log') + @((Get-SrLine 'Verifying 1 components'), (Get-SrLine 'Verify complete'))
+        $summary = Get-TuneupSfcSummary -Lines $lines
+        $summary.status | Should -Be 'unrepaired'
+        $summary.unrepairedFiles -join ',' | Should -Be 'pbrpwbt.exe (Microsoft-Windows-PbrpWBT, amd64)'
+    }
+
+    It 'keeps the completed run when an interrupted one follows it' {
+        $lines = @(Get-CbsFixture 'sfc-modern-unrepaired.log') + @((Get-SrLine 'Verifying 100 components'),
+            (Get-SrLine "Cannot repair member file [l:7]'other.dll' of Microsoft-Windows-Other, version 10.0.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch"))
+        (Get-TuneupSfcSummary -Lines $lines).unrepairedFiles -join ',' | Should -Be 'pbrpwbt.exe (Microsoft-Windows-PbrpWBT, amd64)'
+    }
+
+    It 'does not read the driver lines that follow an interrupted run' {
+        $lines = @(Get-CbsFixture 'sfc-modern-unrepaired.log') + @((Get-SrLine 'Verifying 100 components'), '2026-09-30 11:00:00, Info DEPLOY [Pnp] Corrupt file: C:\x.sys')
+        (Get-TuneupSfcSummary -Lines $lines).unrepairedFiles -join ',' | Should -Be 'pbrpwbt.exe (Microsoft-Windows-PbrpWBT, amd64)'
     }
 
     It 'keeps the damage that SFC found in an early batch of its run' {
@@ -105,13 +129,13 @@ Describe 'SFC summary' {
 
     It 'ignores [SR] lines that are not part of an SFC run' {
         (Get-TuneupSfcSummary -Lines @((Get-SrLine 'Repairing 3 components'))).status | Should -Be 'unknown'
-        $lines = @((Get-SrLine 'Repairing 3 components'), (Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 0 components'))
+        $lines = @((Get-SrLine 'Repairing 3 components'), (Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 0 components'), (Get-SrLine 'Repair complete'))
         (Get-TuneupSfcSummary -Lines $lines).status | Should -Be 'clean'
     }
 
     It 'is repaired when SFC repaired components without naming files' {
-        (Get-TuneupSfcSummary -Lines @((Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 2 components'))).status | Should -Be 'repaired'
-        (Get-TuneupSfcSummary -Lines @((Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 0 components'))).status | Should -Be 'clean'
+        (Get-TuneupSfcSummary -Lines @((Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 2 components'), (Get-SrLine 'Repair complete'))).status | Should -Be 'repaired'
+        (Get-TuneupSfcSummary -Lines @((Get-SrLine 'Verifying 100 components'), (Get-SrLine 'Repairing 0 components'), (Get-SrLine 'Repair complete'))).status | Should -Be 'clean'
     }
 
     It 'is unknown when SFC left no trace' {
@@ -325,13 +349,14 @@ Describe 'Invoke-TuneupHealth' {
         $script:Healthy = @(
             '2026-09-30 10:00:00, Info                  CSI    00000001 [SR] Verifying 100 components',
             '2026-09-30 10:00:00, Info                  CSI    00000002 [SR] Repairing 0 components',
+            '2026-09-30 10:00:00, Info                  CSI    00000003 [SR] Repair complete',
             '2026-09-30 10:00:01, Info                  CBS    Checking System Update Readiness.',
             '2026-09-30 10:00:01, Info                  CBS    Operation: Detect only ',
             "2026-09-30 10:00:01, Info                  CBS    Total Detected Corruption:`t0"
         )
-        $script:Corrupt = @($Healthy[0]) + @(Get-CbsFixture 'scanhealth-corrupt.log')
-        $script:Fixed = @(Get-CbsFixture 'restorehealth-fixed.log') + @($Healthy[0])
-        $script:NotFixed = @(Get-CbsFixture 'restorehealth-partial.log') + @($Healthy[0])
+        $script:Corrupt = @($Healthy[0..2]) + @(Get-CbsFixture 'scanhealth-corrupt.log')
+        $script:Fixed = @(Get-CbsFixture 'restorehealth-fixed.log') + @($Healthy[0..2])
+        $script:NotFixed = @(Get-CbsFixture 'restorehealth-partial.log') + @($Healthy[0..2])
     }
 
     BeforeEach {
@@ -412,6 +437,10 @@ Describe 'Invoke-TuneupHealth' {
 
     It 'reads the log of the scan up to its end and the log of the repair from there on' {
         $script:Reads = @()
+        $script:Times = [System.Collections.Generic.Queue[datetime]]::new()
+        $script:Times.Enqueue([datetime]'2026-09-30 10:00:00')
+        $script:Times.Enqueue([datetime]'2026-09-30 10:05:00')
+        Mock -ModuleName Tuneup Get-TuneupLogTime { $script:Times.Dequeue() }
         Mock -ModuleName Tuneup Read-TuneupCbsLog {
             $script:Reads += [pscustomobject]@{ Since = $Since; HasUntil = ($null -ne $Until); Until = $Until }
             if ($script:Phase -eq 'repair') { $script:Fixed } else { $script:Corrupt }
@@ -422,6 +451,7 @@ Describe 'Invoke-TuneupHealth' {
         $script:Reads[0].Until | Should -BeGreaterOrEqual $script:Reads[0].Since
         $script:Reads[1].HasUntil | Should -BeFalse
         $script:Reads[1].Since | Should -Be $script:Reads[0].Until
+        $script:Reads[1].Since | Should -Not -Be $script:Reads[0].Since
     }
 
     It 'asks for a manual repair when SFC still cannot repair after DISM fixed the store' {

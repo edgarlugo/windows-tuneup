@@ -30,31 +30,32 @@ function ConvertTo-TuneupCbsFilePath {
 function Get-TuneupSfcSummary {
     param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines)
     $all = @($Lines)
-    # Only the latest SFC run counts. It checks the components in many "Verifying" batches and ends
-    # with "Repair complete" (the driver lines follow it); [SR] lines before its first "Verifying"
-    # belong to other servicing work.
+    # Only the latest completed SFC run counts. It checks the components in many "Verifying" batches
+    # and ends with "Repair complete"; the driver lines follow it. Whatever comes after that (an
+    # interrupted run, background [SR] work) and the [SR] lines before its first "Verifying" are noise.
     $done = @(for ($i = 0; $i -lt $all.Count; $i++) { if ($all[$i] -match '\[SR\] Repair complete') { $i } })
-    $from = 0
-    if ($done.Count) {
-        $from = $done[-1] + 1
-        $started = @(for ($i = $from; $i -lt $all.Count; $i++) { if ($all[$i] -match '\[SR\] Verifying \d+ components') { $i } })
-        # Nothing new began after the last run ended, so the last run is the latest.
-        if (-not $started.Count) { $from = $(if ($done.Count -ge 2) { $done[-2] + 1 } else { 0 }) }
-    }
     $start = -1
-    for ($i = $from; $i -lt $all.Count -and $start -lt 0; $i++) {
-        if ($all[$i] -match '\[SR\] Verifying \d+ components') { $start = $i }
+    if ($done.Count) {
+        $last = $done[-1]
+        $previousEnd = $(if ($done.Count -ge 2) { $done[-2] } else { -1 })
+        for ($i = $previousEnd + 1; $i -le $last -and $start -lt 0; $i++) {
+            if ($all[$i] -match '\[SR\] Verifying \d+ components') { $start = $i }
+        }
     }
     if ($start -lt 0) {
         return [pscustomobject]@{ status = 'unknown'; repairedFiles = [string[]]@(); unrepairedFiles = [string[]]@() }
+    }
+    $run = New-Object System.Collections.Generic.List[string]
+    for ($i = $start; $i -le $last; $i++) { $run.Add($all[$i]) }
+    for ($i = $last + 1; $i -lt $all.Count -and $all[$i] -notmatch '\[SR\] '; $i++) {
+        if ($all[$i] -match '\[Pnp\] ') { $run.Add($all[$i]) }
     }
     $repairing = 0
     $repaired = New-Object System.Collections.Generic.List[string]
     $cannot = New-Object System.Collections.Generic.List[object]
     $reprojected = New-Object System.Collections.Generic.List[string]
     $corrupt = New-Object System.Collections.Generic.List[string]
-    for ($i = $start; $i -lt $all.Count; $i++) {
-        $line = $all[$i]
+    foreach ($line in $run) {
         if ($line -match '\[SR\] Repairing (?<count>\d+) components') {
             $repairing = [int]$Matches['count']
         } elseif ($line -match '\[SR\] Cannot repair member file \[[^\]]*\][''"](?<file>[^''"]+)[''"](?: of (?<component>[^,]+),(?: version [^,]+,)? arch (?<arch>[^,]+),)?') {
