@@ -58,15 +58,23 @@ Describe 'Service handler' {
         Should -Invoke Stop-Service -ModuleName Tuneup -Times 0 -Exactly
     }
 
-    It 'throws a clear error when stopping fails after the start type was changed' {
+    It 'reports a partial change when stopping fails after the start type was changed' {
         Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true } }
         Mock -ModuleName Tuneup Invoke-TuneupSc { }
         Mock -ModuleName Tuneup Stop-Service { throw 'cannot stop' }
-        { Set-ServiceTweakDesired -Tweak $Tweak } |
-            Should -Throw 'Start type of RetailDemo set to Disabled, but stopping it failed: cannot stop'
+        $outcome = Get-TuneupOutcome -Output @(Set-ServiceTweakDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -Be 'Start type of RetailDemo set to Disabled, but stopping it failed: cannot stop'
         Should -Invoke Invoke-TuneupSc -ModuleName Tuneup -Times 1 -Exactly
     }
 
+    It 'fails without a partial result when the start type cannot be changed' {
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $true; startType = 'Manual'; running = $true } }
+        Mock -ModuleName Tuneup Invoke-TuneupSc { throw 'sc.exe config RetailDemo start= disabled failed with exit code 5: Access is denied.' }
+        Mock -ModuleName Tuneup Stop-Service { }
+        { Set-ServiceTweakDesired -Tweak $Tweak } | Should -Throw '*exit code 5*'
+        Should -Invoke Stop-Service -ModuleName Tuneup -Times 0 -Exactly
+    }
     It 'refuses to change a <Current> driver before calling sc.exe' -TestCases @(
         @{ Current = 'Boot' }
         @{ Current = 'System' }

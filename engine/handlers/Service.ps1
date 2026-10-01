@@ -79,7 +79,8 @@ function Set-ServiceTweakDesired {
             Stop-Service -Name $name -ErrorAction Stop
         }
         catch {
-            throw "Start type of $name set to $startType, but stopping it failed: $($_.Exception.Message)"
+            # The start type did change, so this is reported as partial instead of failed.
+            New-TuneupOutcome -Partial -Detail "Start type of $name set to $startType, but stopping it failed: $($_.Exception.Message)"
         }
     }
 }
