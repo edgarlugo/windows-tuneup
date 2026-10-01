@@ -5668,10 +5668,12 @@ git commit -m "feat: menú interactivo con estado, deshacer, salud y medición"
 ### Task 10: Menú: optimizar
 
 **Files:**
-- Modify: `engine/Menu.ps1` (nuevos `Select-TuneupMenuItem`, `Invoke-TuneupMenuOptimize`, `Select-TuneupMenuProfile`, `Select-TuneupMenuHighRisk`, `Request-TuneupMenuAskedTweak`), `i18n/es.json`, `i18n/en.json`
+- Modify: `engine/Menu.ps1` (nuevos `Select-TuneupMenuItem`, `Invoke-TuneupMenuOptimize`, `Select-TuneupMenuProfile`, `Select-TuneupMenuHighRisk`, `Confirm-TuneupMenuReappliedHighRisk`, `Request-TuneupMenuAskedTweak`; `Invoke-TuneupMenuStatus` reaplica con `-Interactive`), `engine/Commands.ps1` (`Invoke-TuneupReapply -Interactive`), `i18n/es.json`, `i18n/en.json`
 - Test: `tests/Menu.Tests.ps1`, `tests/Cli.Tests.ps1`
 
 Diseño: perfiles con `[x]`/`[ ]` (se marcan y desmarcan por número; `base` va primero, marcado y fijo, con `(siempre)`; `(administrador)` si algún ajuste lo necesita). Después, si hay ajustes `high` compatibles: "¿Quieres verlos?"; se eligen por número y se agregan solo escribiendo la palabra completa (`si`/`yes`); van como `-Include`. El plan se arma con `-Interactive` y se pregunta cada ajuste `ask` que va a aplicarse y no se pidió por nombre: `s`/`y` sí, `n` no, `t`/`a` sí a todos los que quedan, `x` no a todos los que quedan; el "no" lo deja `skip` con el motivo `declined`. Si el plan necesita administrador y no lo es, se muestra y se vuelve al menú. Si no, `Invoke-TuneupPlannedApply` (plan, avisos, Restaurar sistema, confirmación, aplicar).
+
+Reaplicar desde el menú (corrección de la revisión de la Task 8b): `Invoke-TuneupReapply -Interactive` pregunta por los ajustes revertidos que `-Yes` y `-Json` dejan fuera. Cada uno de riesgo alto se muestra y vuelve solo si se escribe la palabra completa (`Confirm-TuneupMenuReappliedHighRisk`; el que no la recibe queda `skip` con `high-risk-not-requested`), y cada `ask` se pregunta de a uno con `Request-TuneupMenuAskedTweak` (un "no" queda `declined`). El plan conserva el orden de las corridas que los aplicaron.
 
 - [ ] **Step 1: Pruebas que fallan**
 
@@ -5725,6 +5727,33 @@ En `tests/Menu.Tests.ps1`, agregar antes de `It 'shows the status and applies ag
         { Invoke-Menu $context } | Should -Not -Throw
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
+
+    It 'asks about a drifted tweak that asks first and one of high risk before applying them again' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Include 'menu.ask', 'menu.high' -Yes 6>$null
+        foreach ($name in 'One', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        # Status, apply again, the word for the high-risk one, no to the one that asks, confirm, back, exit.
+        $context = New-MenuContext @('2', 'r', 'YES', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match '\[high risk\] Title menu\.high \(menu\.high\): Reason'
+        $text | Should -Match '1/1 Title menu\.ask \[low risk\]: Reason'
+        Get-Value 'One' | Should -Be 1
+        Get-Value 'High' | Should -Be 1
+        Get-Value 'Ask' | Should -Be 5
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'leaves a drifted high-risk tweak alone unless its word is typed in full' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Include 'menu.ask', 'menu.high' -Yes 6>$null
+        foreach ($name in 'One', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        $context = New-MenuContext @('2', 'r', 'y', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'Not applied again: Title menu\.high\.'
+        Get-Value 'High' | Should -Be 5
+        Get-Value 'Ask' | Should -Be 1
+        Get-Value 'One' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
 ```
 
 En `tests/Cli.Tests.ps1`, agregar antes de `It 'leaves the menu at the end of standard input' {`:
@@ -5747,7 +5776,7 @@ En `tests/Cli.Tests.ps1`, agregar antes de `It 'leaves the menu at the end of st
 - [ ] **Step 2: Verificar que fallan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
-Expected: FAIL en las cinco pruebas nuevas (la opción 1 responde que `Invoke-TuneupMenuOptimize` no se reconoce, y las respuestas guionadas sobran).
+Expected: FAIL en seis de las siete pruebas nuevas, la de fin de la entrada ya pasa (la opción 1 responde que `Invoke-TuneupMenuOptimize` no se reconoce, y las respuestas guionadas sobran).
 
 - [ ] **Step 3: Elegir de una lista**
 
@@ -5870,6 +5899,28 @@ function Select-TuneupMenuHighRisk {
     , @($chosen | ForEach-Object { [string]$candidates[$_].id })
 }
 
+# A tweak of high risk that Windows reverted does not come back on its own either: each one is shown
+# and applied again only after typing the confirmation word in full. Gives the ids confirmed (none is
+# an empty list), or $null when the input ended.
+function Confirm-TuneupMenuReappliedHighRisk {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object[]]$Catalog, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Ids)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $high = @($Ids | ForEach-Object { $id = $_; $Catalog | Where-Object { $_.id -eq $id } } |
+        Where-Object { $_.risk -eq 'high' -and (Test-TuneupCompatible -Tweak $_ -Environment $environment) })
+    $confirmed = New-Object System.Collections.Generic.List[string]
+    if (-not $high.Count) { return , @() }
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.high.warning')
+    foreach ($tweak in $high) {
+        Write-TuneupMenuLine -Context $Context -Text ('{0} {1} ({2}): {3}' -f (Get-TuneupText -Key 'menu.high.mark'), (Get-TuneupTitle -Tweak $tweak), $tweak.id, (Get-TuneupLocalizedText $tweak.why))
+        $word = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.reapply.highConfirm' -Format (Get-TuneupText -Key 'menu.high.word'))
+        if ($null -eq $word) { return $null }
+        if ($word -ieq (Get-TuneupText -Key 'menu.high.word')) { $confirmed.Add([string]$tweak.id) }
+        else { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.reapply.highSkipped' -Format (Get-TuneupTitle -Tweak $tweak)) }
+    }
+    , @($confirmed.ToArray())
+}
+
 # One question for each tweak of the plan that asks first (ask: true) and was not asked for by name:
 # yes, no, yes to all the rest or no to all the rest. A no turns the item into a skip with the reason
 # declined. Gives the ids said no to, or $null to go back.
@@ -5912,6 +5963,44 @@ function Request-TuneupMenuAskedTweak {
 }
 ```
 
+En `engine/Menu.ps1`, en `Invoke-TuneupMenuStatus`, reemplazar `Invoke-TuneupReapply -Context $Context -Items $items` por `Invoke-TuneupReapply -Context $Context -Items $items -Interactive`.
+
+En `engine/Commands.ps1`, reemplazar, desde la línea `# compatibility checks still apply.` del comentario hasta el cierre `)` de `param`, por:
+
+```powershell
+# compatibility checks still apply. A drifted tweak that the catalog no longer has is left out with a
+# warning: undoing the run that applied it restores it. -Interactive (the menu) asks about the tweaks
+# that are left out otherwise: one question for each that asks first, and each one of high risk comes
+# back only after typing the confirmation word in full.
+function Invoke-TuneupReapply {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items,
+        [switch]$PlanOnly,
+        [switch]$Yes,
+        [switch]$Interactive
+    )
+```
+
+En `Invoke-TuneupReapply`, reemplazar las dos líneas `$plan = ... -Candidates $ids -NoBase)` y `$request = New-TuneupApplyRequest -Source 'reapply' -Include $ids` por:
+
+```powershell
+    $confirmed = @()
+    if ($Interactive) {
+        $confirmed = Confirm-TuneupMenuReappliedHighRisk -Context $Context -Catalog $definition.Catalog -Ids $ids
+        if ($null -eq $confirmed) { return }
+    }
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -Include $confirmed -NoBase -Interactive:$Interactive)
+    $declined = @()
+    if ($Interactive) {
+        # Back in the order of the runs that applied them: a confirmed tweak is planned first.
+        $plan = @(foreach ($id in $ids) { $plan | Where-Object { $_.Id -eq $id } })
+        $declined = Request-TuneupMenuAskedTweak -Context $Context -Plan $plan -Requested $confirmed
+        if ($null -eq $declined) { return }
+    }
+    $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids -Exclude $declined
+```
+
 En `i18n/es.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
 
 ```json
@@ -5932,7 +6021,9 @@ En `i18n/es.json`, agregar estas claves al final (una coma después de la últim
   "menu.ask.no": "n",
   "menu.ask.all": "t",
   "menu.ask.none": "x",
-  "menu.optimize.needsAdmin": "Este plan tiene cambios de sistema: abre PowerShell como administrador y vuelve a correr tuneup.ps1, o elige solo perfiles sin (administrador)."
+  "menu.optimize.needsAdmin": "Este plan tiene cambios de sistema: abre PowerShell como administrador y vuelve a correr tuneup.ps1, o elige solo perfiles sin (administrador).",
+  "menu.reapply.highConfirm": "Windows lo revirtió. Para volver a aplicarlo, escribe {0} completo:",
+  "menu.reapply.highSkipped": "No se vuelve a aplicar {0}."
 ```
 
 En `i18n/en.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
@@ -5955,13 +6046,15 @@ En `i18n/en.json`, agregar estas claves al final (una coma después de la últim
   "menu.ask.no": "n",
   "menu.ask.all": "a",
   "menu.ask.none": "x",
-  "menu.optimize.needsAdmin": "This plan has system changes: open PowerShell as administrator and run tuneup.ps1 again, or choose only profiles without (administrator)."
+  "menu.optimize.needsAdmin": "This plan has system changes: open PowerShell as administrator and run tuneup.ps1 again, or choose only profiles without (administrator).",
+  "menu.reapply.highConfirm": "Windows reverted it. To apply it again, type {0} in full:",
+  "menu.reapply.highSkipped": "Not applied again: {0}."
 ```
 
 - [ ] **Step 5: Verificar que pasan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
-Expected: PASS (`Tests Passed: 13, Failed: 0`).
+Expected: PASS (`Tests Passed: 15, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Cli.Tests.ps1`
 Expected: PASS (`Tests Passed: 65, Failed: 0, Skipped: 1`).
@@ -5988,7 +6081,7 @@ Expected: `PSScriptAnalyzer: no findings`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add engine/Menu.ps1 i18n/es.json i18n/en.json tests/Menu.Tests.ps1 tests/Cli.Tests.ps1
+git add engine/Menu.ps1 engine/Commands.ps1 i18n/es.json i18n/en.json tests/Menu.Tests.ps1 tests/Cli.Tests.ps1
 git commit -m "feat: optimizar desde el menú, con preguntas y riesgo alto a pedido"
 ```
 
