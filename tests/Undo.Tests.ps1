@@ -228,4 +228,14 @@ Describe 'Undo and status' {
         { Invoke-TuneupUndo -Run $resolved -TweakId 'test.one' } | Should -Throw '*already undone*'
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 9
     }
+
+    It 'keeps a partial tweak in the status' {
+        $run = Invoke-TestApply $Root
+        $results = @(
+            [pscustomobject]@{ id = 'test.one'; status = 'partial' },
+            [pscustomobject]@{ id = 'test.two'; status = 'failed' }
+        )
+        Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object ([pscustomobject]@{ results = $results })
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one'
+    }
 }

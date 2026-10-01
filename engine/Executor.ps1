@@ -3,7 +3,9 @@ function New-TuneupResult {
         [Parameter(Mandatory)]$Item,
         [Parameter(Mandatory)][string]$Status,
         [string]$Reason,
-        [string]$ErrorText
+        [string]$ErrorText,
+        [string]$Detail,
+        [switch]$RebootRequired
     )
     [pscustomobject]@{
         id             = $Item.Id
@@ -11,7 +13,8 @@ function New-TuneupResult {
         status         = $Status
         reason         = $(if ($Reason) { $Reason } else { $null })
         error          = $(if ($ErrorText) { $ErrorText } else { $null })
-        rebootRequired = [bool]$Item.Tweak.rebootRequired
+        detail         = $(if ($Detail) { $Detail } else { $null })
+        rebootRequired = ([bool]$Item.Tweak.rebootRequired -or [bool]$RebootRequired)
     }
 }
 
@@ -46,12 +49,17 @@ function Invoke-TuneupPlan {
             continue
         }
         try {
-            $null = Set-TuneupDesired -Tweak $tweak
-            if ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
-                New-TuneupResult -Item $item -Status 'applied'
+            # Set may report through New-TuneupOutcome that it changed something but could not finish
+            # (partial) or that Windows asked for a restart; any other output is ignored.
+            $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $tweak)
+            if ($outcome.partial) {
+                $status = 'partial'
+            } elseif ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
+                $status = 'applied'
             } else {
-                New-TuneupResult -Item $item -Status 'not-applied'
+                $status = 'not-applied'
             }
+            New-TuneupResult -Item $item -Status $status -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
         } catch {
             New-TuneupResult -Item $item -Status 'failed' -ErrorText $_.Exception.Message
         }

@@ -94,10 +94,11 @@ function New-TuneupApplyReport {
         finishedAt     = (Get-Date).ToString('s')
         environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
         restorePoint   = $RestorePoint
-        rebootRequired = (@($Results | Where-Object { $_.status -eq 'applied' -and $_.rebootRequired }).Count -gt 0)
+        rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
-            notApplied    = & $count 'not-applied'
+            partial       = & $count 'partial'
+            notApplied   = & $count 'not-applied'
             failed        = & $count 'failed'
             skipped       = & $count 'skipped'
             journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
@@ -118,14 +119,15 @@ function Save-TuneupApplyReport {
     }
 }
 
-# 0: everything done. 2: not everything was completed (some changes may have been made; read the
-# summary). 1: nothing was changed because the backups could not be written.
+# 0: everything done. 2: not everything was completed (a partial, failed or ineffective tweak, a
+# backup that could not be written after some change, or an unsaved result; read the summary).
+# 1: nothing was changed because the backups could not be written.
 function Get-TuneupApplyExitCode {
     param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
     $summary = $Report.summary
-    $touched = $summary.applied + $summary.notApplied + $summary.failed
+    $touched = $summary.applied + $summary.partial + $summary.notApplied + $summary.failed
     if ($summary.journalErrors -and -not $touched) { return 1 }
-    if ($summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
+    if ($summary.partial -or $summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
     0
 }
 
@@ -146,7 +148,7 @@ function Write-TuneupApplyReport {
         [switch]$Json
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
-    $colors = @{ 'applied' = 'Green'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
+    $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
     foreach ($result in $Report.results) {
         if ($result.reason -eq 'journal-error') {
             Write-Host ((Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key 'status.skipped'), $result.title) + ": $(Get-TuneupText -Key 'reason.journal-error')") -ForegroundColor Red
@@ -155,11 +157,12 @@ function Write-TuneupApplyReport {
         }
         if ($result.status -eq 'skipped') { continue }
         Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $colors[$result.status]
+        if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor Yellow }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
     $summary = $Report.summary
     Write-Host ''
-    Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.notApplied, $summary.failed, $summary.skipped)
+    Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped)
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
     Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }

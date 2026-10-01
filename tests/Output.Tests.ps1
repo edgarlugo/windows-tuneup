@@ -51,6 +51,16 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.skipped | Should -Be 1
         $report.environment.PSObject.Properties.Name | Should -Contain 'isAdmin'
     }
+
+    It 'counts partial tweaks and lets them ask for a restart' {
+        $partial = New-TestResult -Status 'partial'
+        $partial.rebootRequired = $true
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $partial)
+        $report.summary.partial | Should -Be 1
+        $report.summary.applied | Should -Be 1
+        $report.rebootRequired | Should -BeTrue
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,journalErrors'
+    }
 }
 
 Describe 'Get-TuneupApplyExitCode' {
@@ -63,6 +73,8 @@ Describe 'Get-TuneupApplyExitCode' {
         @{ Name = 'a journal error after a failure'; Statuses = @('failed', 'journal-error'); NotSaved = $false; Expected = 2 }
         @{ Name = 'an unsaved result'; Statuses = @('applied'); NotSaved = $true; Expected = 2 }
         @{ Name = 'an unsaved result with nothing applied'; Statuses = @('journal-error'); NotSaved = $true; Expected = 1 }
+        @{ Name = 'a partial tweak'; Statuses = @('applied', 'partial'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'a journal error after a partial change'; Statuses = @('partial', 'journal-error'); NotSaved = $false; Expected = 2 }
     ) {
         param($Statuses, $NotSaved, $Expected)
         $results = @(foreach ($status in $Statuses) {
@@ -129,6 +141,14 @@ Describe 'Write-TuneupApplyReport' {
         $json = Write-TuneupApplyReport -Report $report -Warnings @('careful') -Json | ConvertFrom-Json
         @($json.warnings) -join ',' | Should -Be 'careful'
         $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
+    }
+
+    It 'shows a partial tweak with its explanation' {
+        $partial = [pscustomobject]@{ id = 'test.partial'; title = 'Title partial'; status = 'partial'; reason = $null; error = $null; detail = 'Stopping it failed'; rebootRequired = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($partial)) 6>&1 | Out-String)
+        $text | Should -Match '\[partial\] Title partial'
+        $text | Should -Match 'Stopping it failed'
+        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0'
     }
 }
 

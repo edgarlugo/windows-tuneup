@@ -66,7 +66,7 @@ function Get-TuneupStatus {
         $touchedIds = $null
         $result = Read-TuneupTrustedJson -Path (Join-Path $run.Dir 'result.json') -Root $run.Root
         if ($null -ne $result) {
-            $touchedIds = @($result.results | Where-Object { $_.status -eq 'applied' -or $_.status -eq 'not-applied' } | ForEach-Object { $_.id })
+            $touchedIds = @($result.results | Where-Object { $_.status -eq 'applied' -or $_.status -eq 'partial' -or $_.status -eq 'not-applied' } | ForEach-Object { $_.id })
         }
         foreach ($entry in @(Read-TuneupRunJournal -Run $run)) {
             if ($undoneIds -contains $entry.id) { continue }

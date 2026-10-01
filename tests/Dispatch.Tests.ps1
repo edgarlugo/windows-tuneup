@@ -61,3 +61,30 @@ Describe 'Handler registry' {
         Get-TuneupHandler -Type @('registry') | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Handler outcomes' {
+    It 'ignores output that is not an outcome' {
+        $outcome = Get-TuneupOutcome -Output @('noise', 5, [pscustomobject]@{ partial = $true; detail = 'plain' })
+        $outcome.partial | Should -BeFalse
+        $outcome.detail | Should -BeNullOrEmpty
+        $outcome.rebootRequired | Should -BeFalse
+        $outcome.reason | Should -BeNullOrEmpty
+    }
+
+    It 'merges partial, restart, reason and detail' {
+        $outcome = Get-TuneupOutcome -Output @(
+            (New-TuneupOutcome -Partial -Detail 'one'),
+            'noise',
+            (New-TuneupOutcome -RebootRequired -Detail 'two' -Reason 'reinstalled'))
+        $outcome.partial | Should -BeTrue
+        $outcome.rebootRequired | Should -BeTrue
+        $outcome.reason | Should -Be 'reinstalled'
+        $outcome.detail | Should -Be 'one; two'
+    }
+
+    It 'returns an empty outcome for no output' {
+        $outcome = Get-TuneupOutcome -Output @()
+        $outcome.partial | Should -BeFalse
+        $outcome.rebootRequired | Should -BeFalse
+    }
+}
