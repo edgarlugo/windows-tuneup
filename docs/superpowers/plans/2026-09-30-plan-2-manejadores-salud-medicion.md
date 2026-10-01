@@ -12,6 +12,8 @@
 
 **Plan anterior:** `docs/superpowers/plans/2026-09-30-plan-1-motor-nucleo.md`. Como dice su encabezado, **los archivos del repositorio son la fuente de verdad**; este plan se escribió leyendo el código de `main` después de mergear el Plan 1 (`4199f51`).
 
+> **Nota sobre los bloques de código:** igual que en el Plan 1, los bloques de este plan registran lo ejecutado hasta la revisión de cada tarea. Después de los arreglos posteriores, **los archivos del repositorio son la fuente de verdad**; no se sincronizó cada bloque. La nota "Revisión posterior de las Tasks 16 a 19" (antes de la Task 20) detalla lo que cambió en la salud; las demás revisiones solo quedan en el historial de git (commits `fix:`). Tareas cuyo código final difiere del bloque del plan: Tasks 7 y 8 (appx: usuarios, `partial` y reinstalación), 10 y 11 (estados raros de capacidades y características), 13 (powercfg lee el valor efectivo con `Prov*SettingIndex`), 14 (acciones: nombres reservados, sin pisar funciones del motor, exportación del módulo), 15 (`-ActionsPath` advierte al correr elevado), 16 a 19 (lectura de CBS.log), 21 y 22 (validación de forma y mensajes de las mediciones) y 23 (el README y la especificación del repositorio reemplazan al texto del plan). La "Adenda de diseño" de este plan es el texto de partida de la sección 10 de la especificación; donde difieren manda la especificación.
+
 ---
 
 ## Convenciones de este plan
