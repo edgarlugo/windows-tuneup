@@ -70,6 +70,14 @@ function Resolve-TuneupPowerScheme {
     $Scheme.ToLowerInvariant()
 }
 
+function Read-TuneupPowerKey {
+    param([Parameter(Mandatory)][string]$Path)
+    # A key that is not there has no value to give; one that is there but cannot be read (access
+    # denied, a broken hive) is an error, never a reason to go on to the next source as if it were empty.
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
+}
+
 function Get-TuneupPowerSettingIndex {
     param(
         [Parameter(Mandatory)][string]$Scheme,
@@ -82,8 +90,8 @@ function Get-TuneupPowerSettingIndex {
     # under User\PowerSchemes, then the provisioned default (Prov*SettingIndex, which Windows
     # prefers to the plain one), then the default kept with the setting definition.
     # powercfg /q is not used: it hides the settings marked hidden.
-    $user = Get-ItemProperty -LiteralPath "$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting" -ErrorAction SilentlyContinue
-    $defaults = Get-ItemProperty -LiteralPath "$definition\DefaultPowerSchemeValues\$Scheme" -ErrorAction SilentlyContinue
+    $user = Read-TuneupPowerKey -Path "$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting"
+    $defaults = Read-TuneupPowerKey -Path "$definition\DefaultPowerSchemeValues\$Scheme"
     $provisioned = @{ ACSettingIndex = 'ProvAcSettingIndex'; DCSettingIndex = 'ProvDcSettingIndex' }
     $values = @{}
     foreach ($name in 'ACSettingIndex', 'DCSettingIndex') {

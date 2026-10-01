@@ -83,11 +83,20 @@ Describe 'Power setting' {
         $script:Keys[$Defaults] = [pscustomobject]@{ ACSettingIndex = 1800; DCSettingIndex = 900 }
         $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
         $script:FailDc = $false
+        $script:Denied = @()
         $script:ActiveText = $ActiveBalanced
         $script:ListText = $BothSchemes
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ListText } -ParameterFilter { $Arguments[0] -eq '/list' }
         Mock -ModuleName Tuneup Test-Path { $script:Keys.ContainsKey([string]$LiteralPath) } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
-        Mock -ModuleName Tuneup Get-ItemProperty { $script:Keys[[string]$LiteralPath] } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
+        Mock -ModuleName Tuneup Get-ItemProperty {
+            if ($script:Denied -contains [string]$LiteralPath) {
+                # Like the cmdlet: an error that -ErrorAction can silence.
+                $action = $(if ($PesterBoundParameters.ContainsKey('ErrorAction')) { $PesterBoundParameters['ErrorAction'] } else { 'Continue' })
+                Write-Error "Access to the path '$LiteralPath' is denied." -ErrorAction $action
+                return
+            }
+            $script:Keys[[string]$LiteralPath]
+        } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ActiveText } -ParameterFilter { $Arguments[0] -eq '/getactivescheme' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg {
             if ($script:FailDc -and $Arguments[0] -eq '/setdcvalueindex') { throw 'powercfg /setdcvalueindex failed with exit code 1: Invalid Parameters' }
@@ -145,6 +154,21 @@ Describe 'Power setting' {
         $script:Keys[$Defaults] = [pscustomobject]@{ ProvAcSettingIndex = '30' }
         $script:Keys.Remove($UserValues)
         { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw '*ProvAcSettingIndex*not a DWORD*'
+    }
+
+    It 'surfaces the error when a key that exists cannot be read, instead of falling back' -TestCases @(
+        @{ Which = 'UserValues' }
+        @{ Which = 'Defaults' }
+    ) {
+        param($Which)
+        $script:Denied = @($(if ($Which -eq 'UserValues') { $UserValues } else { $Defaults }))
+        { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw '*is denied*'
+    }
+
+    It 'still falls back when the key of the scheme does not exist' {
+        $script:Keys.Remove($UserValues)
+        $script:Denied = @($UserValues)
+        (Get-PowercfgTweakState -Tweak $SettingTweak).ac | Should -Be 1800
     }
 
     It 'is not applied when a value differs' {
