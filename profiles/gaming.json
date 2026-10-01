@@ -3,8 +3,8 @@
   "aliases": ["juegos"],
   "title": { "es": "Juegos", "en": "Gaming" },
   "description": {
-    "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y servicios de Xbox.",
-    "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and services."
+    "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y la tarea de Xbox.",
+    "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and task."
   },
   "include": [
     "gaming.game-mode-on",

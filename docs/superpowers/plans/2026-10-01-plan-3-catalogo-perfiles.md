@@ -5897,8 +5897,8 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "aliases": ["juegos"],
   "title": { "es": "Juegos", "en": "Gaming" },
   "description": {
-    "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y servicios de Xbox.",
-    "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and services."
+    "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y la tarea de Xbox.",
+    "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and task."
   },
   "include": [
     "gaming.game-mode-on",
@@ -5930,8 +5930,8 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "aliases": ["privacidad"],
   "title": { "es": "Privacidad", "en": "Privacy" },
   "description": {
-    "es": "Menos datos enviados a Microsoft y a los anunciantes: telemetría al mínimo, historial de actividad, Bing en la búsqueda, Copilot y Recall.",
-    "en": "Less data sent to Microsoft and advertisers: minimum telemetry, activity history, Bing in search, Copilot and Recall."
+    "es": "Menos datos enviados a Microsoft y a los anunciantes: telemetría al mínimo, historial de actividad, Bing en la búsqueda y Copilot (Recall solo si lo pides con -Include).",
+    "en": "Less data sent to Microsoft and advertisers: minimum telemetry, activity history, Bing in search and Copilot (Recall only when you ask for it with -Include)."
   },
   "include": [
     "privacy.diagnostic-data-required",
@@ -7535,7 +7535,7 @@ Goal-based, reversible and measurable Windows 10/11 optimization.
 | `base` | | Sin anuncios ni sugerencias, ID de publicidad apagado, extensiones visibles. Siempre se aplica. / No ads or suggestions, advertising ID off, extensions shown. Always applied. | No |
 | `dev` | `desarrollo` | Modo desarrollador, rutas largas, archivos ocultos, "Finalizar tarea"; respeta WSL y Hyper-V. / Developer Mode, long paths, hidden files, "End task"; keeps WSL and Hyper-V. | Sí / Yes |
 | `gaming` | `juegos` | Modo Juego, sin grabación en segundo plano ni aceleración del mouse, GPU con menos latencia; conserva Xbox. / Game Mode, no background recording or mouse acceleration, lower GPU latency; keeps Xbox. | Sí / Yes |
-| `privacy` | `privacidad` | Telemetría al mínimo, historial de actividad, Bing, Copilot, Recall, Edge. / Minimum telemetry, activity history, Bing, Copilot, Recall, Edge. | Sí / Yes |
+| `privacy` | `privacidad` | Telemetría al mínimo, historial de actividad, Bing, Copilot, Edge (Recall solo con `-Include`). / Minimum telemetry, activity history, Bing, Copilot, Edge (Recall only with `-Include`). | Sí / Yes |
 | `laptop` | `portatil`, `portátil` | Más batería: apps y Edge sin procesos de fondo, sin red en suspensión con batería. / More battery: apps and Edge without background processes, no network in standby on battery. | Sí / Yes |
 | `legacy` | `equipo-antiguo`, `antiguo` | Sin transparencia ni animaciones, menos tareas de fondo y apps preinstaladas. / No transparency or animations, fewer background tasks and preinstalled apps. | Sí / Yes |
 | `work` | `trabajo` | Solo ajustes de tu usuario, sin directivas; conserva Teams, Outlook y OneDrive. / Only settings of your user, no policies; keeps Teams, Outlook and OneDrive. | No |
@@ -7549,10 +7549,10 @@ Guía de cada perfil / Guide to each profile: [docs/es/profiles.md](docs/es/prof
 
 - Windows 10 u 11 (build 19041 o posterior) con Windows PowerShell 5.1. Si se lanza desde PowerShell 7 (`pwsh`), el script se relanza solo en Windows PowerShell 5.1. Windows Server y builds anteriores se rechazan salvo con `-Force`.
 - Windows 10 or 11 (build 19041 or later) with Windows PowerShell 5.1. If started from PowerShell 7 (`pwsh`), the script relaunches itself in Windows PowerShell 5.1. Windows Server and older builds are refused unless `-Force` is given.
-- Los ajustes de sistema necesitan PowerShell como administrador. Sin elevar, un plan que contenga cualquier cambio de sistema se rechaza completo (no se aplica nada): usar `-Exclude` para dejar fuera esos ajustes o abrir PowerShell como administrador. Los perfiles `base` (siempre aplicado) y `work` solo tienen ajustes de registro de usuario (`HKCU`) y se aplican sin elevar; los demás traen cambios de sistema.
-- System-wide tweaks need PowerShell as administrator. Without elevation, a plan that contains any system-level change is refused entirely (nothing is applied): use `-Exclude` to leave those tweaks out or open PowerShell as administrator. The `base` (always applied) and `work` profiles only hold user registry tweaks (`HKCU`) and apply without elevation; the others bring system changes.
-- `-Health` necesita administrador. `-Measure` no, pero sin administrador no puede leer la duración del arranque. Deshacer la quita de una app de la Store usa `winget` (App Installer).
-- `-Health` needs administrator. `-Measure` does not, but without administrator it cannot read the boot duration. Undoing the removal of a Store app uses `winget` (App Installer).
+- Los ajustes de sistema y las directivas de tu usuario (las claves `Policies` de `HKCU`, que Windows solo deja leer y escribir a un administrador) necesitan PowerShell como administrador. Sin elevar, un plan que contenga cualquiera de ellos se rechaza completo (no se aplica nada): usar `-Exclude` para dejar fuera esos ajustes o abrir PowerShell como administrador. Los perfiles `base` (siempre aplicado) y `work` solo tienen ajustes de registro de usuario (`HKCU`) que no son directivas y se aplican sin elevar; los demás traen cambios de sistema o directivas.
+- System-wide tweaks and policies of your user (the `Policies` keys of `HKCU`, which Windows only lets an administrator read and write) need PowerShell as administrator. Without elevation, a plan that contains any of them is refused entirely (nothing is applied): use `-Exclude` to leave those tweaks out or open PowerShell as administrator. The `base` (always applied) and `work` profiles only hold user registry tweaks (`HKCU`) that are not policies and apply without elevation; the others bring system changes or policies.
+- `-Health` necesita administrador. `-Measure` no, pero sin administrador no puede leer la duración del arranque. Deshacer la quita de una app de la Store usa `winget` (App Installer); elevado, solo el `winget.exe` que Windows instaló en `Program Files\WindowsApps`, nunca el alias de la carpeta del usuario.
+- `-Health` needs administrator. `-Measure` does not, but without administrator it cannot read the boot duration. Undoing the removal of a Store app uses `winget` (App Installer); elevated, only the `winget.exe` that Windows installed under `Program Files\WindowsApps`, never the alias in the user's folder.
 - Ejecutar `windows-tuneup` desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`): quien pueda modificar `actions/` o `engine/` ejecuta código con los permisos de quien aplica los ajustes. La revisión de las acciones (solo se leen definiciones de funciones, sin ejecutar nada al cargar) es defensa en profundidad, no sustituye ese permiso de carpeta.
 - Run `windows-tuneup` from a folder that only administrators can write to (for example under `Program Files`): anyone who can change `actions/` or `engine/` runs code with the rights of whoever applies the tweaks. The check of action scripts (only function definitions are read, nothing runs while loading) is defense in depth, not a substitute for that folder permission.
 
@@ -7615,8 +7615,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleS
   **Capabilities and features (`capability`, `feature`):** only those that Windows clearly reports as installed or absent (enabled or disabled) are touched; in any other state (for example `PartiallyInstalled`) they are reported as `not-present` and left alone. Disabling a feature without `-All` also disables the features that depend on it and undo only enables that one again: the catalog must not include parent features, only leaf ones.
 - **Energía (`powercfg`):** el estado se lee del registro (valor del plan, luego el predeterminado aprovisionado `Prov*SettingIndex`, luego el simple), igual que `powercfg /q`. Una clave que existe pero no se puede leer es un error, no se pasa a la siguiente fuente. Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan.
   **Power (`powercfg`):** the state is read from the registry (the scheme's own value, then the provisioned default `Prov*SettingIndex`, then the plain one), the same as `powercfg /q`. A key that exists but cannot be read is an error; the next source is not used instead. Known limitation: values enforced by group policy (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) are not detected.
-- **Acciones (`action`):** el cargador analiza los scripts de `actions/` sin ejecutarlos y solo acepta definiciones de funciones con nombres del contrato. `onedrive` desinstala OneDrive sin borrar archivos y se niega (sin cambiar nada) si Escritorio, Documentos o Imágenes están en OneDrive o hay archivos solo en la nube: el ajuste queda `skipped` con el motivo; deshacer lo reinstala con `winget`. `gaming-hags` solo activa la GPU acelerada si el driver la admite. `gaming-windowed-optimizations` cambia solo su opción dentro de la lista de preferencias de DirectX. Un script que no se pueda cargar no rompe el resto: se informa como advertencia y solo falla la validación de los ajustes que lo usan (`-Status`, `-Undo`, `-Health` y `-Measure` siguen funcionando).
-  **Actions (`action`):** the loader parses the scripts in `actions/` without running them and only accepts function definitions with contract names. `onedrive` uninstalls OneDrive without deleting files and refuses (changing nothing) when Desktop, Documents or Pictures are in OneDrive or files only live in the cloud: the tweak ends `skipped` with the reason; undo reinstalls it with `winget`. `gaming-hags` only turns on GPU scheduling when the driver supports it. `gaming-windowed-optimizations` changes only its own choice inside the DirectX preference list. A script that cannot be loaded does not break the rest: it is reported as a warning and only the validation of the tweaks that use it fails (`-Status`, `-Undo`, `-Health` and `-Measure` keep working).
+- **Acciones (`action`):** el cargador analiza los scripts de `actions/` sin ejecutarlos y solo acepta definiciones de funciones con nombres del contrato. `onedrive` desinstala OneDrive sin borrar archivos y se niega (sin cambiar nada) si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio: el ajuste queda `skipped` con el motivo; deshacer lo reinstala con `winget`. Elevado, solo usa instaladores de rutas confiables. `gaming-hags` solo activa la GPU acelerada si el driver la admite. `gaming-windowed-optimizations` cambia solo su opción dentro de la lista de preferencias de DirectX y también se niega si el proceso no corre con la cuenta del escritorio. Un script que no se pueda cargar no rompe el resto: se informa como advertencia y solo falla la validación de los ajustes que lo usan (`-Status`, `-Undo`, `-Health` y `-Measure` siguen funcionando).
+  **Actions (`action`):** the loader parses the scripts in `actions/` without running them and only accepts function definitions with contract names. `onedrive` uninstalls OneDrive without deleting files and refuses (changing nothing) when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when it could not check every file, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop: the tweak ends `skipped` with the reason; undo reinstalls it with `winget`. Elevated, it only uses installers from trusted paths. `gaming-hags` only turns on GPU scheduling when the driver supports it. `gaming-windowed-optimizations` changes only its own choice inside the DirectX preference list and also refuses when the process does not run as the account at the desktop. A script that cannot be loaded does not break the rest: it is reported as a warning and only the validation of the tweaks that use it fails (`-Status`, `-Undo`, `-Health` and `-Measure` keep working).
 - `appx`, `capability` y `feature` no se pueden leer sin administrador: sin elevar, el plan los muestra como cambios por aplicar con `reason` `unverified-needs-admin` (en `-Json` el `reason` de un elemento que se aplica puede por eso no ser nulo) y `-Status` los informa como `needs-admin`. Todos los tipos nuevos (`appx`, `capability`, `feature`, `powercfg`, `action`) son de sistema: exigen administrador y su corrida va a la carpeta protegida.
   `appx`, `capability` and `feature` cannot be read without administrator rights: when not elevated, the plan shows them as changes to apply with `reason` `unverified-needs-admin` (so in `-Json` the `reason` of an item that will be applied may be non-null) and `-Status` reports them as `needs-admin`. All the newer types (`appx`, `capability`, `feature`, `powercfg`, `action`) are system-level: they require administrator and their run goes to the protected folder.
 
@@ -7673,9 +7673,9 @@ Every document carries `schemaVersion` (currently `1`), `command` and `warnings`
 | `command` | Campos principales / Main fields |
 |---|---|
 | `plan` | `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `items` (`id`, `title`, `risk`, `scope`, `action`, `reason`, `rebootRequired`), `summary` (`apply`, `skip`) |
-| `apply` | `runId`, `runDir`, `finishedAt`, `environment`, `restorePoint`, `rebootRequired`, `signOutRequired`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `journalErrors`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`) |
+| `apply` | `runId`, `runDir`, `finishedAt`, `environment`, `restorePoint`, `rebootRequired`, `signOutRequired`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `refused`, `journalErrors`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`, `refused`) |
 | `status` | `items` (`id`, `title`, `status`, `runId`) |
-| `undo` | `runId`, `rebootRequired`, `results` (los de `apply` salvo `signOutRequired` / those of `apply` except `signOutRequired`), `summary` (`restored`, `failed`, `skipped`) |
+| `undo` | `runId`, `rebootRequired`, `results` (mismos campos que `apply` / same fields as `apply`), `summary` (`restored`, `failed`, `skipped`) |
 | `health` | `startedAt`, `finishedAt`, `repairRequested`, `repairRan`, `before`, `after` (`sfc`, `componentStore`, `corruptComponents`), `recommendation`, `rebootRecommended` |
 | `measure` | `id`, `path`, `measurement` (`takenAt`, `idleSeconds`, `environment`, `metrics`, `notes`), `comparison` (`againstId`, `items` con `metric`, `before`, `after`, `delta`; nulo sin `-Compare` / null without `-Compare`) |
 | `error` | `message`, `details` |
@@ -7686,8 +7686,8 @@ Every document carries `schemaVersion` (currently `1`), `command` and `warnings`
   Several policies do not apply on Windows Home (Widgets, minimum telemetry, activity history...): on Home the plan skips them as "does not apply". The list is in [docs/en/catalog.md](docs/en/catalog.md).
 - Las apps que winget no puede reinstalar (Solitaire, Tips, Mapas, People y otras) no están en el catálogo: quitarlas no se podría deshacer.
   Apps that winget cannot reinstall (Solitaire, Tips, Maps, People and others) are not in the catalog: removing them could not be undone.
-- Un ajuste que se niega a cambiar algo (por ejemplo OneDrive con carpetas en la nube) queda omitido y no cuenta como fallo: el código de salida sigue siendo `0` si todo lo demás se aplicó.
-  A tweak that refuses to change something (for example OneDrive with folders in the cloud) is skipped and does not count as a failure: the exit code stays `0` if everything else was applied.
+- Un ajuste que se niega a cambiar algo (por ejemplo OneDrive con carpetas en la nube) queda omitido (`skipped`), el resumen lo cuenta aparte como negado (`refused`) y no cuenta como fallo: el código de salida sigue siendo `0` si todo lo demás se aplicó.
+  A tweak that refuses to change something (for example OneDrive with folders in the cloud) is skipped (`skipped`), the summary counts it apart as refused (`refused`) and it does not count as a failure: the exit code stays `0` if everything else was applied.
 - No hay menú interactivo, y `-Status` solo informa la deriva: no ofrece reaplicar (Plan 4).
   There is no interactive menu, and `-Status` only reports drift: it does not offer to reapply (Plan 4).
 - Deshacer una app de la Store es una reinstalación para una cuenta, no una restauración exacta (ver arriba).
@@ -7726,7 +7726,7 @@ Expected: `PSScriptAnalyzer: no findings`.
 - [ ] **Step 3: Suite completa**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1`
-Expected: PASS (`Tests Passed: 877, Failed: 0, Skipped: 1`). El salto es la prueba de la carpeta de máquina que ya se saltaba antes de este plan.
+Expected: PASS (`Tests Passed: 1032, Failed: 0, Skipped: 1`). El salto es la prueba de la carpeta de máquina que ya se saltaba antes de este plan.
 
 - [ ] **Step 4: Las páginas generadas siguen al día**
 
@@ -7779,16 +7779,16 @@ git commit -m "docs: README del Plan 3, perfiles y documentación"
 | `apps.json` | 30 | 29 appx, 1 action | 0 | 13 | 0 |
 | **Total** | **166** | | **59** | **36** | **4** |
 
-Perfiles: `base` 21, `dev` 6, `gaming` 12 (+6 `keep`), `privacy` 55, `laptop` 7, `legacy` 30, `work` 10 (+5 `keep`), `lite` 105.
+Perfiles: `base` 21, `dev` 6, `gaming` 12 (+3 `keep`), `privacy` 53, `laptop` 7, `legacy` 30, `work` 10 (+5 `keep`), `lite` 102.
 
 **Búsqueda de marcadores pendientes:** no quedan "TBD", "TODO", "similar a la Task N" ni pasos sin código. Cada archivo nuevo va completo; cada cambio a un archivo existente da el texto exacto a reemplazar o el punto exacto donde agregar.
 
-**Consistencia de ids entre catálogo, perfiles y `keep`:** `Test-TuneupProfileSet` (que ya exige que todo id de `include` y `keep` exista y que ningún `include` sea `high`) pasa con los ocho perfiles; `tests/CatalogQuality.Tests.ps1` comprueba además que ningún id esté en `include` y `keep` del mismo perfil, que `gaming` + `lite` conserve los 6 ids de Xbox y `work` + `lite` los 5 de trabajo; `tests/CatalogContent.Tests.ps1` fija los ids de cada archivo en orden; `tests/Docs.Tests.ps1` exige que la guía nombre cada id que pregunta y cada id de riesgo alto; `tests/CatalogDoc.Tests.ps1` exige que el catálogo generado tenga una sección por id y que `excluded.json` no nombre un paquete que el catálogo quita.
+**Consistencia de ids entre catálogo, perfiles y `keep`:** `Test-TuneupProfileSet` (que ya exige que todo id de `include` y `keep` exista y que ningún `include` sea `high`) pasa con los ocho perfiles; `tests/CatalogQuality.Tests.ps1` comprueba además que ningún id esté en `include` y `keep` del mismo perfil, que `gaming` + `lite` conserve los 3 ids de Xbox y `work` + `lite` los 5 de trabajo; `tests/CatalogContent.Tests.ps1` fija los ids de cada archivo en orden; `tests/Docs.Tests.ps1` exige que la guía nombre cada id que pregunta y cada id de riesgo alto; `tests/CatalogDoc.Tests.ps1` exige que el catálogo generado tenga una sección por id y que `excluded.json` no nombre un paquete que el catálogo quita.
 
 **Consistencia de nombres:**
 
 - Campos nuevos del catálogo: `requires` (`battery`, `no-battery`) y `signOutRequired` (booleano), validados en `Test-TuneupTweak`; el motivo `not-applicable-hardware` tiene texto `reason.*` en los dos idiomas.
-- `New-TuneupOutcome -Refused` (campo `refused`) lo emite solo `actions/onedrive.ps1`, con los motivos `onedrive-known-folders` y `onedrive-online-only-files`, que tienen texto en los dos idiomas (lo verifica `tests/I18nCoverage.Tests.ps1`, que desde la Task 5 lee `actions/`).
+- `New-TuneupOutcome -Refused` (campo `refused`) lo emiten `actions/onedrive.ps1` (motivos `onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts` y `onedrive-session-user`) y `actions/gaming-windowed-optimizations.ps1` (motivo `session-user`), que tienen texto en los dos idiomas (lo verifica `tests/I18nCoverage.Tests.ps1`, que desde la Task 5 lee `actions/`).
 - Resultados de aplicar: `id, title, status, reason, error, detail, rebootRequired, signOutRequired`; reporte de aplicar: `rebootRequired` y `signOutRequired`; texto `signOut` en los dos idiomas.
 - Acciones y sus funciones: `gaming-windowed-optimizations` → `GamingWindowedOptimizations` (ayudantes `Value`, `Tweak`, `Token`), `gaming-hags` → `GamingHags` (`Value`, `Tweak`, `Capability`, `Supported`), `onedrive` → `Onedrive` (`Root`, `KnownFolder`, `Redirected`, `OnlineOnly`, `Install`, `OtherProfile`, `Removal`). Ningún ayudante contiene `Action` después de `ActionHelper`; los tres scripts cargan sin error (`finds the script of every action tweak in actions/ and loads it`).
 

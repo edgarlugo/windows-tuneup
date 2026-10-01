@@ -3,8 +3,8 @@
   "aliases": ["privacidad"],
   "title": { "es": "Privacidad", "en": "Privacy" },
   "description": {
-    "es": "Menos datos enviados a Microsoft y a los anunciantes: telemetría al mínimo, historial de actividad, Bing en la búsqueda, Copilot y Recall.",
-    "en": "Less data sent to Microsoft and advertisers: minimum telemetry, activity history, Bing in search, Copilot and Recall."
+    "es": "Menos datos enviados a Microsoft y a los anunciantes: telemetría al mínimo, historial de actividad, Bing en la búsqueda y Copilot (Recall solo si lo pides con -Include).",
+    "en": "Less data sent to Microsoft and advertisers: minimum telemetry, activity history, Bing in search and Copilot (Recall only when you ask for it with -Include)."
   },
   "include": [
     "privacy.diagnostic-data-required",
