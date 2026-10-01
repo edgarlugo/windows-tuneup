@@ -8,6 +8,9 @@ Describe 'Dispatch' {
         @{ Type = 'registry'; Handler = 'Registry' }
         @{ Type = 'service'; Handler = 'Service' }
         @{ Type = 'task'; Handler = 'Task' }
+        @{ Type = 'appx'; Handler = 'Appx' }
+        @{ Type = 'capability'; Handler = 'Capability' }
+        @{ Type = 'feature'; Handler = 'Feature' }
     ) {
         Get-TuneupHandlerName -Tweak (New-TestTweak -Type $Type) | Should -Be $Handler
     }
@@ -55,6 +58,9 @@ Describe 'Handler registry' {
     It 'says whether reading a type needs elevation' {
         foreach ($type in 'registry', 'service', 'task') {
             (Get-TuneupHandler -Type $type).ReadNeedsAdmin | Should -BeFalse -Because $type
+        }
+        foreach ($type in 'appx', 'capability', 'feature') {
+            (Get-TuneupHandler -Type $type).ReadNeedsAdmin | Should -BeTrue -Because $type
         }
         Get-TuneupHandler -Type 'magic' | Should -BeNullOrEmpty
         Get-TuneupHandler -Type $null | Should -BeNullOrEmpty

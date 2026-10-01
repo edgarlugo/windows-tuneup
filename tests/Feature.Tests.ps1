@@ -22,6 +22,28 @@ Describe 'Feature handler' {
         ConvertTo-TuneupFeatureState -State $Raw | Should -Be $Expected
     }
 
+    It 'does not read <Raw> as enabled or disabled' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = 'Unheard' }
+        @{ Raw = '' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $null -eq (ConvertTo-TuneupFeatureState -State $Raw) | Should -BeTrue
+    }
+
+    It 'leaves a feature in the unusual state <Raw> alone' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $script:Raw = $Raw
+        (Get-FeatureTweakState -Tweak $Tweak).present | Should -BeFalse
+        Test-FeatureTweakState -Tweak $Tweak | Should -Be 'not-present'
+    }
+
     It 'is not applied while the feature is enabled' {
         (Get-FeatureTweakState -Tweak $Tweak).state | Should -Be 'Enabled'
         Test-FeatureTweakState -Tweak $Tweak | Should -Be 'not-applied'
@@ -67,7 +89,11 @@ Describe 'Feature system calls' {
     }
 
     It 'lists the features once and again after a change, without -All or -Remove' {
+        # The look-alikes come first: a prefix or first-match lookup would return one of them.
         Mock -ModuleName Tuneup Get-WindowsOptionalFeature {
+            [pscustomobject]@{ FeatureName = 'WorkFolders-Client-Extra'; State = 'Disabled' }
+            [pscustomobject]@{ FeatureName = 'WorkFolders'; State = 'Disabled' }
+            [pscustomobject]@{ FeatureName = 'TFTP-Legacy'; State = 'Enabled' }
             [pscustomobject]@{ FeatureName = 'WorkFolders-Client'; State = 'Enabled' }
             [pscustomobject]@{ FeatureName = 'TFTP'; State = 'Disabled' }
         }
@@ -80,6 +106,15 @@ Describe 'Feature system calls' {
             $FeatureName -eq 'WorkFolders-Client' -and $NoRestart -and -not $Remove
         }
         Get-TuneupWindowsOptionalFeature -Name 'TFTP' | Out-Null
+        Should -Invoke Get-WindowsOptionalFeature -ModuleName Tuneup -Times 2 -Exactly
+    }
+
+    It 'lists the features again after enabling one' {
+        Mock -ModuleName Tuneup Get-WindowsOptionalFeature { [pscustomobject]@{ FeatureName = 'WorkFolders-Client'; State = 'Disabled' } }
+        Mock -ModuleName Tuneup Enable-WindowsOptionalFeature { }
+        Get-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client' | Out-Null
+        Enable-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client'
+        Get-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client' | Out-Null
         Should -Invoke Get-WindowsOptionalFeature -ModuleName Tuneup -Times 2 -Exactly
     }
 
@@ -97,6 +132,7 @@ Describe 'Feature definition and registration' {
 
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'a wildcard'; Set = @{ name = 'WorkFolders*'; state = 'Disabled' }; Scope = 'machine'; Message = 'invalid feature name' }
+        @{ Problem = 'a name with a trailing newline'; Set = @{ name = "WorkFolders-Client`n"; state = 'Disabled' }; Scope = 'machine'; Message = 'invalid feature name' }
         @{ Problem = 'an unknown state'; Set = @{ name = 'WorkFolders-Client'; state = 'Off' }; Scope = 'machine'; Message = "invalid feature state 'Off'" }
         @{ Problem = 'scope user'; Set = @{ name = 'WorkFolders-Client'; state = 'Disabled' }; Scope = 'user'; Message = 'must use scope machine' }
     ) {

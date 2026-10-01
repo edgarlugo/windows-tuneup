@@ -44,12 +44,12 @@ Este texto se copia en la Task 1 como sección 10 de la especificación.
 1. **Resultado de `Set` y estado `partial`.** `Set-<Tipo>TweakDesired` puede emitir un resultado de manejador creado con `New-TuneupOutcome` (un `[pscustomobject]` con tipo `Tuneup.Outcome` y los campos `partial`, `detail`, `rebootRequired` y `reason`); cualquier otra salida del manejador se ignora. Si informa `partial` (cambió algo pero no pudo terminar; por ejemplo, el servicio quedó deshabilitado pero no se pudo detener), el ajuste queda `partial` con la explicación en `detail`, diga lo que diga `Test`. Si no, `Test` decide `applied` o `not-applied`, como antes. `rebootRequired` del resultado es el del catálogo **o** el que pida Windows (`RestartNeeded` de DISM). El resumen y el JSON cuentan `partial`; un `partial` da código de salida `2`; `-Status` lo trata como ajuste tocado. `Restore-<Tipo>TweakState` usa el mismo objeto: su `reason` (por ejemplo `reinstalled`), `detail` y `rebootRequired` llegan al resultado de `-Undo`, que sigue contando como `restored`.
 2. **Registro único de manejadores.** `engine/Dispatch.ps1` tiene una tabla `tipo → manejador` que también dice si leer el estado exige administrador. La usan el despachador y la validación del catálogo; la validación del bloque `set` de cada tipo vive en su manejador (`Test-<Tipo>TweakDefinition`). Agregar un tipo es una línea en la tabla más `engine/handlers/<Tipo>.ps1`. Una prueba exige que cada tipo de la tabla tenga sus cinco funciones. Los tipos se comparan en minúsculas exactas.
 3. **appx.** `scope: machine`. `set: { name, storeId, action: "remove" }`: `name` es el nombre del paquete Appx (`Microsoft.BingNews`, sin comodines) y `storeId` el id de producto de la Microsoft Store (`^[0-9A-Z]{12}$`, por ejemplo `9WZDNCRFHVFW`). Estado: `{ installedUsers, currentUserHad, currentUserSid, otherUsers, provisioned, version }`. Un usuario tiene la app solo si `Get-AppxPackage -AllUsers` lo lista con `InstallState = Installed` (un paquete `Staged` no cuenta); El SID de cada usuario es el campo `Sid` de la estructura `AppxUserSecurityId` que devuelve Windows (su texto es solo el nombre del tipo). `currentUserHad` es si el SID del usuario que corre la herramienta está entre ellos, `currentUserSid` es ese SID cuando la tenía (si no, nulo) y `otherUsers` cuántos SID distintos más hay. `provisioned` viene de `Get-AppxProvisionedPackage -Online` por `DisplayName`. Las listas se piden una vez por proceso y se vuelven a pedir después de cualquier cambio. Una app que no está ni instalada ni provisionada cuenta como **aplicada** (no hay nada que quitar); nunca es `not-present`. Aplicar lee las dos listas antes de quitar nada, quita el paquete solo si algún usuario lo tiene instalado, para todos los usuarios, y lo desprovisiona; si una parte falla (incluida la lectura de la lista provisionada) después de que otra funcionó, el resultado es `partial`; si nada funcionó, `failed`. Deshacer: solo si `currentUserHad` y el `currentUserSid` guardado es el del usuario que deshace (otra cuenta no le devuelve la app a quien la perdió: cuenta como "otros usuarios"), y si el usuario actual no la tiene ya, `winget install --id <storeId> --source msstore --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity` (códigos de salida de winget aceptados como éxito: 0, `-1978335135` y `-1978335189`), con resultado `restored` y motivo `reinstalled` ("reinstalada para el usuario actual"); lo que la Store no puede devolver se informa en `detail` (`not provisioned again for new users`, `N other users not restored`). Si el usuario actual no la tenía, no se llama a winget: `restored` con motivo `installed-for-other-users` (lo tenían otros usuarios: cada uno debe reinstalarla desde la Store) o, si solo estaba provisionada, `not-reprovisioned`, siempre con la línea de winget para instalarla a mano. Si el usuario actual conservó la app y solo se perdió el provisionamiento, `restored` sin motivo y con `not provisioned again for new users` en `detail`. Un estado guardado sin `currentUserHad`/`otherUsers` se trata como una app que tenía el usuario actual. Sin winget, o si winget falla, el deshacer falla con el código de salida y la corrida queda pendiente para reintentar. winget reinstala para la cuenta que corre el deshacer: con elevación "sobre el hombro" (otra cuenta de administrador) la app queda en esa cuenta, no en la del usuario que la perdió, y el mensaje de error pide correr el deshacer desde el símbolo del sistema elevado del usuario que inició sesión. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
-4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
-5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`.
+4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
+5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
 6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura: `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`) y, para el que no esté, el predeterminado en `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`; si la definición `PowerSettings\<subgrupo>\<valor>` no existe, `not-present`. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`. `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer".
 7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
-9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer".
+9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
 10. **-Health.** Exige administrador. Corre `sfc /scannow` y `DISM /Online /Cleanup-Image /ScanHealth /English`, guardando el código de salida y los bytes crudos de la salida, que se decodifican después (sfc escribe UTF-16 al redirigirse y DISM usa la página OEM); se guardan en memoria, no en un archivo temporal. El resultado se lee de `%windir%\Logs\CBS\CBS.log` y de los `CbsPersist_*.log` modificados desde el inicio (Windows rota CBS.log en medio de una revisión larga), solo con líneas desde la hora de inicio: `[SR] Repairing N components`, `[SR] Cannot repair member file`, `[SR] Repairing corrupted file`, `[Pnp] Corrupt file`/`[Pnp] Repaired file`, el bloque `Summary` que sigue a `Checking System Update Readiness` (`Operation`, `Operation result`, `Total Detected Corruption`, `Total Repaired Corruption`) y las líneas `(p) CSI Payload Corrupt` que no dicen `(Fixed)`, agrupadas por componente. Resumen: SFC `clean|repaired|unrepaired|unknown`, almacén de componentes `healthy|repairable|repaired|unrepairable|unknown`, grupos dañados y recomendación `none|run-repair|manual-repair|check-logs`. El código de salida de SFC no está documentado: se muestra, pero no decide. `-Repair` corre `DISM /RestoreHealth` y SFC otra vez solo si hace falta, e informa antes y después. Código de salida: `0` sin problemas, `2` quedan problemas o no se pudo confirmar, `1` no se pudo empezar (sin administrador). No hay pregunta interactiva para reparar: el menú es del Plan 4.
 11. **-Measure / -Compare.** Métricas: RAM en uso (MB), procesos, servicios en ejecución, tareas programadas habilitadas, espacio libre del disco del sistema (GB), duración del último arranque (`BootTime` del evento 100 de `Microsoft-Windows-Diagnostics-Performance/Operational`) y minutos desde el arranque, más fecha y entorno. Si la duración no se puede leer queda `null` con el motivo en `notes` (`needs-admin`, `no-event`, `not-recorded-yet` si el evento es de un arranque anterior, `unreadable`, `unavailable`); no hay respaldo con el tiempo hasta el inicio de sesión. Sin elevar, Windows responde "no hay eventos" en vez de "acceso denegado" (verificado), por eso ese caso se informa como `needs-admin`. `-IdleSeconds <n>` (0 a 3600) espera antes de medir; el README recomienda reiniciar y usar 120. Se guarda en `<carpeta de estado>\measurements\<id>.json` con las mismas reglas de confianza que las corridas (máquina si es administrador, usuario si no, `-StateRoot` para pruebas). `-Compare <id|last>` compara contra una medición guardada (no contra una corrida); se resuelve antes de medir, así `last` nunca es la medición nueva.
 12. **CLI.** `-Status`, `-Undo`, `-Health` y `-Measure` se excluyen entre sí y ninguno se combina con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` ni `-Yes`. Opciones que dependen de un comando: `-Tweak` (de `-Undo`), `-Repair` (de `-Health`), `-Compare` e `-IdleSeconds` (de `-Measure`). La regla vive en una función pura (`Get-TuneupArgumentConflict`). El JSON suma los comandos `health` y `measure`, con `schemaVersion` y `warnings` como los demás.
@@ -120,12 +120,12 @@ secciones anteriores, manda esta.
 1. **Resultado de `Set` y estado `partial`.** `Set-<Tipo>TweakDesired` puede emitir un resultado de manejador creado con `New-TuneupOutcome` (un `[pscustomobject]` con tipo `Tuneup.Outcome` y los campos `partial`, `detail`, `rebootRequired` y `reason`); cualquier otra salida del manejador se ignora. Si informa `partial` (cambió algo pero no pudo terminar; por ejemplo, el servicio quedó deshabilitado pero no se pudo detener), el ajuste queda `partial` con la explicación en `detail`, diga lo que diga `Test`. Si no, `Test` decide `applied` o `not-applied`, como antes. `rebootRequired` del resultado es el del catálogo **o** el que pida Windows (`RestartNeeded` de DISM). El resumen y el JSON cuentan `partial`; un `partial` da código de salida `2`; `-Status` lo trata como ajuste tocado. `Restore-<Tipo>TweakState` usa el mismo objeto: su `reason` (por ejemplo `reinstalled`), `detail` y `rebootRequired` llegan al resultado de `-Undo`, que sigue contando como `restored`.
 2. **Registro único de manejadores.** `engine/Dispatch.ps1` tiene una tabla `tipo → manejador` que también dice si leer el estado exige administrador. La usan el despachador y la validación del catálogo; la validación del bloque `set` de cada tipo vive en su manejador (`Test-<Tipo>TweakDefinition`). Agregar un tipo es una línea en la tabla más `engine/handlers/<Tipo>.ps1`. Una prueba exige que cada tipo de la tabla tenga sus cinco funciones. Los tipos se comparan en minúsculas exactas.
 3. **appx.** `scope: machine`. `set: { name, storeId, action: "remove" }`: `name` es el nombre del paquete Appx (`Microsoft.BingNews`, sin comodines) y `storeId` el id de producto de la Microsoft Store (`^[0-9A-Z]{12}$`, por ejemplo `9WZDNCRFHVFW`). Estado: `{ installedUsers, currentUserHad, currentUserSid, otherUsers, provisioned, version }`. Un usuario tiene la app solo si `Get-AppxPackage -AllUsers` lo lista con `InstallState = Installed` (un paquete `Staged` no cuenta); El SID de cada usuario es el campo `Sid` de la estructura `AppxUserSecurityId` que devuelve Windows (su texto es solo el nombre del tipo). `currentUserHad` es si el SID del usuario que corre la herramienta está entre ellos, `currentUserSid` es ese SID cuando la tenía (si no, nulo) y `otherUsers` cuántos SID distintos más hay. `provisioned` viene de `Get-AppxProvisionedPackage -Online` por `DisplayName`. Las listas se piden una vez por proceso y se vuelven a pedir después de cualquier cambio. Una app que no está ni instalada ni provisionada cuenta como **aplicada** (no hay nada que quitar); nunca es `not-present`. Aplicar lee las dos listas antes de quitar nada, quita el paquete solo si algún usuario lo tiene instalado, para todos los usuarios, y lo desprovisiona; si una parte falla (incluida la lectura de la lista provisionada) después de que otra funcionó, el resultado es `partial`; si nada funcionó, `failed`. Deshacer: solo si `currentUserHad` y el `currentUserSid` guardado es el del usuario que deshace (otra cuenta no le devuelve la app a quien la perdió: cuenta como "otros usuarios"), y si el usuario actual no la tiene ya, `winget install --id <storeId> --source msstore --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity` (códigos de salida de winget aceptados como éxito: 0, `-1978335135` y `-1978335189`), con resultado `restored` y motivo `reinstalled` ("reinstalada para el usuario actual"); lo que la Store no puede devolver se informa en `detail` (`not provisioned again for new users`, `N other users not restored`). Si el usuario actual no la tenía, no se llama a winget: `restored` con motivo `installed-for-other-users` (lo tenían otros usuarios: cada uno debe reinstalarla desde la Store) o, si solo estaba provisionada, `not-reprovisioned`, siempre con la línea de winget para instalarla a mano. Si el usuario actual conservó la app y solo se perdió el provisionamiento, `restored` sin motivo y con `not provisioned again for new users` en `detail`. Un estado guardado sin `currentUserHad`/`otherUsers` se trata como una app que tenía el usuario actual. Sin winget, o si winget falla, el deshacer falla con el código de salida y la corrida queda pendiente para reintentar. winget reinstala para la cuenta que corre el deshacer: con elevación "sobre el hombro" (otra cuenta de administrador) la app queda en esa cuenta, no en la del usuario que la perdió, y el mensaje de error pide correr el deshacer desde el símbolo del sistema elevado del usuario que inició sesión. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
-4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
-5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`.
+4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
+5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
 6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura: `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`) y, para el que no esté, el predeterminado en `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`; si la definición `PowerSettings\<subgrupo>\<valor>` no existe, `not-present`. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`. `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer".
 7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
-9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer".
+9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
 10. **-Health.** Exige administrador. Corre `sfc /scannow` y `DISM /Online /Cleanup-Image /ScanHealth /English`, guardando el código de salida y los bytes crudos de la salida, que se decodifican después (sfc escribe UTF-16 al redirigirse y DISM usa la página OEM); se guardan en memoria, no en un archivo temporal. El resultado se lee de `%windir%\Logs\CBS\CBS.log` y de los `CbsPersist_*.log` modificados desde el inicio (Windows rota CBS.log en medio de una revisión larga), solo con líneas desde la hora de inicio: `[SR] Repairing N components`, `[SR] Cannot repair member file`, `[SR] Repairing corrupted file`, `[Pnp] Corrupt file`/`[Pnp] Repaired file`, el bloque `Summary` que sigue a `Checking System Update Readiness` (`Operation`, `Operation result`, `Total Detected Corruption`, `Total Repaired Corruption`) y las líneas `(p) CSI Payload Corrupt` que no dicen `(Fixed)`, agrupadas por componente. Resumen: SFC `clean|repaired|unrepaired|unknown`, almacén de componentes `healthy|repairable|repaired|unrepairable|unknown`, grupos dañados y recomendación `none|run-repair|manual-repair|check-logs`. El código de salida de SFC no está documentado: se muestra, pero no decide. `-Repair` corre `DISM /RestoreHealth` y SFC otra vez solo si hace falta, e informa antes y después. Código de salida: `0` sin problemas, `2` quedan problemas o no se pudo confirmar, `1` no se pudo empezar (sin administrador). No hay pregunta interactiva para reparar: el menú es del Plan 4.
 11. **-Measure / -Compare.** Métricas: RAM en uso (MB), procesos, servicios en ejecución, tareas programadas habilitadas, espacio libre del disco del sistema (GB), duración del último arranque (`BootTime` del evento 100 de `Microsoft-Windows-Diagnostics-Performance/Operational`) y minutos desde el arranque, más fecha y entorno. Si la duración no se puede leer queda `null` con el motivo en `notes` (`needs-admin`, `no-event`, `not-recorded-yet` si el evento es de un arranque anterior, `unreadable`, `unavailable`); no hay respaldo con el tiempo hasta el inicio de sesión. Sin elevar, Windows responde "no hay eventos" en vez de "acceso denegado" (verificado), por eso ese caso se informa como `needs-admin`. `-IdleSeconds <n>` (0 a 3600) espera antes de medir; el README recomienda reiniciar y usar 120. Se guarda en `<carpeta de estado>\measurements\<id>.json` con las mismas reglas de confianza que las corridas (máquina si es administrador, usuario si no, `-StateRoot` para pruebas). `-Compare <id|last>` compara contra una medición guardada (no contra una corrida); se resuelve antes de medir, así `last` nunca es la medición nueva.
 12. **CLI.** `-Status`, `-Undo`, `-Health` y `-Measure` se excluyen entre sí y ninguno se combina con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` ni `-Yes`. Opciones que dependen de un comando: `-Tweak` (de `-Undo`), `-Repair` (de `-Health`), `-Compare` e `-IdleSeconds` (de `-Measure`). La regla vive en una función pura (`Get-TuneupArgumentConflict`). El JSON suma los comandos `health` y `measure`, con `schemaVersion` y `warnings` como los demás.
@@ -1388,6 +1388,8 @@ Describe 'Appx definition' {
         @{ Problem = 'a wildcard in the name'; Field = 'name'; Value = 'Microsoft.Bing*'; Message = 'invalid appx package name' }
         @{ Problem = 'a lowercase Store id'; Field = 'storeId'; Value = '9wzdncrfhvfw'; Message = 'Microsoft Store id' }
         @{ Problem = 'a short Store id'; Field = 'storeId'; Value = '9WZDNCRF'; Message = 'Microsoft Store id' }
+        @{ Problem = 'a name with a trailing newline'; Field = 'name'; Value = "Microsoft.BingNews`n"; Message = 'invalid appx package name' }
+        @{ Problem = 'a Store id with a trailing newline'; Field = 'storeId'; Value = "9WZDNCRFHVFW`n"; Message = 'Microsoft Store id' }
         @{ Problem = 'another action'; Field = 'action'; Value = 'install'; Message = "invalid appx action 'install'" }
     ) {
         param($Field, $Value, $Message)
@@ -1416,8 +1418,8 @@ Expected: FAIL, `Get-AppxTweakState` no se reconoce como comando.
 ```powershell
 # Appx package names look like Microsoft.BingNews; Store ids are the 12-character product ids
 # that winget uses with --source msstore.
-$script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}$'
-$script:StoreIdPattern = '^[0-9A-Z]{12}$'
+$script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}\z'
+$script:StoreIdPattern = '^[0-9A-Z]{12}\z'
 
 # The lists are read once per process and dropped after any change, so a plan, the apply and the
 # check that follows it do not each list every package again.
@@ -1933,10 +1935,14 @@ Describe 'New-TuneupPlan with state that needs elevation to read' {
 Agregar dentro de `Describe 'Undo and status'` de `tests/Undo.Tests.ps1`:
 
 ```powershell
-    It 'says a tweak needs elevation to check instead of reading it' {
-        $appx = New-TestTweak -Id 'apps.news' -Type 'appx' -Scope 'machine' `
-            -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
-        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($appx) | Out-Null
+    It 'says a <Type> tweak needs elevation to check instead of reading it' -TestCases @(
+        @{ Type = 'appx'; Set = @{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' } }
+        @{ Type = 'capability'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' } }
+        @{ Type = 'feature'; Set = @{ name = 'WorkFolders-Client'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = New-TestTweak -Id 'apps.news' -Type $Type -Scope 'machine' -Set ([pscustomobject]$Set)
+        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($tweak) | Out-Null
         Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
         Mock -ModuleName Tuneup Test-TuneupState { throw 'must not read' }
         $status = @(Get-TuneupStatus -StateRoot $Root)
@@ -2142,6 +2148,30 @@ Describe 'Capability handler' {
         ConvertTo-TuneupCapabilityState -State $Raw | Should -Be $Expected
     }
 
+    It 'does not read <Raw> as installed or not present' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = 'Resolved' }
+        @{ Raw = 'Unheard' }
+        @{ Raw = '' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $null -eq (ConvertTo-TuneupCapabilityState -State $Raw) | Should -BeTrue
+    }
+
+    It 'leaves a capability in the unusual state <Raw> alone' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = 'Resolved' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $script:Raw = $Raw
+        (Get-CapabilityTweakState -Tweak $Tweak).present | Should -BeFalse
+        Test-CapabilityTweakState -Tweak $Tweak | Should -Be 'not-present'
+    }
+
     It 'is not applied while the capability is installed' {
         (Get-CapabilityTweakState -Tweak $Tweak).state | Should -Be 'Installed'
         Test-CapabilityTweakState -Tweak $Tweak | Should -Be 'not-applied'
@@ -2194,15 +2224,26 @@ Describe 'Capability system calls' {
     }
 
     It 'lists the capabilities once and again after a change' {
+        # The look-alikes come first: a prefix or first-match lookup would return one of them.
         Mock -ModuleName Tuneup Get-WindowsCapability {
-            [pscustomobject]@{ Name = 'App.StepsRecorder~~~~0.0.1.0'; State = 'Installed' }
             [pscustomobject]@{ Name = 'App.StepsRecorder~~~~0.0.1.0x'; State = 'NotPresent' }
+            [pscustomobject]@{ Name = 'App.StepsRecorder~~~~0.0.1.'; State = 'NotPresent' }
+            [pscustomobject]@{ Name = 'App.StepsRecorder~~~~0.0.1.0'; State = 'Installed' }
         }
         Mock -ModuleName Tuneup Remove-WindowsCapability { }
         (Get-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0').State | Should -Be 'Installed'
         (Get-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0').State | Should -Be 'Installed'
         Should -Invoke Get-WindowsCapability -ModuleName Tuneup -Times 1 -Exactly
         Remove-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0'
+        Get-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0' | Out-Null
+        Should -Invoke Get-WindowsCapability -ModuleName Tuneup -Times 2 -Exactly
+    }
+
+    It 'lists the capabilities again after adding one' {
+        Mock -ModuleName Tuneup Get-WindowsCapability { [pscustomobject]@{ Name = 'App.StepsRecorder~~~~0.0.1.0'; State = 'NotPresent' } }
+        Mock -ModuleName Tuneup Add-WindowsCapability { }
+        Get-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0' | Out-Null
+        Add-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0'
         Get-TuneupWindowsCapability -Name 'App.StepsRecorder~~~~0.0.1.0' | Out-Null
         Should -Invoke Get-WindowsCapability -ModuleName Tuneup -Times 2 -Exactly
     }
@@ -2222,6 +2263,7 @@ Describe 'Capability definition and registration' {
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'a name without the version part'; Set = @{ name = 'App.StepsRecorder'; state = 'NotPresent' }; Scope = 'machine'; Message = 'invalid capability name' }
         @{ Problem = 'a wildcard'; Set = @{ name = 'App.Steps*~~~~0.0.1.0'; state = 'NotPresent' }; Scope = 'machine'; Message = 'invalid capability name' }
+        @{ Problem = 'a name with a trailing newline'; Set = @{ name = "App.StepsRecorder~~~~0.0.1.0`n"; state = 'NotPresent' }; Scope = 'machine'; Message = 'invalid capability name' }
         @{ Problem = 'an unknown state'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'Removed' }; Scope = 'machine'; Message = "invalid capability state 'Removed'" }
         @{ Problem = 'scope user'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' }; Scope = 'user'; Message = 'must use scope machine' }
     ) {
@@ -2249,14 +2291,16 @@ Expected: FAIL, `ConvertTo-TuneupCapabilityState` no se reconoce como comando.
 ```powershell
 $script:CapabilityStates = @('Installed', 'NotPresent')
 # Name~~~~Version, as Get-WindowsCapability lists it (for example App.StepsRecorder~~~~0.0.1.0).
-$script:CapabilityNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*~[A-Za-z0-9._~-]*$'
+$script:CapabilityNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*~[A-Za-z0-9._~-]*\z'
 $script:CapabilityCache = $null
 
 function ConvertTo-TuneupCapabilityState {
     param([AllowNull()][AllowEmptyString()][string]$State)
-    # A pending change counts as done: Windows finishes it on the next restart.
-    if (@('Installed', 'InstallPending', 'PartiallyInstalled') -contains $State) { return 'Installed' }
-    'NotPresent'
+    # A pending change counts as done: Windows finishes it on the next restart. Any other state
+    # (PartiallyInstalled, Superseded, Resolved...) is neither one nor the other: it returns
+    # nothing, so the capability is left alone instead of being read as installed or absent.
+    if (@('Installed', 'InstallPending') -contains $State) { return 'Installed' }
+    if (@('NotPresent', 'UninstallPending', 'Staged', 'Removed') -contains $State) { return 'NotPresent' }
 }
 
 function Clear-TuneupCapabilityCache {
@@ -2298,7 +2342,10 @@ function Get-CapabilityTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $capability = Get-TuneupWindowsCapability -Name ([string]$Tweak.set.name)
     if ($null -eq $capability) { return [pscustomobject]@{ present = $false; state = $null } }
-    [pscustomobject]@{ present = $true; state = (ConvertTo-TuneupCapabilityState -State ([string]$capability.State)) }
+    $state = ConvertTo-TuneupCapabilityState -State ([string]$capability.State)
+    # A state that is not clearly installed or absent counts as not present: it is not touched.
+    if ($null -eq $state) { return [pscustomobject]@{ present = $false; state = $null } }
+    [pscustomobject]@{ present = $true; state = $state }
 }
 
 function Test-CapabilityTweakState {
@@ -2392,6 +2439,28 @@ Describe 'Feature handler' {
         ConvertTo-TuneupFeatureState -State $Raw | Should -Be $Expected
     }
 
+    It 'does not read <Raw> as enabled or disabled' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = 'Unheard' }
+        @{ Raw = '' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $null -eq (ConvertTo-TuneupFeatureState -State $Raw) | Should -BeTrue
+    }
+
+    It 'leaves a feature in the unusual state <Raw> alone' -TestCases @(
+        @{ Raw = 'PartiallyInstalled' }
+        @{ Raw = 'Superseded' }
+        @{ Raw = $null }
+    ) {
+        param($Raw)
+        $script:Raw = $Raw
+        (Get-FeatureTweakState -Tweak $Tweak).present | Should -BeFalse
+        Test-FeatureTweakState -Tweak $Tweak | Should -Be 'not-present'
+    }
+
     It 'is not applied while the feature is enabled' {
         (Get-FeatureTweakState -Tweak $Tweak).state | Should -Be 'Enabled'
         Test-FeatureTweakState -Tweak $Tweak | Should -Be 'not-applied'
@@ -2437,7 +2506,11 @@ Describe 'Feature system calls' {
     }
 
     It 'lists the features once and again after a change, without -All or -Remove' {
+        # The look-alikes come first: a prefix or first-match lookup would return one of them.
         Mock -ModuleName Tuneup Get-WindowsOptionalFeature {
+            [pscustomobject]@{ FeatureName = 'WorkFolders-Client-Extra'; State = 'Disabled' }
+            [pscustomobject]@{ FeatureName = 'WorkFolders'; State = 'Disabled' }
+            [pscustomobject]@{ FeatureName = 'TFTP-Legacy'; State = 'Enabled' }
             [pscustomobject]@{ FeatureName = 'WorkFolders-Client'; State = 'Enabled' }
             [pscustomobject]@{ FeatureName = 'TFTP'; State = 'Disabled' }
         }
@@ -2450,6 +2523,15 @@ Describe 'Feature system calls' {
             $FeatureName -eq 'WorkFolders-Client' -and $NoRestart -and -not $Remove
         }
         Get-TuneupWindowsOptionalFeature -Name 'TFTP' | Out-Null
+        Should -Invoke Get-WindowsOptionalFeature -ModuleName Tuneup -Times 2 -Exactly
+    }
+
+    It 'lists the features again after enabling one' {
+        Mock -ModuleName Tuneup Get-WindowsOptionalFeature { [pscustomobject]@{ FeatureName = 'WorkFolders-Client'; State = 'Disabled' } }
+        Mock -ModuleName Tuneup Enable-WindowsOptionalFeature { }
+        Get-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client' | Out-Null
+        Enable-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client'
+        Get-TuneupWindowsOptionalFeature -Name 'WorkFolders-Client' | Out-Null
         Should -Invoke Get-WindowsOptionalFeature -ModuleName Tuneup -Times 2 -Exactly
     }
 
@@ -2467,6 +2549,7 @@ Describe 'Feature definition and registration' {
 
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'a wildcard'; Set = @{ name = 'WorkFolders*'; state = 'Disabled' }; Scope = 'machine'; Message = 'invalid feature name' }
+        @{ Problem = 'a name with a trailing newline'; Set = @{ name = "WorkFolders-Client`n"; state = 'Disabled' }; Scope = 'machine'; Message = 'invalid feature name' }
         @{ Problem = 'an unknown state'; Set = @{ name = 'WorkFolders-Client'; state = 'Off' }; Scope = 'machine'; Message = "invalid feature state 'Off'" }
         @{ Problem = 'scope user'; Set = @{ name = 'WorkFolders-Client'; state = 'Disabled' }; Scope = 'user'; Message = 'must use scope machine' }
     ) {
@@ -2482,6 +2565,8 @@ Describe 'Feature definition and registration' {
 }
 ```
 
+En `tests/Dispatch.Tests.ps1`, sumar al `-TestCases` de `routes <Type> tweaks to the <Handler> handler` los tipos `appx`/`Appx`, `capability`/`Capability` y `feature`/`Feature`, y en `says whether reading a type needs elevation` comprobar `ReadNeedsAdmin` verdadero para `appx`, `capability` y `feature`.
+
 - [ ] **Step 2: Verificar que falla**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Feature.Tests.ps1`
@@ -2493,14 +2578,16 @@ Expected: FAIL, `ConvertTo-TuneupFeatureState` no se reconoce como comando.
 
 ```powershell
 $script:FeatureStates = @('Enabled', 'Disabled')
-$script:FeatureNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+$script:FeatureNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*\z'
 $script:FeatureCache = $null
 
 function ConvertTo-TuneupFeatureState {
     param([AllowNull()][AllowEmptyString()][string]$State)
-    # A pending change counts as done; a feature whose files were removed is still disabled.
-    if (@('Enabled', 'EnablePending', 'PartiallyInstalled') -contains $State) { return 'Enabled' }
-    'Disabled'
+    # A pending change counts as done; a feature whose files were removed is still disabled. Any
+    # other state (PartiallyInstalled, Superseded...) is neither one nor the other: it returns
+    # nothing, so the feature is left alone instead of being read as enabled or disabled.
+    if (@('Enabled', 'EnablePending') -contains $State) { return 'Enabled' }
+    if (@('Disabled', 'DisablePending', 'DisabledWithPayloadRemoved') -contains $State) { return 'Disabled' }
 }
 
 function Clear-TuneupFeatureCache {
@@ -2544,7 +2631,10 @@ function Get-FeatureTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $feature = Get-TuneupWindowsOptionalFeature -Name ([string]$Tweak.set.name)
     if ($null -eq $feature) { return [pscustomobject]@{ present = $false; state = $null } }
-    [pscustomobject]@{ present = $true; state = (ConvertTo-TuneupFeatureState -State ([string]$feature.State)) }
+    $state = ConvertTo-TuneupFeatureState -State ([string]$feature.State)
+    # A state that is not clearly enabled or disabled counts as not present: it is not touched.
+    if ($null -eq $state) { return [pscustomobject]@{ present = $false; state = $null } }
+    [pscustomobject]@{ present = $true; state = $state }
 }
 
 function Test-FeatureTweakState {
@@ -2692,7 +2782,7 @@ Expected: FAIL, `Get-TuneupGuidList` no se reconoce como comando.
 `engine/handlers/Powercfg.ps1`:
 
 ```powershell
-$script:GuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+$script:GuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z'
 $script:GuidSearch = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 
 function Invoke-TuneupPowercfg {

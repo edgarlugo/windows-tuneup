@@ -1,13 +1,15 @@
 $script:CapabilityStates = @('Installed', 'NotPresent')
 # Name~~~~Version, as Get-WindowsCapability lists it (for example App.StepsRecorder~~~~0.0.1.0).
-$script:CapabilityNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*~[A-Za-z0-9._~-]*$'
+$script:CapabilityNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*~[A-Za-z0-9._~-]*\z'
 $script:CapabilityCache = $null
 
 function ConvertTo-TuneupCapabilityState {
     param([AllowNull()][AllowEmptyString()][string]$State)
-    # A pending change counts as done: Windows finishes it on the next restart.
-    if (@('Installed', 'InstallPending', 'PartiallyInstalled') -contains $State) { return 'Installed' }
-    'NotPresent'
+    # A pending change counts as done: Windows finishes it on the next restart. Any other state
+    # (PartiallyInstalled, Superseded, Resolved...) is neither one nor the other: it returns
+    # nothing, so the capability is left alone instead of being read as installed or absent.
+    if (@('Installed', 'InstallPending') -contains $State) { return 'Installed' }
+    if (@('NotPresent', 'UninstallPending', 'Staged', 'Removed') -contains $State) { return 'NotPresent' }
 }
 
 function Clear-TuneupCapabilityCache {
@@ -49,7 +51,10 @@ function Get-CapabilityTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $capability = Get-TuneupWindowsCapability -Name ([string]$Tweak.set.name)
     if ($null -eq $capability) { return [pscustomobject]@{ present = $false; state = $null } }
-    [pscustomobject]@{ present = $true; state = (ConvertTo-TuneupCapabilityState -State ([string]$capability.State)) }
+    $state = ConvertTo-TuneupCapabilityState -State ([string]$capability.State)
+    # A state that is not clearly installed or absent counts as not present: it is not touched.
+    if ($null -eq $state) { return [pscustomobject]@{ present = $false; state = $null } }
+    [pscustomobject]@{ present = $true; state = $state }
 }
 
 function Test-CapabilityTweakState {

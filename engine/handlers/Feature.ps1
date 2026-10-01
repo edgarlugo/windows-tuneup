@@ -1,12 +1,14 @@
 $script:FeatureStates = @('Enabled', 'Disabled')
-$script:FeatureNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+$script:FeatureNamePattern = '^[A-Za-z0-9][A-Za-z0-9._-]*\z'
 $script:FeatureCache = $null
 
 function ConvertTo-TuneupFeatureState {
     param([AllowNull()][AllowEmptyString()][string]$State)
-    # A pending change counts as done; a feature whose files were removed is still disabled.
-    if (@('Enabled', 'EnablePending', 'PartiallyInstalled') -contains $State) { return 'Enabled' }
-    'Disabled'
+    # A pending change counts as done; a feature whose files were removed is still disabled. Any
+    # other state (PartiallyInstalled, Superseded...) is neither one nor the other: it returns
+    # nothing, so the feature is left alone instead of being read as enabled or disabled.
+    if (@('Enabled', 'EnablePending') -contains $State) { return 'Enabled' }
+    if (@('Disabled', 'DisablePending', 'DisabledWithPayloadRemoved') -contains $State) { return 'Disabled' }
 }
 
 function Clear-TuneupFeatureCache {
@@ -50,7 +52,10 @@ function Get-FeatureTweakState {
     param([Parameter(Mandatory)]$Tweak)
     $feature = Get-TuneupWindowsOptionalFeature -Name ([string]$Tweak.set.name)
     if ($null -eq $feature) { return [pscustomobject]@{ present = $false; state = $null } }
-    [pscustomobject]@{ present = $true; state = (ConvertTo-TuneupFeatureState -State ([string]$feature.State)) }
+    $state = ConvertTo-TuneupFeatureState -State ([string]$feature.State)
+    # A state that is not clearly enabled or disabled counts as not present: it is not touched.
+    if ($null -eq $state) { return [pscustomobject]@{ present = $false; state = $null } }
+    [pscustomobject]@{ present = $true; state = $state }
 }
 
 function Test-FeatureTweakState {

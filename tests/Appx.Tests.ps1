@@ -287,6 +287,8 @@ Describe 'Appx definition' {
         @{ Problem = 'a wildcard in the name'; Field = 'name'; Value = 'Microsoft.Bing*'; Message = 'invalid appx package name' }
         @{ Problem = 'a lowercase Store id'; Field = 'storeId'; Value = '9wzdncrfhvfw'; Message = 'Microsoft Store id' }
         @{ Problem = 'a short Store id'; Field = 'storeId'; Value = '9WZDNCRF'; Message = 'Microsoft Store id' }
+        @{ Problem = 'a name with a trailing newline'; Field = 'name'; Value = "Microsoft.BingNews`n"; Message = 'invalid appx package name' }
+        @{ Problem = 'a Store id with a trailing newline'; Field = 'storeId'; Value = "9WZDNCRFHVFW`n"; Message = 'Microsoft Store id' }
         @{ Problem = 'another action'; Field = 'action'; Value = 'install'; Message = "invalid appx action 'install'" }
     ) {
         param($Field, $Value, $Message)

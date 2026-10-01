@@ -263,10 +263,14 @@ Describe 'Undo and status' {
         (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one'
     }
 
-    It 'says a tweak needs elevation to check instead of reading it' {
-        $appx = New-TestTweak -Id 'apps.news' -Type 'appx' -Scope 'machine' `
-            -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
-        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($appx) | Out-Null
+    It 'says a <Type> tweak needs elevation to check instead of reading it' -TestCases @(
+        @{ Type = 'appx'; Set = @{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' } }
+        @{ Type = 'capability'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' } }
+        @{ Type = 'feature'; Set = @{ name = 'WorkFolders-Client'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = New-TestTweak -Id 'apps.news' -Type $Type -Scope 'machine' -Set ([pscustomobject]$Set)
+        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($tweak) | Out-Null
         Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
         Mock -ModuleName Tuneup Test-TuneupState { throw 'must not read' }
         $status = @(Get-TuneupStatus -StateRoot $Root)

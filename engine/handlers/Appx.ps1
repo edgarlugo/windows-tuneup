@@ -1,7 +1,7 @@
 # Appx package names look like Microsoft.BingNews; Store ids are the 12-character product ids
 # that winget uses with --source msstore.
-$script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}$'
-$script:StoreIdPattern = '^[0-9A-Z]{12}$'
+$script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}\z'
+$script:StoreIdPattern = '^[0-9A-Z]{12}\z'
 
 # The lists are read once per process and dropped after any change, so a plan, the apply and the
 # check that follows it do not each list every package again.
