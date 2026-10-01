@@ -19,6 +19,7 @@ function New-TuneupContext {
         Environment  = $null
         ScriptRoot   = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
+        InputEnded   = $false
         ExitCode     = 1
         Result       = $null
     }
@@ -149,8 +150,9 @@ function Invoke-TuneupUndoCommand {
     $Context.ExitCode = Get-TuneupUndoExitCode -Results $results
 }
 
+# -Previous: a health report whose check is reused, so -Repair only repairs (the menu offers it).
 function Invoke-TuneupHealthCommand {
-    param([Parameter(Mandatory)]$Context, [switch]$Repair)
+    param([Parameter(Mandatory)]$Context, [switch]$Repair, $Previous)
     $environment = Get-TuneupContextEnvironment -Context $Context
     if (-not $environment.IsAdmin) {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
@@ -158,7 +160,7 @@ function Invoke-TuneupHealthCommand {
     }
     if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'health.running') }
     # One line per phase for people; with -Json nothing but the document goes to the output.
-    $healthArguments = @{ Repair = $Repair }
+    $healthArguments = @{ Repair = $Repair; Previous = $Previous }
     if (-not $Context.Json) {
         $io = $Context.Io
         $healthArguments.OnPhase = { param($Name) Write-TuneupIoLine -Io $io -Text (Get-TuneupText -Key "health.phase.$Name") }.GetNewClosure()
@@ -524,6 +526,8 @@ function Invoke-TuneupCli {
     Invoke-TuneupContextStep -Context $Context -Step { Write-TuneupActionLoadWarning }
     Get-TuneupContextEnvironment -Context $Context | Out-Null
 
+    # No command and no option of applying: the menu (with -Json there is nobody to ask).
+    if (-not $present.Count -and -not $Context.Json) { Invoke-TuneupMenu -Context $Context; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

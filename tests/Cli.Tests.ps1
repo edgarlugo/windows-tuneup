@@ -236,6 +236,12 @@ Describe 'tuneup.ps1' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
+    It 'leaves the menu at the end of standard input' {
+        $output = @('2') | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en
+        $LASTEXITCODE | Should -Be 0
+        ($output -join "`n") | Should -Match 'windows-tuneup has not applied any tweak'
+    }
+
     It 'undoes the last run' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
