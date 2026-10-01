@@ -47,7 +47,7 @@ Este texto se copia en la Task 1 como sección 10 de la especificación.
 4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
 5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
 6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura, por separado para CA y CC y con el primero que exista: el valor propio del plan en `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`); luego el predeterminado aprovisionado (`ProvAcSettingIndex`/`ProvDcSettingIndex`) de `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`, que Windows prefiere al simple; y por último `ACSettingIndex`/`DCSettingIndex` de esa misma clave. Si la definición `PowerSettings\<subgrupo>\<valor>` no existe, o el plan indicado por GUID no aparece en `powercfg /list`, es `not-present`. Un dato que no es DWORD da un error que nombra el valor. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`, y los 28 ajustes visibles de `powercfg /q SCHEME_CURRENT` coinciden con la lectura (5 tienen `Prov*` y difieren del valor simple: por ejemplo, apagar el disco con CA da 1200 simple y 30 efectivo). `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás (DC o volver a activar el plan) falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer". Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan; el estado leído es el del plan, no el que la directiva fuerza.
-7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
+7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyos nombres son los cuatro del contrato o ayudantes `<Verbo>-<Pascal>ActionHelper<Nombre>` (el `<Nombre>` no puede volver a contener `Action`, así ningún nombre de una acción puede igualar un nombre de contrato de otra: `foo` no puede definir `Set-FooActionXActionDesired`, que es de `foo-action-x`). Además se rechaza, sin distinguir mayúsculas, un nombre reservado (`tuneup...`, también `tune-up`), una función que otra acción ya define (`a-b` y `ab` dan los mismos nombres), una que ya sea un comando (el motor, un cmdlet, otro módulo) y un bloque `dynamicparam`. Solo se leen archivos con extensión exactamente `.ps1` (no `.ps1xml`) y las funciones de las acciones no se exportan del módulo. Modelo de confianza: `windows-tuneup` debe correrse desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`); la revisión del AST es defensa en profundidad, no sustituye ese permiso de carpeta, porque quien pueda escribir en `actions/` ejecuta código con los permisos de quien aplique el ajuste. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
 9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
 10. **-Health.** Exige administrador. Corre `sfc /scannow` y `DISM /Online /Cleanup-Image /ScanHealth /English`, guardando el código de salida y los bytes crudos de la salida, que se decodifican después (sfc escribe UTF-16 al redirigirse y DISM usa la página OEM); se guardan en memoria, no en un archivo temporal. El resultado se lee de `%windir%\Logs\CBS\CBS.log` y de los `CbsPersist_*.log` modificados desde el inicio (Windows rota CBS.log en medio de una revisión larga), solo con líneas desde la hora de inicio: `[SR] Repairing N components`, `[SR] Cannot repair member file`, `[SR] Repairing corrupted file`, `[Pnp] Corrupt file`/`[Pnp] Repaired file`, el bloque `Summary` que sigue a `Checking System Update Readiness` (`Operation`, `Operation result`, `Total Detected Corruption`, `Total Repaired Corruption`) y las líneas `(p) CSI Payload Corrupt` que no dicen `(Fixed)`, agrupadas por componente. Resumen: SFC `clean|repaired|unrepaired|unknown`, almacén de componentes `healthy|repairable|repaired|unrepairable|unknown`, grupos dañados y recomendación `none|run-repair|manual-repair|check-logs`. El código de salida de SFC no está documentado: se muestra, pero no decide. `-Repair` corre `DISM /RestoreHealth` y SFC otra vez solo si hace falta, e informa antes y después. Código de salida: `0` sin problemas, `2` quedan problemas o no se pudo confirmar, `1` no se pudo empezar (sin administrador). No hay pregunta interactiva para reparar: el menú es del Plan 4.
@@ -123,7 +123,7 @@ secciones anteriores, manda esta.
 4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
 5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
 6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura, por separado para CA y CC y con el primero que exista: el valor propio del plan en `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`); luego el predeterminado aprovisionado (`ProvAcSettingIndex`/`ProvDcSettingIndex`) de `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`, que Windows prefiere al simple; y por último `ACSettingIndex`/`DCSettingIndex` de esa misma clave. Si la definición `PowerSettings\<subgrupo>\<valor>` no existe, o el plan indicado por GUID no aparece en `powercfg /list`, es `not-present`. Un dato que no es DWORD da un error que nombra el valor. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`, y los 28 ajustes visibles de `powercfg /q SCHEME_CURRENT` coinciden con la lectura (5 tienen `Prov*` y difieren del valor simple: por ejemplo, apagar el disco con CA da 1200 simple y 30 efectivo). `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás (DC o volver a activar el plan) falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer". Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan; el estado leído es el del plan, no el que la directiva fuerza.
-7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
+7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyos nombres son los cuatro del contrato o ayudantes `<Verbo>-<Pascal>ActionHelper<Nombre>` (el `<Nombre>` no puede volver a contener `Action`, así ningún nombre de una acción puede igualar un nombre de contrato de otra: `foo` no puede definir `Set-FooActionXActionDesired`, que es de `foo-action-x`). Además se rechaza, sin distinguir mayúsculas, un nombre reservado (`tuneup...`, también `tune-up`), una función que otra acción ya define (`a-b` y `ab` dan los mismos nombres), una que ya sea un comando (el motor, un cmdlet, otro módulo) y un bloque `dynamicparam`. Solo se leen archivos con extensión exactamente `.ps1` (no `.ps1xml`) y las funciones de las acciones no se exportan del módulo. Modelo de confianza: `windows-tuneup` debe correrse desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`); la revisión del AST es defensa en profundidad, no sustituye ese permiso de carpeta, porque quien pueda escribir en `actions/` ejecuta código con los permisos de quien aplique el ajuste. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
 9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
 10. **-Health.** Exige administrador. Corre `sfc /scannow` y `DISM /Online /Cleanup-Image /ScanHealth /English`, guardando el código de salida y los bytes crudos de la salida, que se decodifican después (sfc escribe UTF-16 al redirigirse y DISM usa la página OEM); se guardan en memoria, no en un archivo temporal. El resultado se lee de `%windir%\Logs\CBS\CBS.log` y de los `CbsPersist_*.log` modificados desde el inicio (Windows rota CBS.log en medio de una revisión larga), solo con líneas desde la hora de inicio: `[SR] Repairing N components`, `[SR] Cannot repair member file`, `[SR] Repairing corrupted file`, `[Pnp] Corrupt file`/`[Pnp] Repaired file`, el bloque `Summary` que sigue a `Checking System Update Readiness` (`Operation`, `Operation result`, `Total Detected Corruption`, `Total Repaired Corruption`) y las líneas `(p) CSI Payload Corrupt` que no dicen `(Fixed)`, agrupadas por componente. Resumen: SFC `clean|repaired|unrepaired|unknown`, almacén de componentes `healthy|repairable|repaired|unrepairable|unknown`, grupos dañados y recomendación `none|run-repair|manual-repair|check-logs`. El código de salida de SFC no está documentado: se muestra, pero no decide. `-Repair` corre `DISM /RestoreHealth` y SFC otra vez solo si hace falta, e informa antes y después. Código de salida: `0` sin problemas, `2` quedan problemas o no se pudo confirmar, `1` no se pudo empezar (sin administrador). No hay pregunta interactiva para reparar: el menú es del Plan 4.
@@ -3317,6 +3317,14 @@ BeforeAll {
         foreach ($name in $Files.Keys) { [System.IO.File]::WriteAllText((Join-Path $dir $name), $Files[$name]) }
         $dir
     }
+    function New-ContractFor([string]$Pascal) {
+        @(
+            "function Get-${Pascal}ActionState { param(`$Tweak) `$null }"
+            "function Test-${Pascal}ActionState { param(`$Tweak) 'applied' }"
+            "function Set-${Pascal}ActionDesired { param(`$Tweak) }"
+            "function Restore-${Pascal}ActionState { param(`$Tweak, `$State) }"
+        ) -join "`r`n"
+    }
     $script:Contract = @'
 function Get-BadOneActionState { param($Tweak) $null }
 function Test-BadOneActionState { param($Tweak) 'applied' }
@@ -3388,6 +3396,87 @@ function Restore-BadOneActionState { param($Tweak, $State) }
         { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*param() block*'
     }
 
+    It 'refuses reserved names whatever their case' {
+        $dir = New-ActionFolder @{ 'tune-up.ps1' = (New-ContractFor 'TuneUp') + "`r`nfunction Get-TuneUpActionCommand { param(`$Tweak) 1 }" }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*reserved for the engine*'
+        $dir = New-ActionFolder @{ 'tuneup-two.ps1' = (New-ContractFor 'TuneupTwo') }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*reserved for the engine*'
+    }
+
+    It 'refuses a function that another action script already defines' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'a-b.ps1' = (New-ContractFor 'AB') })
+        $dir = New-ActionFolder @{ 'ab.ps1' = (New-ContractFor 'Ab') }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw "*defines Get-AbActionState, which action script 'a-b' already defines*"
+    }
+
+    It 'refuses a function that is a contract name of another action script' {
+        Import-TuneupActionLibrary -Path (New-ActionFolder @{ 'foo-action-x.ps1' = (New-ContractFor 'FooActionX') })
+        $dir = New-ActionFolder @{ 'foo.ps1' = ((New-ContractFor 'Foo') + "`r`nfunction Set-FooActionXActionDesired { param(`$Tweak) }") }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*defines Set-FooActionXActionDesired*'
+    }
+
+    It 'refuses a function that would shadow an existing command' {
+        function global:Get-ShadowOneActionHelperRead { 'global' }
+        try {
+            $dir = New-ActionFolder @{ 'shadow-one.ps1' = ((New-ContractFor 'ShadowOne') + "`r`nfunction Get-ShadowOneActionHelperRead { param() 1 }") }
+            { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*Get-ShadowOneActionHelperRead, which is already a command*'
+        } finally {
+            Remove-Item -LiteralPath 'Function:\global:Get-ShadowOneActionHelperRead'
+        }
+    }
+
+    It 'allows helper functions named <Verb>-<Pascal>ActionHelper<Name>' {
+        $dir = New-ActionFolder @{ 'helper-ok.ps1' = ((New-ContractFor 'HelperOk') + "`r`nfunction Get-HelperOkActionHelperRead { param() 7 }") }
+        Import-TuneupActionLibrary -Path $dir
+        (& (Get-Module Tuneup) { Get-HelperOkActionHelperRead }) | Should -Be 7
+    }
+
+    It 'reloads the same script without calling it a duplicate' {
+        $dir = New-ActionFolder @{ 'again-one.ps1' = (New-ContractFor 'AgainOne') }
+        Import-TuneupActionLibrary -Path $dir
+        { Import-TuneupActionLibrary -Path $dir } | Should -Not -Throw
+    }
+
+    It 'refuses function names that are neither a contract name nor a helper (<Name>)' -TestCases @(
+        @{ Name = 'Get-BadOneActionFoo' }
+        @{ Name = 'Get-BadOneActionHelperActionX' }
+        @{ Name = 'Get-BadOneActionStates' }
+        @{ Name = 'Get-BadOne' }
+    ) {
+        param($Name)
+        $dir = New-ActionFolder @{ 'bad-one.ps1' = ($Contract + "`r`nfunction $Name { param() }") }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw "*defines $Name*"
+    }
+
+    It 'refuses a function with a dynamicparam block' {
+        $dynamic = $Contract + "`r`nfunction Get-BadOneActionHelperDyn { dynamicparam { } }"
+        $dir = New-ActionFolder @{ 'bad-one.ps1' = $dynamic }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Throw '*dynamicparam*'
+    }
+
+    It 'only takes files whose extension is exactly .ps1' {
+        $dir = New-ActionFolder @{ 'long-file-name.ps1xml' = '<Types />'; 'other-file.ps1.txt' = 'x' }
+        { Import-TuneupActionLibrary -Path $dir } | Should -Not -Throw
+        $tweak = New-TestTweak -Id 'test.xml' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'long-file-name' })
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'not in the actions folder'
+    }
+
+    It 'does not export the functions of action scripts' {
+        # The module loads <root>\actions while it is imported, so a copy of the engine with an
+        # actions folder next to it is imported in a separate process to see what it exports.
+        $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $copy | Out-Null
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\engine') -Destination (Join-Path $copy 'engine') -Recurse
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'fixtures\actions') -Destination (Join-Path $copy 'actions') -Recurse
+        $module = Join-Path $copy 'engine\Tuneup.psm1'
+        $command = "Import-Module '$module'; (Get-Module Tuneup).ExportedFunctions.Keys; '--'; & (Get-Module Tuneup) { Get-FixtureToggleActionState -Tweak ([pscustomobject]@{}) | Out-Null; 'loaded' }"
+        $output = @(& powershell -NoProfile -ExecutionPolicy Bypass -Command $command)
+        $output -contains 'Get-TuneupState' | Should -BeTrue
+        $output -contains 'Import-TuneupActionLibrary' | Should -BeTrue
+        $output -contains 'loaded' | Should -BeTrue
+        ($output | Where-Object { $_ -like '*FixtureToggle*' }) | Should -BeNullOrEmpty
+    }
+
     It 'ignores a folder that does not exist' {
         { Import-TuneupActionLibrary -Path (Join-Path $TestDrive 'none') } | Should -Not -Throw
     }
@@ -3457,6 +3546,8 @@ Expected: FAIL, `Import-TuneupActionLibrary` no se reconoce como comando.
 $script:ActionNamePattern = '^[a-z0-9]+(-[a-z0-9]+)*$'
 # Loaded action scripts: name -> file.
 $script:TuneupActionScripts = @{}
+# Function names defined by action scripts: name -> script (hashtables ignore case).
+$script:TuneupActionFunctions = @{}
 
 function ConvertTo-TuneupPascalName {
     param([Parameter(Mandatory)][string]$Name)
@@ -3476,16 +3567,18 @@ function Get-TuneupActionFunctionName {
 function Import-TuneupActionLibrary {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
-    foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.ps1' -File | Sort-Object Name) {
+    # -Filter '*.ps1' also matches names such as x.ps1xml (through their short names).
+    foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.ps1' -File | Where-Object { $_.Extension -eq '.ps1' } | Sort-Object Name) {
         $name = $file.BaseName
         $pascal = ConvertTo-TuneupPascalName -Name $name
-        if ($pascal -clike 'Tuneup*') { throw "Action script $($file.Name): names starting with tuneup are reserved for the engine" }
+        if ($pascal -like 'Tuneup*') { throw "Action script $($file.Name): names starting with tuneup are reserved for the engine" }
         $tokens = $null
         $parseErrors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw "Action script $($file.Name) has a syntax error: $($parseErrors[0].Message)" }
         # The file is never run: only its function definitions are taken, so loading it cannot
-        # execute code, and the name check keeps it from replacing functions of the engine.
+        # execute code, and the name rules keep it from replacing functions of the engine or of
+        # another action script.
         $onlyFunctions = ($null -eq $ast.ParamBlock -and $null -eq $ast.BeginBlock -and $null -eq $ast.ProcessBlock -and
             $null -eq $ast.DynamicParamBlock -and -not @($ast.UsingStatements).Count)
         $definitions = New-Object System.Collections.Generic.List[object]
@@ -3496,24 +3589,47 @@ function Import-TuneupActionLibrary {
             }
         }
         if (-not $onlyFunctions) { throw "Action script $($file.Name) may only define functions" }
+        $contract = @{}
+        foreach ($verb in 'Get', 'Test', 'Set', 'Restore') { $contract[(Get-TuneupActionFunctionName -Name $name -Verb $verb)] = $true }
+        $seen = @{}
         foreach ($definition in $definitions) {
-            if ($definition.Name -cnotmatch "^[A-Z][a-z]+-$($pascal)Action[A-Za-z0-9]*$") {
-                throw "Action script $($file.Name) defines $($definition.Name); its functions must be named <Verb>-$($pascal)Action..."
+            $function = $definition.Name
+            # A function is one of the four contract names or a helper <Verb>-<Pascal>ActionHelper<Name>
+            # whose name never contains Action again, so no name of one script can equal a contract
+            # name of another (FooActionX has Set-FooActionXActionDesired; Foo cannot define it).
+            $isHelper = $function -cmatch "^[A-Z][a-z]+-$($pascal)ActionHelper[A-Za-z0-9]*$" -and
+                $function.Substring($function.IndexOf('ActionHelper') + 'ActionHelper'.Length) -notlike '*Action*'
+            if ($function -like '*-Tuneup*' -or -not ($contract.ContainsKey($function) -or $isHelper)) {
+                throw "Action script $($file.Name) defines $function; its functions must be the four contract names or helpers named <Verb>-$($pascal)ActionHelper<Name>"
             }
             if ($definition.IsFilter -or $definition.IsWorkflow) {
-                throw "Action script $($file.Name) must define $($definition.Name) as a plain function"
+                throw "Action script $($file.Name) must define $function as a plain function"
             }
             if ($null -ne $definition.Parameters) {
-                throw "Action script $($file.Name) must declare the parameters of $($definition.Name) in a param() block"
+                throw "Action script $($file.Name) must declare the parameters of $function in a param() block"
+            }
+            if ($null -ne $definition.Body.DynamicParamBlock) {
+                throw "Action script $($file.Name) must not use a dynamicparam block in $function"
+            }
+            if ($seen.ContainsKey($function)) { throw "Action script $($file.Name) defines $function twice" }
+            $seen[$function] = $true
+            # Names compare without regard to case (a-b and ab both give AB/Ab). A name that is
+            # already a command (the engine, a cmdlet, another module) is never replaced.
+            $owner = $script:TuneupActionFunctions[$function]
+            if ($null -ne $owner -and $owner -ne $name) {
+                throw "Action script $($file.Name) defines $function, which action script '$owner' already defines"
+            }
+            if ($null -eq $owner -and $null -ne (Get-Command -Name $function -ErrorAction SilentlyContinue)) {
+                throw "Action script $($file.Name) defines $function, which is already a command"
             }
         }
-        $defined = @($definitions | ForEach-Object { $_.Name })
         foreach ($verb in 'Get', 'Test', 'Set', 'Restore') {
             $required = Get-TuneupActionFunctionName -Name $name -Verb $verb
-            if ($defined -cnotcontains $required) { throw "Action script $($file.Name) does not define $required" }
+            if (-not $seen.ContainsKey($required)) { throw "Action script $($file.Name) does not define $required" }
         }
         foreach ($definition in $definitions) {
             Set-Item -LiteralPath "Function:script:$($definition.Name)" -Value $definition.Body.GetScriptBlock()
+            $script:TuneupActionFunctions[$definition.Name] = $name
         }
         $script:TuneupActionScripts[$name] = $file.FullName
     }
@@ -3566,15 +3682,19 @@ Reemplazar `engine/Tuneup.psm1` completo por:
 ```powershell
 $ErrorActionPreference = 'Stop'
 $engineRoot = $PSScriptRoot
+$functionsBefore = @(Get-ChildItem -LiteralPath Function:\ | ForEach-Object { $_.Name })
 foreach ($folder in @($engineRoot, (Join-Path $engineRoot 'handlers'))) {
     if (-not (Test-Path -LiteralPath $folder)) { continue }
-    foreach ($file in Get-ChildItem -LiteralPath $folder -Filter '*.ps1' | Sort-Object Name) {
+    # -Filter '*.ps1' also matches names such as x.ps1xml (through their short names).
+    foreach ($file in Get-ChildItem -LiteralPath $folder -Filter '*.ps1' -File | Where-Object { $_.Extension -eq '.ps1' } | Sort-Object Name) {
         . $file.FullName
     }
 }
+# Only the engine is exported: the functions of action scripts stay inside the module.
+$engineFunctions = @(Get-ChildItem -LiteralPath Function:\ | ForEach-Object { $_.Name } | Where-Object { $functionsBefore -notcontains $_ })
 # Action scripts are parsed, never run: only their functions are defined (handlers/Action.ps1).
 Import-TuneupActionLibrary -Path (Join-Path (Split-Path $engineRoot -Parent) 'actions')
-Export-ModuleMember -Function *
+Export-ModuleMember -Function $engineFunctions
 ```
 
 En `engine/Dispatch.ps1`, agregar a la tabla, después de `powercfg`:

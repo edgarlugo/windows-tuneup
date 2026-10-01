@@ -1,6 +1,8 @@
 $script:ActionNamePattern = '^[a-z0-9]+(-[a-z0-9]+)*$'
 # Loaded action scripts: name -> file.
 $script:TuneupActionScripts = @{}
+# Function names defined by action scripts: name -> script (hashtables ignore case).
+$script:TuneupActionFunctions = @{}
 
 function ConvertTo-TuneupPascalName {
     param([Parameter(Mandatory)][string]$Name)
@@ -20,16 +22,18 @@ function Get-TuneupActionFunctionName {
 function Import-TuneupActionLibrary {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return }
-    foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.ps1' -File | Sort-Object Name) {
+    # -Filter '*.ps1' also matches names such as x.ps1xml (through their short names).
+    foreach ($file in Get-ChildItem -LiteralPath $Path -Filter '*.ps1' -File | Where-Object { $_.Extension -eq '.ps1' } | Sort-Object Name) {
         $name = $file.BaseName
         $pascal = ConvertTo-TuneupPascalName -Name $name
-        if ($pascal -clike 'Tuneup*') { throw "Action script $($file.Name): names starting with tuneup are reserved for the engine" }
+        if ($pascal -like 'Tuneup*') { throw "Action script $($file.Name): names starting with tuneup are reserved for the engine" }
         $tokens = $null
         $parseErrors = $null
         $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
         if ($parseErrors.Count) { throw "Action script $($file.Name) has a syntax error: $($parseErrors[0].Message)" }
         # The file is never run: only its function definitions are taken, so loading it cannot
-        # execute code, and the name check keeps it from replacing functions of the engine.
+        # execute code, and the name rules keep it from replacing functions of the engine or of
+        # another action script.
         $onlyFunctions = ($null -eq $ast.ParamBlock -and $null -eq $ast.BeginBlock -and $null -eq $ast.ProcessBlock -and
             $null -eq $ast.DynamicParamBlock -and -not @($ast.UsingStatements).Count)
         $definitions = New-Object System.Collections.Generic.List[object]
@@ -40,24 +44,47 @@ function Import-TuneupActionLibrary {
             }
         }
         if (-not $onlyFunctions) { throw "Action script $($file.Name) may only define functions" }
+        $contract = @{}
+        foreach ($verb in 'Get', 'Test', 'Set', 'Restore') { $contract[(Get-TuneupActionFunctionName -Name $name -Verb $verb)] = $true }
+        $seen = @{}
         foreach ($definition in $definitions) {
-            if ($definition.Name -cnotmatch "^[A-Z][a-z]+-$($pascal)Action[A-Za-z0-9]*$") {
-                throw "Action script $($file.Name) defines $($definition.Name); its functions must be named <Verb>-$($pascal)Action..."
+            $function = $definition.Name
+            # A function is one of the four contract names or a helper <Verb>-<Pascal>ActionHelper<Name>
+            # whose name never contains Action again, so no name of one script can equal a contract
+            # name of another (FooActionX has Set-FooActionXActionDesired; Foo cannot define it).
+            $isHelper = $function -cmatch "^[A-Z][a-z]+-$($pascal)ActionHelper[A-Za-z0-9]*$" -and
+                $function.Substring($function.IndexOf('ActionHelper') + 'ActionHelper'.Length) -notlike '*Action*'
+            if ($function -like '*-Tuneup*' -or -not ($contract.ContainsKey($function) -or $isHelper)) {
+                throw "Action script $($file.Name) defines $function; its functions must be the four contract names or helpers named <Verb>-$($pascal)ActionHelper<Name>"
             }
             if ($definition.IsFilter -or $definition.IsWorkflow) {
-                throw "Action script $($file.Name) must define $($definition.Name) as a plain function"
+                throw "Action script $($file.Name) must define $function as a plain function"
             }
             if ($null -ne $definition.Parameters) {
-                throw "Action script $($file.Name) must declare the parameters of $($definition.Name) in a param() block"
+                throw "Action script $($file.Name) must declare the parameters of $function in a param() block"
+            }
+            if ($null -ne $definition.Body.DynamicParamBlock) {
+                throw "Action script $($file.Name) must not use a dynamicparam block in $function"
+            }
+            if ($seen.ContainsKey($function)) { throw "Action script $($file.Name) defines $function twice" }
+            $seen[$function] = $true
+            # Names compare without regard to case (a-b and ab both give AB/Ab). A name that is
+            # already a command (the engine, a cmdlet, another module) is never replaced.
+            $owner = $script:TuneupActionFunctions[$function]
+            if ($null -ne $owner -and $owner -ne $name) {
+                throw "Action script $($file.Name) defines $function, which action script '$owner' already defines"
+            }
+            if ($null -eq $owner -and $null -ne (Get-Command -Name $function -ErrorAction SilentlyContinue)) {
+                throw "Action script $($file.Name) defines $function, which is already a command"
             }
         }
-        $defined = @($definitions | ForEach-Object { $_.Name })
         foreach ($verb in 'Get', 'Test', 'Set', 'Restore') {
             $required = Get-TuneupActionFunctionName -Name $name -Verb $verb
-            if ($defined -cnotcontains $required) { throw "Action script $($file.Name) does not define $required" }
+            if (-not $seen.ContainsKey($required)) { throw "Action script $($file.Name) does not define $required" }
         }
         foreach ($definition in $definitions) {
             Set-Item -LiteralPath "Function:script:$($definition.Name)" -Value $definition.Body.GetScriptBlock()
+            $script:TuneupActionFunctions[$definition.Name] = $name
         }
         $script:TuneupActionScripts[$name] = $file.FullName
     }
