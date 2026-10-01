@@ -98,7 +98,7 @@ function New-TuneupApplyReport {
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
             partial       = & $count 'partial'
-            notApplied   = & $count 'not-applied'
+            notApplied    =& $count 'not-applied'
             failed        = & $count 'failed'
             skipped       = & $count 'skipped'
             journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count

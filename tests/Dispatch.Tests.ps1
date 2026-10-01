@@ -82,6 +82,12 @@ Describe 'Handler outcomes' {
         $outcome.detail | Should -Be 'one; two'
     }
 
+    It 'refuses a partial outcome without a detail' {
+        { New-TuneupOutcome -Partial } | Should -Throw '*A partial outcome needs a detail*'
+        { New-TuneupOutcome -Partial -Detail '' } | Should -Throw '*A partial outcome needs a detail*'
+        (New-TuneupOutcome -Partial -Detail 'x').partial | Should -BeTrue
+    }
+
     It 'returns an empty outcome for no output' {
         $outcome = Get-TuneupOutcome -Output @()
         $outcome.partial | Should -BeFalse

@@ -50,6 +50,7 @@ function Restore-TuneupState {
 # anything else a handler or a cmdlet prints is never mistaken for it.
 function New-TuneupOutcome {
     param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason)
+    if ($Partial -and -not $Detail) { throw 'A partial outcome needs a detail' }
     [pscustomobject]@{
         PSTypeName     = 'Tuneup.Outcome'
         partial        = [bool]$Partial

@@ -372,6 +372,12 @@ Describe 'Handler outcomes' {
         $outcome.detail | Should -Be 'one; two'
     }
 
+    It 'refuses a partial outcome without a detail' {
+        { New-TuneupOutcome -Partial } | Should -Throw '*A partial outcome needs a detail*'
+        { New-TuneupOutcome -Partial -Detail '' } | Should -Throw '*A partial outcome needs a detail*'
+        (New-TuneupOutcome -Partial -Detail 'x').partial | Should -BeTrue
+    }
+
     It 'returns an empty outcome for no output' {
         $outcome = Get-TuneupOutcome -Output @()
         $outcome.partial | Should -BeFalse
@@ -393,6 +399,17 @@ Agregar dentro del `Describe 'Invoke-TuneupPlan'` de `tests/Executor.Tests.ps1`,
         $results[1].status | Should -Be 'applied'
         $results[1].detail | Should -BeNullOrEmpty
         @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl')).Count | Should -Be 2
+    }
+
+    It 'reports partial even when the state reads as applied' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            Write-TuneupRegistryValue -Path $Tweak.set.path -Name $Tweak.set.name -Kind $Tweak.set.kind -Value $Tweak.set.value
+            New-TuneupOutcome -Partial -Detail 'x'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        Test-TuneupState -Tweak $One | Should -Be 'applied'
+        $results[0].status | Should -Be 'partial'
+        $results[0].detail | Should -Be 'x'
     }
 
     It 'adds a restart asked for by the handler to the catalog flag' {
@@ -470,6 +487,7 @@ Agregar al final de `engine/Dispatch.ps1`:
 # anything else a handler or a cmdlet prints is never mistaken for it.
 function New-TuneupOutcome {
     param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason)
+    if ($Partial -and -not $Detail) { throw 'A partial outcome needs a detail' }
     [pscustomobject]@{
         PSTypeName     = 'Tuneup.Outcome'
         partial        = [bool]$Partial
@@ -666,14 +684,14 @@ por:
 
 - [ ] **Step 6: Textos**
 
-En `i18n/es.json`, reemplazar la línea de `"summary"` por estas dos (la primera es nueva):
+En `i18n/es.json`, agregar `"status.partial"` justo después de `"status.applied"` y reemplazar la línea de `"summary"`:
 
 ```json
   "status.partial": "parcial",
   "summary": "Aplicados: {0} · Parciales: {1} · Sin efecto: {2} · Fallidos: {3} · Omitidos: {4}",
 ```
 
-En `i18n/en.json`, reemplazar la línea de `"summary"` por:
+En `i18n/en.json`, lo mismo:
 
 ```json
   "status.partial": "partial",
