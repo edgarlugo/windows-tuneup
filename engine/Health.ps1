@@ -179,3 +179,92 @@ function Invoke-TuneupDism {
     param([Parameter(Mandatory)][ValidateSet('ScanHealth', 'RestoreHealth')][string]$Operation)
     Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -Arguments @('/Online', '/Cleanup-Image', "/$Operation", '/English')
 }
+
+function Get-TuneupLogTime {
+    # CBS.log has one-second resolution.
+    $now = Get-Date
+    $now.AddTicks(-($now.Ticks % [TimeSpan]::TicksPerSecond))
+}
+
+function New-TuneupHealthScan {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines,
+        [Parameter(Mandatory)]$SfcRun,
+        [Parameter(Mandatory)]$DismRun
+    )
+    $sfc = Get-TuneupSfcSummary -Lines $Lines
+    $store = Get-TuneupComponentStoreSummary -Lines $Lines
+    [pscustomobject]@{
+        sfc               = [pscustomobject]@{
+            exitCode        = $SfcRun.ExitCode
+            status          = $sfc.status
+            repairedFiles   = $sfc.repairedFiles
+            unrepairedFiles = $sfc.unrepairedFiles
+            output          = $(if ($SfcRun.ExitCode) { $SfcRun.Output } else { $null })
+        }
+        componentStore    = [pscustomobject]@{
+            exitCode  = $DismRun.ExitCode
+            state     = $store.state
+            operation = $store.operation
+            detected  = $store.detected
+            repaired  = $store.repaired
+            output    = $(if ($DismRun.ExitCode) { $DismRun.Output } else { $null })
+        }
+        corruptComponents = @(Get-TuneupCorruptComponentGroup -Lines $Lines)
+    }
+}
+
+function Test-TuneupHealthNeedsRepair {
+    param([Parameter(Mandatory)]$Scan)
+    ($Scan.componentStore.state -ne 'healthy') -or ($Scan.sfc.status -eq 'unrepaired')
+}
+
+function Get-TuneupHealthRecommendation {
+    param([Parameter(Mandatory)]$Scan, [switch]$RepairRan)
+    $store = $Scan.componentStore.state
+    $sfc = $Scan.sfc.status
+    if ($store -eq 'unrepairable') { return 'manual-repair' }
+    # SFC exit codes are not documented, so only DISM's decides; SFC's result comes from CBS.log.
+    if ($store -eq 'unknown' -or $sfc -eq 'unknown' -or $Scan.componentStore.exitCode) { return 'check-logs' }
+    if ($store -eq 'repairable' -or $sfc -eq 'unrepaired') {
+        if ($RepairRan) { return 'manual-repair' }
+        return 'run-repair'
+    }
+    'none'
+}
+
+function Invoke-TuneupHealth {
+    param([switch]$Repair)
+    $started = Get-TuneupLogTime
+    $sfcRun = Invoke-TuneupSfc
+    $dismRun = Invoke-TuneupDism -Operation 'ScanHealth'
+    $scanned = Get-TuneupLogTime
+    $before = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $started -Until $scanned) -SfcRun $sfcRun -DismRun $dismRun
+    $after = $null
+    if ($Repair -and (Test-TuneupHealthNeedsRepair -Scan $before)) {
+        $restoreRun = Invoke-TuneupDism -Operation 'RestoreHealth'
+        $sfcAgain = Invoke-TuneupSfc
+        $after = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $scanned) -SfcRun $sfcAgain -DismRun $restoreRun
+    }
+    $final = $(if ($null -ne $after) { $after } else { $before })
+    $repaired = @(@($before, $after) | Where-Object { $null -ne $_ -and ($_.sfc.status -eq 'repaired' -or $_.componentStore.state -eq 'repaired') })
+    [pscustomobject]@{
+        schemaVersion     = 1
+        command           = 'health'
+        startedAt         = $started.ToString('s')
+        finishedAt        = (Get-Date).ToString('s')
+        repairRequested   = [bool]$Repair
+        repairRan         = ($null -ne $after)
+        before            = $before
+        after             = $after
+        recommendation    = Get-TuneupHealthRecommendation -Scan $final -RepairRan:($null -ne $after)
+        rebootRecommended = ($repaired.Count -gt 0)
+    }
+}
+
+# 0: no problems left. 2: problems remain or the result could not be confirmed.
+function Get-TuneupHealthExitCode {
+    param([Parameter(Mandatory)]$Report)
+    if ($Report.recommendation -eq 'none') { return 0 }
+    2
+}

@@ -189,3 +189,93 @@ Describe 'Tool output' {
         }
     }
 }
+
+Describe 'Invoke-TuneupHealth' {
+    BeforeAll {
+        $script:Healthy = @(
+            '2026-09-30 10:00:00, Info                  CSI    00000001 [SR] Repairing 0 components',
+            '2026-09-30 10:00:01, Info                  CBS    Checking System Update Readiness.',
+            '2026-09-30 10:00:01, Info                  CBS    Operation: Detect only ',
+            "2026-09-30 10:00:01, Info                  CBS    Total Detected Corruption:`t0"
+        )
+        $script:Corrupt = @($Healthy[0]) + @(Get-CbsFixture 'scanhealth-corrupt.log')
+        $script:Fixed = @(Get-CbsFixture 'restorehealth-fixed.log') + @($Healthy[0])
+        $script:NotFixed = @(Get-CbsFixture 'restorehealth-partial.log') + @($Healthy[0])
+    }
+
+    BeforeEach {
+        $script:Phase = 'scan'
+        Mock -ModuleName Tuneup Invoke-TuneupSfc { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+        Mock -ModuleName Tuneup Invoke-TuneupDism {
+            if ($Operation -eq 'RestoreHealth') { $script:Phase = 'repair' }
+            [pscustomobject]@{ ExitCode = 0; Output = '' }
+        }
+    }
+
+    It 'reports a healthy Windows and does not repair it' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { $script:Healthy }
+        $report = Invoke-TuneupHealth -Repair
+        $report.command | Should -Be 'health'
+        $report.schemaVersion | Should -Be 1
+        $report.before.sfc.status | Should -Be 'clean'
+        $report.before.componentStore.state | Should -Be 'healthy'
+        $report.repairRequested | Should -BeTrue
+        $report.repairRan | Should -BeFalse
+        $report.after | Should -BeNullOrEmpty
+        $report.recommendation | Should -Be 'none'
+        $report.rebootRecommended | Should -BeFalse
+        Get-TuneupHealthExitCode -Report $report | Should -Be 0
+        Should -Invoke Invoke-TuneupDism -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Operation -eq 'RestoreHealth' }
+    }
+
+    It 'recommends a repair without running it' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { $script:Corrupt }
+        $report = Invoke-TuneupHealth
+        $report.before.componentStore.state | Should -Be 'repairable'
+        @($report.before.corruptComponents).Count | Should -Be 3
+        $report.recommendation | Should -Be 'run-repair'
+        Get-TuneupHealthExitCode -Report $report | Should -Be 2
+        Should -Invoke Invoke-TuneupDism -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Operation -eq 'RestoreHealth' }
+    }
+
+    It 'repairs, checks again and reports before and after' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { if ($script:Phase -eq 'repair') { $script:Fixed } else { $script:Corrupt } }
+        $report = Invoke-TuneupHealth -Repair
+        $report.before.componentStore.state | Should -Be 'repairable'
+        $report.repairRan | Should -BeTrue
+        $report.after.componentStore.state | Should -Be 'repaired'
+        @($report.after.corruptComponents).Count | Should -Be 0
+        $report.recommendation | Should -Be 'none'
+        $report.rebootRecommended | Should -BeTrue
+        Get-TuneupHealthExitCode -Report $report | Should -Be 0
+        Should -Invoke Invoke-TuneupSfc -ModuleName Tuneup -Times 2 -Exactly
+        Should -Invoke Invoke-TuneupDism -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Operation -eq 'RestoreHealth' }
+    }
+
+    It 'asks for a manual repair when DISM could not fix everything' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { if ($script:Phase -eq 'repair') { $script:NotFixed } else { $script:Corrupt } }
+        $report = Invoke-TuneupHealth -Repair
+        $report.after.componentStore.state | Should -Be 'unrepairable'
+        $report.recommendation | Should -Be 'manual-repair'
+        Get-TuneupHealthExitCode -Report $report | Should -Be 2
+    }
+
+    It 'asks to check the logs when DISM fails' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { $script:Healthy }
+        Mock -ModuleName Tuneup Invoke-TuneupDism { [pscustomobject]@{ ExitCode = 87; Output = 'Error: 87' } }
+        $report = Invoke-TuneupHealth
+        $report.before.componentStore.exitCode | Should -Be 87
+        $report.before.componentStore.output | Should -Be 'Error: 87'
+        $report.recommendation | Should -Be 'check-logs'
+        Get-TuneupHealthExitCode -Report $report | Should -Be 2
+    }
+
+    It 'shows the exit code of SFC without letting it decide' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { $script:Healthy }
+        Mock -ModuleName Tuneup Invoke-TuneupSfc { [pscustomobject]@{ ExitCode = 1; Output = 'Windows Resource Protection found corrupt files' } }
+        $report = Invoke-TuneupHealth
+        $report.before.sfc.exitCode | Should -Be 1
+        $report.before.sfc.output | Should -Match 'corrupt files'
+        $report.recommendation | Should -Be 'none'
+    }
+}
