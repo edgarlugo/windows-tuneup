@@ -2,8 +2,10 @@
 # GraphicsDrivers, but the value alone does not say whether the graphics driver supports it: on a
 # driver without support Windows ignores it, and a plain registry tweak would report a change that
 # never happens. So support is asked to the graphics kernel (D3DKMTQueryAdapterInfo with
-# KMTQAITYPE_WDDM_2_7_CAPS, whose first bit is HwSchSupported) and without it the tweak is
-# not-present. Windows reads the value at boot: a restart is needed.
+# KMTQAITYPE_WDDM_2_7_CAPS, whose bits are HwSchSupported, HwSchEnabled and HwSchEnabledByDefault)
+# and without it the tweak is not-present. Without HwSchMode the driver decides: it counts as on when
+# the driver turns it on by default or says that it is on now. Windows reads the value at boot: a
+# restart is needed, and an undo asks for one only when it changes the value.
 
 function Get-GamingHagsActionHelperValue {
     param()
@@ -16,12 +18,10 @@ function Get-GamingHagsActionHelperTweak {
     [pscustomobject]@{ id = $Tweak.id; set = [pscustomobject]@{ path = $value.path; name = $value.name; kind = 'DWord'; value = $null } }
 }
 
-function Get-GamingHagsActionHelperCapability {
+function Initialize-GamingHagsActionHelperNative {
     param()
-    # One number per graphics adapter: the WDDM 2.7 capability bits, or -1 when the adapter does not
-    # answer the query (a driver older than WDDM 2.7). Only reads; nothing is changed.
-    if (-not ('WindowsTuneupGpuScheduling' -as [type])) {
-        Add-Type -ErrorAction Stop -TypeDefinition @'
+    if ('WindowsTuneupGpuScheduling' -as [type]) { return }
+    Add-Type -ErrorAction Stop -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 public static class WindowsTuneupGpuScheduling {
@@ -36,18 +36,29 @@ public static class WindowsTuneupGpuScheduling {
     [DllImport("gdi32.dll")] static extern int D3DKMTEnumAdapters2(ref EnumAdapters2 data);
     [DllImport("gdi32.dll")] static extern int D3DKMTQueryAdapterInfo(ref QueryAdapterInfo data);
     [DllImport("gdi32.dll")] static extern int D3DKMTCloseAdapter(ref CloseAdapter data);
-    const int Wddm27Caps = 70;
+    public const int Wddm27Caps = 70;
+    public const int BufferTooSmall = unchecked((int)0xC0000023);
+    public static int[] Sizes() {
+        return new int[] { Marshal.SizeOf(typeof(AdapterInfo)), Marshal.SizeOf(typeof(EnumAdapters2)), Marshal.SizeOf(typeof(QueryAdapterInfo)), Marshal.SizeOf(typeof(CloseAdapter)) };
+    }
     public static int[] Query() {
-        EnumAdapters2 list = new EnumAdapters2();
-        int status = D3DKMTEnumAdapters2(ref list);
-        if (status != 0) throw new InvalidOperationException("D3DKMTEnumAdapters2 failed with status 0x" + status.ToString("X8"));
-        if (list.Count == 0) return new int[0];
         int size = Marshal.SizeOf(typeof(AdapterInfo));
-        list.Adapters = Marshal.AllocHGlobal(size * (int)list.Count);
+        EnumAdapters2 list = new EnumAdapters2();
+        // The first call gives the number of adapters, the second fills them. An adapter that
+        // appears in between makes the second call answer STATUS_BUFFER_TOO_SMALL: count again once.
+        for (int attempt = 0; ; attempt++) {
+            list.Adapters = IntPtr.Zero;
+            int status = D3DKMTEnumAdapters2(ref list);
+            if (status != 0) throw new InvalidOperationException("D3DKMTEnumAdapters2 failed with status 0x" + status.ToString("X8"));
+            if (list.Count == 0) return new int[0];
+            list.Adapters = Marshal.AllocHGlobal(size * (int)list.Count);
+            status = D3DKMTEnumAdapters2(ref list);
+            if (status == 0) break;
+            Marshal.FreeHGlobal(list.Adapters);
+            if (status != BufferTooSmall || attempt > 0) throw new InvalidOperationException("D3DKMTEnumAdapters2 failed with status 0x" + status.ToString("X8"));
+        }
         IntPtr caps = Marshal.AllocHGlobal(4);
         try {
-            status = D3DKMTEnumAdapters2(ref list);
-            if (status != 0) throw new InvalidOperationException("D3DKMTEnumAdapters2 failed with status 0x" + status.ToString("X8"));
             int[] result = new int[list.Count];
             for (int i = 0; i < list.Count; i++) {
                 AdapterInfo adapter = (AdapterInfo)Marshal.PtrToStructure(new IntPtr(list.Adapters.ToInt64() + i * size), typeof(AdapterInfo));
@@ -70,27 +81,48 @@ public static class WindowsTuneupGpuScheduling {
     }
 }
 '@
-    }
+}
+
+function Get-GamingHagsActionHelperCapability {
+    param()
+    # One number per graphics adapter: the WDDM 2.7 capability bits, or -1 when the adapter does not
+    # answer the query (a driver older than WDDM 2.7). Only reads; nothing is changed.
+    Initialize-GamingHagsActionHelperNative
     [WindowsTuneupGpuScheduling]::Query()
+}
+
+function Get-GamingHagsActionHelperSupportedCapability {
+    param()
+    # The capability bits of the adapters that support it (bit 0, HwSchSupported). With a hybrid GPU
+    # the setting is global: one adapter with support is enough.
+    @(Get-GamingHagsActionHelperCapability | Where-Object { $_ -ge 0 -and ($_ -band 1) })
 }
 
 function Test-GamingHagsActionHelperSupported {
     param()
-    # With a hybrid GPU the setting is global: one adapter with support is enough.
-    @(Get-GamingHagsActionHelperCapability | Where-Object { $_ -ge 0 -and ($_ -band 1) }).Count -gt 0
+    @(Get-GamingHagsActionHelperSupportedCapability).Count -gt 0
 }
 
 function Get-GamingHagsActionState {
     param([Parameter(Mandatory)]$Tweak)
     $state = Get-RegistryTweakState -Tweak (Get-GamingHagsActionHelperTweak -Tweak $Tweak)
-    $state | Add-Member -NotePropertyName supported -NotePropertyValue ([bool](Test-GamingHagsActionHelperSupported)) -PassThru
+    $caps = @(Get-GamingHagsActionHelperSupportedCapability)
+    # HwSchEnabled (bit 1) or HwSchEnabledByDefault (bit 2) of an adapter that supports it.
+    $driverOn = @($caps | Where-Object { $_ -band 6 }).Count -gt 0
+    $state | Add-Member -NotePropertyName supported -NotePropertyValue ($caps.Count -gt 0)
+    $state | Add-Member -NotePropertyName driverOn -NotePropertyValue $driverOn -PassThru
 }
 
 function Test-GamingHagsActionState {
     param([Parameter(Mandatory)]$Tweak)
     $state = Get-GamingHagsActionState -Tweak $Tweak
     if (-not $state.supported) { return 'not-present' }
-    if ($state.exists -and $state.kind -eq 'DWord' -and [long]$state.value -eq 2) { return 'applied' }
+    if ($state.exists) {
+        if ($state.kind -eq 'DWord' -and [long]$state.value -eq 2) { return 'applied' }
+        return 'not-applied'
+    }
+    # Without HwSchMode the driver decides.
+    if ($state.driverOn) { return 'applied' }
     'not-applied'
 }
 
@@ -106,6 +138,11 @@ function Set-GamingHagsActionDesired {
 
 function Restore-GamingHagsActionState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
-    Restore-RegistryTweakState -Tweak (Get-GamingHagsActionHelperTweak -Tweak $Tweak) -State $State
-    New-TuneupOutcome -RebootRequired
+    $target = Get-GamingHagsActionHelperTweak -Tweak $Tweak
+    $before = Get-RegistryTweakState -Tweak $target
+    Restore-RegistryTweakState -Tweak $target -State $State
+    # Windows reads the value at boot: a restart only matters when the undo changed it.
+    $changed = ([bool]$before.exists -ne [bool]$State.exists) -or
+        ($before.exists -and ($before.kind -ne $State.kind -or -not (Test-TuneupRegistryValueEqual -Kind $before.kind -Current $before.value -Desired $State.value)))
+    if ($changed) { New-TuneupOutcome -RebootRequired }
 }

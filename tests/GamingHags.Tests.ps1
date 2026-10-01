@@ -67,6 +67,36 @@ Describe 'gaming-hags action' {
         Set-TestMode 2
         Test-TuneupState -Tweak $Tweak | Should -Be 'applied'
     }
+
+    It 'is applied without HwSchMode when the driver <Name>' -TestCases @(
+        @{ Name = 'turns it on by default'; Caps = @(0, 5) }
+        @{ Name = 'says it is on now'; Caps = @(3) }
+    ) {
+        param($Caps)
+        $script:Caps = $Caps
+        Test-TuneupState -Tweak $Tweak | Should -Be 'applied'
+        # A value of 1 turns it off whatever the driver would do.
+        Set-TestMode 1
+        Test-TuneupState -Tweak $Tweak | Should -Be 'not-applied'
+    }
+
+    It 'does not count the bits of an adapter that does not support it' {
+        $script:Caps = @(6, 1)
+        Test-TuneupState -Tweak $Tweak | Should -Be 'not-applied'
+    }
+
+    It 'asks for a restart on undo only when the undo changes the value' {
+        $state = Get-TuneupState -Tweak $Tweak
+        Set-TuneupDesired -Tweak $Tweak | Out-Null
+        # The user turned it off again by hand before the undo: nothing changes, so no restart.
+        Set-TestMode 1
+        $before = [pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $true; kind = 'DWord'; value = 1; supported = $true }
+        (Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State $before)).rebootRequired | Should -BeFalse
+        (Get-ItemProperty -LiteralPath $Key).HwSchMode | Should -Be 1
+        (Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State $state)).rebootRequired | Should -BeTrue
+        @((Get-Item -LiteralPath $Key).GetValueNames()) | Should -Not -Contain 'HwSchMode'
+        (Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State $state)).rebootRequired | Should -BeFalse
+    }
 }
 
 Describe 'gaming-hags support query' {
@@ -74,6 +104,16 @@ Describe 'gaming-hags support query' {
         $value = & (Get-Module Tuneup) { Get-GamingHagsActionHelperValue }
         $value.path | Should -Be 'HKLM:\SYSTEM\CurrentControlSet\Control\GraphicsDrivers'
         $value.name | Should -Be 'HwSchMode'
+    }
+
+    It 'lays out the structures of the graphics kernel as Windows does, and asks KMTQAITYPE_WDDM_2_7_CAPS (70)' {
+        & (Get-Module Tuneup) { Initialize-GamingHagsActionHelperNative }
+        $sizes = [WindowsTuneupGpuScheduling]::Sizes()
+        # D3DKMT_ADAPTERINFO, D3DKMT_ENUMADAPTERS2, D3DKMT_QUERYADAPTERINFO and D3DKMT_CLOSEADAPTER.
+        $expected = $(if ([IntPtr]::Size -eq 8) { @(20, 16, 24, 4) } else { @(20, 8, 16, 4) })
+        $sizes -join ',' | Should -Be ($expected -join ',')
+        [WindowsTuneupGpuScheduling]::Wddm27Caps | Should -Be 70
+        [WindowsTuneupGpuScheduling]::BufferTooSmall | Should -Be -1073741789
     }
 
     It 'asks the graphics kernel without changing anything and gets one number per adapter' {
