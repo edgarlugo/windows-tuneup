@@ -307,6 +307,11 @@ Describe 'Appx definition' {
 Describe 'Appx restore' {
     BeforeEach {
         Clear-TuneupAppxCache
+        # What the system holds while the undo runs; by default nothing is left of the app.
+        $script:NowPackages = @()
+        $script:NowProvisioned = @()
+        Mock -ModuleName Tuneup Get-AppxPackage { $script:NowPackages }
+        Mock -ModuleName Tuneup Get-AppxProvisionedPackage { $script:NowProvisioned }
         Mock -ModuleName Tuneup Get-TuneupCurrentUserSid { 'S-1-5-21-1-1-1-1001' }
         Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
         Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = 0; Output = 'Successfully installed' } }
@@ -385,14 +390,6 @@ Describe 'Appx restore' {
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly
     }
 
-    It 'does not install for another account than the one that applied the tweak' {
-        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = $Other; otherUsers = 1; provisioned = $false; version = '1.0' }
-        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
-        $outcome.reason | Should -Be 'installed-for-other-users'
-        $outcome.detail | Should -BeLike '*2 other users not restored*winget install --id 9WZDNCRFHVFW --source msstore*'
-        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
-    }
-
     It 'does nothing for an app that was not there' {
         $state = [pscustomobject]@{ installedUsers = $false; currentUserHad = $false; otherUsers = 0; provisioned = $false; version = $null }
         @(Restore-AppxTweakState -Tweak $Tweak -State $state).Count | Should -Be 0
@@ -414,6 +411,61 @@ Describe 'Appx restore' {
         $outcome.detail | Should -BeLike '*2 other users*winget install --id 9WZDNCRFHVFW --source msstore*'
         $outcome.detail | Should -BeLike '*not provisioned again*'
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'describes what is true now, not what was saved: a provisioning that is still there is not reported' {
+        $script:NowProvisioned = @($Provisioned)
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 0; provisioned = $true; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.reason | Should -Be 'reinstalled'
+        $outcome.detail | Should -BeNullOrEmpty
+    }
+
+    It 'only counts the other users that still lack the app' -TestCases @(
+        @{ Still = 0; Note = '2 other users not restored' }
+        @{ Still = 1; Note = '1 other user not restored' }
+        @{ Still = 2; Note = $null }
+        @{ Still = 3; Note = $null }
+    ) {
+        param($Still, $Note)
+        $sids = @($Other, $Third, 'S-1-5-21-1-1-1-1004') | Select-Object -First $Still
+        $script:NowPackages = @(New-FakePackage -Users @($sids | ForEach-Object { New-FakeUser -Sid $_ }))
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 2; provisioned = $false; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        if ($Note) { $outcome.detail | Should -BeLike "*$Note*" } else { $outcome.detail | Should -BeNullOrEmpty; $outcome.reason | Should -BeNullOrEmpty }
+    }
+
+    It 'does not count the copy that the current user has again among the other users' {
+        $script:NowPackages = @(New-FakePackage -Users @((New-FakeUser -Sid $Me), (New-FakeUser -Sid $Other)))
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 1; provisioned = $false; version = '1.0' }
+        @(Restore-AppxTweakState -Tweak $Tweak -State $state).Count | Should -Be 0
+    }
+
+    It 'says nothing when nothing was actually removed' {
+        $script:NowPackages = @(New-FakePackage -Users @((New-FakeUser -Sid $Me), (New-FakeUser -Sid $Other)))
+        $script:NowProvisioned = @($Provisioned)
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 1; provisioned = $true; version = '1.0' }
+        @(Restore-AppxTweakState -Tweak $Tweak -State $state).Count | Should -Be 0
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'does not tell the user to reinstall by hand an app that other users still have' {
+        $script:NowPackages = @(New-FakePackage -Users @((New-FakeUser -Sid $Other)))
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $false; otherUsers = 1; provisioned = $false; version = '1.0' }
+        @(Restore-AppxTweakState -Tweak $Tweak -State $state).Count | Should -Be 0
+    }
+
+    It 'falls back on the saved state for what it cannot read now' {
+        Mock -ModuleName Tuneup Get-AppxPackage { throw 'Access denied' }
+        Mock -ModuleName Tuneup Get-AppxProvisionedPackage { throw 'Access denied' }
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 2; provisioned = $true; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.detail | Should -BeLike '*2 other users not restored*'
+        $outcome.detail | Should -BeLike '*not provisioned again*'
     }
 
     It 'reads the app packages again after a reinstall' {

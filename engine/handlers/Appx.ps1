@@ -196,20 +196,14 @@ function Restore-AppxTweakState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
     $name = [string]$Tweak.set.name
     $manual = "winget install --id $($Tweak.set.storeId) --source msstore"
+    # Whose copy it is was already decided when the entry was read: one that belongs to another account
+    # never gets here (Get-TuneupRunJournal leaves it pending for its owner).
     # A state saved before the user fields existed only knows that someone had the app: assume the current user.
     $currentUserHad = [bool]$State.installedUsers
     if ($null -ne $State.PSObject.Properties['currentUserHad']) { $currentUserHad = [bool]$State.currentUserHad }
-    $others = 0
-    if ($null -ne $State.PSObject.Properties['otherUsers']) { $others = [int]$State.otherUsers }
-    # The copy belongs to the account that applied the tweak: another account cannot give it back.
-    if ($currentUserHad -and $null -ne $State.PSObject.Properties['currentUserSid'] -and $State.currentUserSid -and $State.currentUserSid -ne (Get-TuneupCurrentUserSid)) {
-        $currentUserHad = $false
-        $others++
-    }
-    # What the Store cannot give back: the provisioning and the other users' copies.
-    $notes = New-Object System.Collections.Generic.List[string]
-    if ($State.provisioned) { $notes.Add('not provisioned again for new users') }
-    if ($others -gt 0) { $notes.Add("$others other $(if ($others -eq 1) { 'user' } else { 'users' }) not restored") }
+    $savedOthers = 0
+    if ($null -ne $State.PSObject.Properties['otherUsers']) { $savedOthers = [int]$State.otherUsers }
+    Clear-TuneupAppxCache
     $reinstalled = $false
     if ($currentUserHad -and -not (Test-TuneupAppxInstalledForCurrentUser -Name $name)) {
         $result = Invoke-TuneupWinget -Arguments @(Get-TuneupWingetInstallArgument -StoreId $Tweak.set.storeId)
@@ -219,6 +213,28 @@ function Restore-AppxTweakState {
         Clear-TuneupAppxCache
         $reinstalled = $true
     }
+    # What the Store cannot give back, judged by what the system holds now: a provisioning or another
+    # user's copy that is still there was never lost, whatever the state saved before the removal says.
+    # What cannot be read now is taken from the saved state.
+    $provisionedLost = [bool]$State.provisioned
+    try {
+        if ($provisionedLost -and @(Get-TuneupAppxProvisionedPackage -Name $name).Count -gt 0) { $provisionedLost = $false }
+    } catch {
+        $provisionedLost = [bool]$State.provisioned
+    }
+    $others = $savedOthers
+    if ($savedOthers -gt 0) {
+        try {
+            $me = Get-TuneupCurrentUserSid
+            $othersNow = @(Get-TuneupAppxInstalledSid -Packages @(Get-TuneupAppxPackage -Name $name) | Where-Object { $_ -ne $me }).Count
+            $others = [Math]::Max(0, $savedOthers - $othersNow)
+        } catch {
+            $others = $savedOthers
+        }
+    }
+    $notes = New-Object System.Collections.Generic.List[string]
+    if ($provisionedLost) { $notes.Add('not provisioned again for new users') }
+    if ($others -gt 0) { $notes.Add("$others other $(if ($others -eq 1) { 'user' } else { 'users' }) not restored") }
     if ($reinstalled) {
         $detail = $notes -join '; '
         if ($others -gt 0) { $detail += ". Each of them can reinstall it with: $manual" }
