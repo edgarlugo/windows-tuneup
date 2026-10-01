@@ -179,9 +179,12 @@ function Write-TuneupApplyReport {
     param(
         [Parameter(Mandatory)]$Report,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
-        [switch]$Json
+        [switch]$Json,
+        # Shown from the menu: what it says about undoing names the menu, not a parameter.
+        [switch]$FromMenu
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
+    $suffix = $(if ($FromMenu) { '.menu' } else { '' })
     $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red'; 'skipped' = 'Yellow' }
     foreach ($result in $Report.results) {
         if ($result.reason -eq 'journal-error') {
@@ -202,10 +205,10 @@ function Write-TuneupApplyReport {
     Write-Host ''
     Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped, $summary.refused)
     if ($summary.PSObject.Properties['interrupted'] -and $summary.interrupted) {
-        Write-Host (Get-TuneupText -Key 'interrupted.summary' -Format $summary.interrupted) -ForegroundColor Yellow
+        Write-Host (Get-TuneupText -Key "interrupted.summary$suffix" -Format $summary.interrupted) -ForegroundColor Yellow
     }
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
-    Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
+    Write-Host (Get-TuneupText -Key "run.saved$suffix" -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
     # A restart also signs the user out, so the sign-out line is only needed without one.
     elseif ($Report.signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }

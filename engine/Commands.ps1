@@ -6,6 +6,8 @@
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
 # collected so far, the questions and answers (Io), the exit code and the last result. The exit code
 # starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
+# Menu is on while the menu runs, so what a command says about undoing names the menu and not a
+# parameter; Pause is set by a menu option that printed something to be read before the menu returns.
 function New-TuneupContext {
     param([switch]$Json, $Io)
     [pscustomobject]@{
@@ -20,6 +22,8 @@ function New-TuneupContext {
         ScriptRoot   = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
         InputEnded   = $false
+        Menu         = $false
+        Pause        = $false
         ExitCode     = 1
         Result       = $null
     }
@@ -97,16 +101,12 @@ function Invoke-TuneupReapply {
         $Context.ExitCode = 0
         return
     }
-    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
-    if ($unsupported) {
-        Write-TuneupCommandError -Context $Context -Message $unsupported
+    $ready = Get-TuneupPlanningDefinition -Context $Context
+    if ($ready.Message) {
+        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
         return
     }
-    $definition = Import-TuneupContextDefinition -Context $Context
-    if ($definition.Problems.Count) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
-        return
-    }
+    $definition = $ready.Definition
     $known = @{}
     foreach ($tweak in $definition.Catalog) { $known[[string]$tweak.id] = $true }
     $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
@@ -227,6 +227,21 @@ function Get-TuneupUnsupportedMessage {
     if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
 }
 
+# The start of every command that plans: the refusal of an unsupported Windows and the catalog with
+# its profiles. Gives { Definition, Message, Details }; Message is set when the command cannot go on
+# and its caller writes the error (with -Json the report is output, and written here it would be
+# mixed into what this returns).
+function Get-TuneupPlanningDefinition {
+    param([Parameter(Mandatory)]$Context)
+    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+    if ($unsupported) { return [pscustomobject]@{ Definition = $null; Message = $unsupported; Details = [string[]]@() } }
+    $definition = Import-TuneupContextDefinition -Context $Context
+    if ($definition.Problems.Count) {
+        return [pscustomobject]@{ Definition = $null; Message = (Get-TuneupText -Key 'err.catalog'); Details = $definition.Problems }
+    }
+    [pscustomobject]@{ Definition = $definition; Message = $null; Details = [string[]]@() }
+}
+
 # The catalog and the profiles, with the problems that the checks found (none when they are valid).
 function Import-TuneupContextDefinition {
     param([Parameter(Mandatory)]$Context)
@@ -271,16 +286,12 @@ function Invoke-TuneupApplyCommand {
         [switch]$PlanOnly,
         [switch]$Yes
     )
-    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
-    if ($unsupported) {
-        Write-TuneupCommandError -Context $Context -Message $unsupported
+    $ready = Get-TuneupPlanningDefinition -Context $Context
+    if ($ready.Message) {
+        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
         return
     }
-    $definition = Import-TuneupContextDefinition -Context $Context
-    if ($definition.Problems.Count) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
-        return
-    }
+    $definition = $ready.Definition
     $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $ProfileIds -Include $Include -Exclude $Exclude
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
@@ -382,7 +393,7 @@ function Invoke-TuneupPlannedApply {
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
     Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
     $Context.Result = $report
-    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json -FromMenu:$Context.Menu
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
 }
 
@@ -459,7 +470,9 @@ function Save-TuneupStoppedApply {
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
     if (-not $Context.Json) {
-        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' }) -Format $Run.Id)
+        $savedKey = $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' })
+        if ($Context.Menu) { $savedKey += '.menu' }
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $savedKey -Format $Run.Id)
     }
 }
 
@@ -547,7 +560,12 @@ function Invoke-TuneupCli {
     Get-TuneupContextEnvironment -Context $Context | Out-Null
 
     # No command and no option of applying: the menu (with -Json there is nobody to ask).
-    if (-not $present.Count -and -not $Context.Json) { Invoke-TuneupMenu -Context $Context; return }
+    if (-not $present.Count -and -not $Context.Json) {
+        $blocked = Get-TuneupMenuBlockMessage
+        if ($blocked) { Write-TuneupCommandError -Context $Context -Message $blocked; return }
+        Invoke-TuneupMenu -Context $Context
+        return
+    }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

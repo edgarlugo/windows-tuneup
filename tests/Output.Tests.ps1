@@ -122,7 +122,7 @@ Describe 'Reports of a run stopped with Ctrl+C' {
         $report.summary.skipped | Should -Be 1
         Get-TuneupApplyExitCode -Report $report | Should -Be 2
         $text = (Write-TuneupApplyReport -Report $report 6>&1 | Out-String)
-        $text | Should -Match 'Stopped with Ctrl\+C: 1 tweaks were not applied'
+        $text | Should -Match 'Stopped with Ctrl\+C\. Tweaks not applied: 1'
     }
 
     It 'exits with 1 when it stopped before the first tweak' {

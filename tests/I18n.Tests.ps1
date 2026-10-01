@@ -31,6 +31,16 @@ Describe 'i18n' {
         $offenders -join ', ' | Should -BeNullOrEmpty
     }
 
+    It 'has no control characters in any text, such as the tab of an unescaped path separator' {
+        foreach ($lang in 'es', 'en') {
+            $texts = Get-Content -LiteralPath (Join-Path $I18nRoot "$lang.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+            $offenders = foreach ($property in $texts.PSObject.Properties) {
+                if ([string]$property.Value -match '\p{Cc}') { $property.Name }
+            }
+            $offenders -join ', ' | Should -BeNullOrEmpty -Because $lang
+        }
+    }
+
     It 'formats texts with arguments' {
         Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
         Get-TuneupText -Key 'plan.header' -Format 3, 1 | Should -Be 'Plan: 3 to apply, 1 skipped'

@@ -55,7 +55,7 @@ Describe 'Commands' {
         $context = New-TestContext -Answers @('n')
         Invoke-TuneupApplyCommand -Context $context 6>$null
         $context.ExitCode | Should -Be 1
-        $context.Io.Output -join "`n" | Should -Match 'Apply 2 changes\? \(y/n\)'
+        $context.Io.Output -join "`n" | Should -Match 'Changes to apply: 2\. Apply\? \(y/n\)'
         $context.Io.Output -join "`n" | Should -Match 'Cancelled'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
@@ -162,7 +162,7 @@ Describe 'Commands' {
         Mock -ModuleName Tuneup New-TuneupMeasureReport { [pscustomobject]@{ schemaVersion = 1; command = 'measure' } }
         Mock -ModuleName Tuneup Write-TuneupMeasureReport { }
         Invoke-TuneupMeasureCommand -Context $context -IdleSeconds 5
-        $context.Io.Output -join "`n" | Should -Match 'Waiting 5 seconds idle'
+        $context.Io.Output -join "`n" | Should -Match 'Waiting idle before measuring \(5 s\)'
         $context.ExitCode | Should -Be 0
     }
 
@@ -272,7 +272,7 @@ Describe 'Re-applying what drifted' {
         $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 3>&1 6>&1 | Out-String)
         $text | Should -Match 'Tweak test.three was reverted but is no longer in the catalog'
         $text | Should -Match 'Plan: 1 to apply'
-        $human.Io.Output -join "`n" | Should -Match 'Apply 1 changes\? \(y/n\)'
+        $human.Io.Output -join "`n" | Should -Match 'Changes to apply: 1\. Apply\? \(y/n\)'
         $human.ExitCode | Should -Be 0
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
         (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 5
@@ -323,7 +323,7 @@ Describe 'Re-applying what drifted' {
         $human = New-TestContext
         Invoke-TuneupStatusCommand -Context $human -Reapply 6>$null
         $text = $human.Io.Output -join "`n"
-        $text | Should -Match 'Nothing to apply again among what could be checked, but 1 tweaks need administrator'
+        $text | Should -Match 'Nothing to apply again among what could be checked\. Tweaks that need administrator to be checked: 1'
         $text | Should -Not -Match 'Windows reverted no tweak'
         $human.ExitCode | Should -Be 0
     }
@@ -340,6 +340,19 @@ Describe 'Invoke-TuneupCli' {
         $documents[0].message | Should -Match 'Invalid parameter combination: -Status -Yes'
         $context.ExitCode | Should -Be 1
         Test-Path -LiteralPath $Root | Should -BeFalse
+    }
+
+    It 'opens the menu when no command is given and says why when it cannot ask' {
+        Mock -ModuleName Tuneup Invoke-TuneupMenu { }
+        Mock -ModuleName Tuneup Get-TuneupMenuBlockMessage { $null }
+        $context = New-TuneupContext
+        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -StateRoot $Root 6>$null
+        Should -Invoke Invoke-TuneupMenu -ModuleName Tuneup -Times 1 -Exactly
+        Mock -ModuleName Tuneup Get-TuneupMenuBlockMessage { 'The menu cannot ask here' }
+        $context = New-TuneupContext
+        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -StateRoot $Root 6>$null
+        Should -Invoke Invoke-TuneupMenu -ModuleName Tuneup -Times 1 -Exactly
+        $context.ExitCode | Should -Be 1
     }
 
     It 'resolves the folders into the context and runs the command they name' {

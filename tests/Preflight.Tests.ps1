@@ -126,7 +126,7 @@ Describe 'Preflight when applying' {
         Invoke-TuneupApplyCommand -Context $context 6>$null
         Should -Invoke Enable-TuneupSystemRestore -ModuleName Tuneup -Times 1 -Exactly
         $output = $context.Io.Output -join "`n"
-        $output | Should -Match 'Apply 2 changes\? \(y/n\)[\s\S]*Turn on System Restore on .* before applying\? \(y/n\)'
+        $output | Should -Match 'Changes to apply: 2\. Apply\? \(y/n\)[\s\S]*Turn on System Restore on .* before applying\? \(y/n\)'
         @($context.Result.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
         $saved = Get-Content -LiteralPath (Join-Path $context.Result.runDir 'result.json') -Raw | ConvertFrom-Json
         @($saved.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
