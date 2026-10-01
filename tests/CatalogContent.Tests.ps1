@@ -83,3 +83,23 @@ Describe 'ads catalog' {
         }
     }
 }
+
+Describe 'ui catalog' {
+    It 'ships the ui tweaks in this order' {
+        $expected = @(
+            'ui.show-file-extensions',
+            'ui.show-hidden-files',
+            'ui.taskbar-end-task',
+            'ui.task-view-button-off',
+            'ui.widgets-off',
+            'ui.news-interests-win10',
+            'ui.meet-now-win10',
+            'ui.transparency-off',
+            'ui.window-animations-off',
+            'ui.listview-shadow-off',
+            'ui.listview-alpha-select-off',
+            'ui.aero-peek-off'
+        ) -join ','
+        Get-CategoryId 'ui' | Should -Be $expected
+    }
+}
