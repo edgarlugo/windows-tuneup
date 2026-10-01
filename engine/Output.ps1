@@ -150,15 +150,19 @@ function Write-TuneupApplyReport {
         [switch]$Json
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
-    $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
+    $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red'; 'skipped' = 'Yellow' }
     foreach ($result in $Report.results) {
         if ($result.reason -eq 'journal-error') {
             Write-Host ((Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key 'status.skipped'), $result.title) + ": $(Get-TuneupText -Key 'reason.journal-error')") -ForegroundColor Red
             if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
             continue
         }
-        if ($result.status -eq 'skipped') { continue }
-        Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $colors[$result.status]
+        # Skips of the plan were already shown; a skip with a detail is a tweak that refused to change
+        # anything when it was applied, so it is shown with its reason.
+        if ($result.status -eq 'skipped' -and -not $result.detail) { continue }
+        $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
+        if ($result.status -eq 'skipped' -and $result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
+        Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor Yellow }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }

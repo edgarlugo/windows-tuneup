@@ -143,6 +143,14 @@ Describe 'Write-TuneupApplyReport' {
         $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
 
+    It 'shows a tweak that refused to change anything, with its reason and detail' {
+        $refused = [pscustomobject]@{ id = 'test.refused'; title = 'Title refused'; status = 'skipped'; reason = 'other-user'; error = $null; detail = 'Nothing was changed'; rebootRequired = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($refused, $PlanSkip)) 6>&1 | Out-String)
+        $text | Should -Match '\[skipped\] Title refused: belongs to another user'
+        $text | Should -Match 'Nothing was changed'
+        $text | Should -Not -Match 'Title skipped'
+    }
+
     It 'shows a partial tweak with its explanation' {
         $partial = [pscustomobject]@{ id = 'test.partial'; title = 'Title partial'; status = 'partial'; reason = $null; error = $null; detail = 'Stopping it failed'; rebootRequired = $false }
         $text = (Write-TuneupApplyReport -Report (New-TestReport @($partial)) 6>&1 | Out-String)

@@ -129,3 +129,46 @@ Describe 'Invoke-TuneupPlan' {
         $results[0].rebootRequired | Should -BeTrue
     }
 }
+
+Describe 'Invoke-TuneupPlan with a refusal' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { New-TuneupOutcome -Refused -Reason 'sample-refusal' -Detail 'nothing was changed' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'reports a refused tweak as skipped with its reason and detail, and goes on' {
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'skipped'
+        $results[0].reason | Should -Be 'sample-refusal'
+        $results[0].detail | Should -Be 'nothing was changed'
+        $results[0].error | Should -BeNullOrEmpty
+        $results[1].status | Should -Be 'applied'
+    }
+
+    It 'keeps the journal entry and notes the tweak as needing no undo' {
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir | Out-Null
+        @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one,test.two'
+        @(Get-TuneupUndoneTweakId -Run $Run) -join ',' | Should -Be 'test.one'
+    }
+
+    It 'never restores the refused tweak when the run is undone' {
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir | Out-Null
+        Mock -ModuleName Tuneup Restore-RegistryTweakState { } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupUndo -Run $Run)
+        ($results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored'
+        Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Test-Path -LiteralPath (Join-Path $Run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'warns, without failing the tweak, when the note cannot be written' {
+        Mock -ModuleName Tuneup Write-TuneupStateFile { throw 'disk full' } -ParameterFilter { $Path -like '*undone-tweaks.txt' }
+        $warnings = @()
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -WarningVariable warnings -WarningAction SilentlyContinue)
+        $results[0].status | Should -Be 'skipped'
+        ($warnings -join ' ') | Should -BeLike '*test.one changed nothing*disk full*'
+    }
+}

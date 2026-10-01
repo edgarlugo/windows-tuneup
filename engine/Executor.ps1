@@ -18,6 +18,18 @@ function New-TuneupResult {
     }
 }
 
+# A refused tweak changed nothing, so it is noted with the tweaks already undone. If the note cannot
+# be written, an undo calls its restore, which leaves it as it is (handlers that can refuse restore
+# only what differs from the saved state).
+function Add-TuneupRefusedMark {
+    param([Parameter(Mandatory)][string]$RunDir, [Parameter(Mandatory)]$Tweak)
+    try {
+        Write-TuneupStateFile -Path (Join-Path $RunDir 'undone-tweaks.txt') -Append -Text ([string]$Tweak.id + [Environment]::NewLine)
+    } catch {
+        Write-Warning "Tweak $($Tweak.id) changed nothing, but that could not be noted for -Undo: $($_.Exception.Message)"
+    }
+}
+
 function Invoke-TuneupPlan {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
@@ -52,6 +64,13 @@ function Invoke-TuneupPlan {
             # Set may report through New-TuneupOutcome that it changed something but could not finish
             # (partial) or that Windows asked for a restart; any other output is ignored.
             $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $tweak)
+            if ($outcome.refused) {
+                # Nothing was changed. Its journal entry stays (it was written first), and the tweak
+                # is noted as needing no undo, so -Undo never calls its restore.
+                Add-TuneupRefusedMark -RunDir $RunDir -Tweak $tweak
+                New-TuneupResult -Item $item -Status 'skipped' -Reason $outcome.reason -Detail $outcome.detail
+                continue
+            }
             if ($outcome.partial) {
                 $status = 'partial'
             } elseif ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
