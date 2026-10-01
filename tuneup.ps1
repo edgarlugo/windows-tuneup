@@ -56,18 +56,10 @@ Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
 
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 
-# powershell.exe writes warnings to standard output, where they would break the JSON document,
-# so with -Json they are collected and reported inside it instead.
+# With -Json the warnings are reported inside the document; otherwise each is shown once.
 function Invoke-TuneupStep {
     param([Parameter(Mandatory)][scriptblock]$Step)
-    if (-not $Json) { return (& $Step) }
-    & $Step 3>&1 | ForEach-Object {
-        if ($_ -is [System.Management.Automation.WarningRecord]) {
-            if (-not $script:Warnings.Contains($_.Message)) { $script:Warnings.Add($_.Message) }
-        } else {
-            $_
-        }
-    }
+    Invoke-TuneupStepCollectingWarning -Step $Step -Warnings $script:Warnings -Json:$Json
 }
 
 function Stop-Tuneup {

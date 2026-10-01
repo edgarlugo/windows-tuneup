@@ -47,3 +47,30 @@ Describe 'Write-TuneupActionsPathWarning' {
         @($warned).Count | Should -Be 0
     }
 }
+
+Describe 'Invoke-TuneupStepCollectingWarning' {
+    BeforeEach {
+        $script:Collected = New-Object 'System.Collections.Generic.List[string]'
+    }
+
+    It 'shows each distinct warning once, however many steps raise it' {
+        $first = Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { Write-Warning 'same'; 'one' } 3>&1
+        $second = Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { Write-Warning 'same'; Write-Warning 'other'; 'two' } 3>&1
+        @($first | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count | Should -Be 1
+        @($second | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ',' | Should -Be 'other'
+        $Collected -join ',' | Should -Be 'same,other'
+        @($first | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] }) | Should -Be 'one'
+    }
+
+    It 'keeps the warnings out of the output with -Json and collects them once' {
+        $output = Invoke-TuneupStepCollectingWarning -Warnings $Collected -Json -Step { Write-Warning 'same'; Write-Warning 'same'; 'one' } 3>&1
+        @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count | Should -Be 0
+        $Collected -join ',' | Should -Be 'same'
+        @($output) | Should -Be 'one'
+    }
+
+    It 'returns what the step returns, and lets an error go through' {
+        @(Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { 1, 2, 3 }) -join ',' | Should -Be '1,2,3'
+        { Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { throw 'boom' } } | Should -Throw 'boom'
+    }
+}

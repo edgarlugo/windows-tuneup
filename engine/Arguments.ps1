@@ -24,3 +24,24 @@ function Write-TuneupActionsPathWarning {
     param()
     if (Test-TuneupAdmin) { Write-Warning '-ActionsPath loads functions that run with administrator rights; use only for development and testing' }
 }
+
+# powershell.exe writes warnings to standard output, where they would break the JSON document, so
+# with -Json they are collected (to go inside it) instead of shown. A warning that several steps
+# raise (the -StateRoot one comes from each state read and write) is shown and collected once.
+function Invoke-TuneupStepCollectingWarning {
+    param(
+        [Parameter(Mandatory)][scriptblock]$Step,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[string]]$Warnings,
+        [switch]$Json
+    )
+    & $Step 3>&1 | ForEach-Object {
+        if ($_ -is [System.Management.Automation.WarningRecord]) {
+            if (-not $Warnings.Contains($_.Message)) {
+                $Warnings.Add($_.Message)
+                if (-not $Json) { Write-Warning $_.Message }
+            }
+        } else {
+            $_
+        }
+    }
+}
