@@ -5200,7 +5200,7 @@ Describe 'Measure-TuneupSystem' {
     BeforeEach {
         $script:Boot = (Get-Date).AddMinutes(-90)
         $script:BootDuration = [pscustomobject]@{ milliseconds = 53789; reason = $null }
-        Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ TotalVisibleMemorySize = [uint64]16777216; FreePhysicalMemory = [uint64]8388608; LastBootUpTime = $script:Boot } } -ParameterFilter { $ClassName -eq 'Win32_OperatingSystem' }
+        Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ TotalVisibleMemorySize = [uint64]16777216; FreePhysicalMemory = [uint64]4194304; LastBootUpTime = $script:Boot } } -ParameterFilter { $ClassName -eq 'Win32_OperatingSystem' }
         Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ FreeSpace = [uint64]107374182400 } } -ParameterFilter { $ClassName -eq 'Win32_LogicalDisk' }
         Mock -ModuleName Tuneup Get-Process { 1..150 | ForEach-Object { [pscustomobject]@{ Id = $_ } } }
         Mock -ModuleName Tuneup Get-Service { [pscustomobject]@{ Status = 'Running' }; [pscustomobject]@{ Status = 'Stopped' }; [pscustomobject]@{ Status = 'Running' } }
@@ -5212,7 +5212,7 @@ Describe 'Measure-TuneupSystem' {
     It 'collects the metrics without waiting by default' {
         $measurement = Measure-TuneupSystem -Environment (New-TestEnvironment)
         $measurement.schemaVersion | Should -Be 1
-        $measurement.metrics.ramInUseMB | Should -Be 8192
+        $measurement.metrics.ramInUseMB | Should -Be 12288
         $measurement.metrics.processCount | Should -Be 150
         $measurement.metrics.runningServices | Should -Be 2
         $measurement.metrics.enabledTasks | Should -Be 2
@@ -5251,6 +5251,13 @@ Describe 'Compare-TuneupMeasurement' {
         $items[4].delta | Should -Be 0.75
         $items[5].after | Should -Be 40000
         $items[5].delta | Should -BeNullOrEmpty
+    }
+
+    It 'rounds the difference to two decimals' {
+        $before = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.90 } }
+        $after = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.98 } }
+        $item = @(Compare-TuneupMeasurement -Before $before -After $after) | Where-Object { $_.metric -eq 'systemDriveFreeGB' }
+        $item.delta | Should -Be 0.08
     }
 }
 ```
@@ -5357,8 +5364,8 @@ git commit -m "feat: métricas del sistema y diferencia entre mediciones"
 ### Task 21: Medición: guardar y buscar mediciones
 
 **Files:**
-- Modify: `engine/Measure.ps1`, `engine/StateSecurity.ps1`
-- Test: `tests/Measure.Tests.ps1`
+- Modify: `engine/Measure.ps1`, `engine/StateSecurity.ps1`, `engine/StateFiles.ps1`
+- Test: `tests/Measure.Tests.ps1`, `tests/StateFiles.Tests.ps1`
 
 - [ ] **Step 1: Prueba que falla**
 
@@ -5402,6 +5409,25 @@ Describe 'Measurement files' {
         $last.Measurement.metrics.ramInUseMB | Should -Be 4000
     }
 
+    It 'never overwrites a file that already has the id' {
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        $existing = Join-Path $Root 'measurements\20260930-120000.json'
+        [System.IO.File]::WriteAllText($existing, 'keep me')
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root
+        $saved.Id | Should -Be '20260930-120000-02'
+        [System.IO.File]::ReadAllText($existing) | Should -Be 'keep me'
+    }
+
+    It 'gives up after the last suffix instead of overwriting' {
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        foreach ($name in @('20260930-120000') + @(2..99 | ForEach-Object { '20260930-120000-{0:D2}' -f $_ })) {
+            [System.IO.File]::WriteAllText((Join-Path $Root "measurements\$name.json"), 'keep me')
+        }
+        { Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root } | Should -Throw '*Cannot find a free measurement id*'
+    }
+
     It 'ignores files that are not measurements and warns about unreadable ones' {
         Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\notes.json'), '{}')
@@ -5415,6 +5441,9 @@ Describe 'Measurement files' {
         @{ Name = 'no metrics'; Json = '{}' }
         @{ Name = 'a text metric'; Json = '{"metrics":{"ramInUseMB":"lots"}}' }
         @{ Name = 'metrics that are not an object'; Json = '{"metrics":5}' }
+        @{ Name = 'empty metrics'; Json = '{"metrics":{}}' }
+        @{ Name = 'only unknown metrics'; Json = '{"metrics":{"other":1}}' }
+        @{ Name = 'only empty metrics'; Json = '{"metrics":{"ramInUseMB":null}}' }
     ) {
         param($Name, $Json)
         New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
@@ -5466,6 +5495,13 @@ Describe 'Machine measurements' {
         Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -UserRoot $UserRoot | Out-Null
         $list = @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot)
         ($list | ForEach-Object { "$($_.Id)/$($_.Root)" }) -join ',' | Should -Be '20260930-120000/machine,20260930-120005/user'
+    }
+
+    It 'gives distinct ids in the machine folder and keeps the first file' {
+        $first = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot
+        $second = Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -Machine -MachineRoot $MachineRoot
+        $second.Id | Should -Be '20260930-120000-02'
+        (Get-Content -LiteralPath $first.Path -Raw | ConvertFrom-Json).metrics.ramInUseMB | Should -Be 5000
     }
 
     It 'ignores a machine measurements folder that others can write' {
@@ -5529,6 +5565,23 @@ function Initialize-TuneupStateRoot {
 }
 ```
 
+- [ ] **Step 3b: Crear sin reemplazar**
+
+En `tests/StateFiles.Tests.ps1`, antes de `Describe 'State roots'`:
+
+```powershell
+Describe 'Create-new state files' {
+    It 'refuses to replace a file that exists and leaves it as it was' {
+        $path = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.json')
+        Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 1 }) -Root 'custom' -CreateNew
+        { Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 2 }) -Root 'custom' -CreateNew } | Should -Throw
+        (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).n | Should -Be 1
+    }
+}
+```
+
+En `engine/StateFiles.ps1`: `Write-TuneupStateFile` y `Save-TuneupJson` reciben `-CreateNew`. En una carpeta que no es de mÃ¡quina se abre con `FileMode.CreateNew` (`FileShare.None`); en la de mÃ¡quina se omite el borrado previo y `New-TuneupSecureFile` (que ya es `CreateNew`) falla si el archivo existe. En los dos casos el error es una `IOException` y el archivo existente queda intacto.
+
 - [ ] **Step 4: Mediciones en disco**
 
 Agregar al final de `engine/Measure.ps1`:
@@ -5558,29 +5611,36 @@ function Save-TuneupMeasurement {
     $dir = Join-Path $root 'measurements'
     if ($kind -ne 'machine') { New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null }
     $baseId = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $id = $baseId
-    $counter = 1
-    while (Test-Path -LiteralPath (Join-Path $dir "$id.json")) {
-        $counter++
-        $id = '{0}-{1:D2}' -f $baseId, $counter
-    }
     $saved = $Measurement | Select-Object -Property *
-    $saved | Add-Member -NotePropertyName id -NotePropertyValue $id -Force
-    $path = Join-Path $dir "$id.json"
-    Save-TuneupJson -Path $path -Object $saved -Root $kind
-    [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
+    # The file is created, never replaced: a second measurement in the same second takes the next suffix.
+    for ($counter = 1; $counter -le 99; $counter++) {
+        $id = $(if ($counter -eq 1) { $baseId } else { '{0}-{1:D2}' -f $baseId, $counter })
+        $path = Join-Path $dir "$id.json"
+        $saved | Add-Member -NotePropertyName id -NotePropertyValue $id -Force
+        try {
+            Save-TuneupJson -Path $path -Object $saved -Root $kind -CreateNew
+            return [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
+        }
+        catch {
+            if (-not ($_.Exception.GetBaseException() -is [System.IO.IOException] -and (Test-Path -LiteralPath $path))) { throw }
+        }
+    }
+    throw "Cannot find a free measurement id for $baseId"
 }
 
-# A file that parses can still be anything; comparing needs an object of numbers (or nulls).
+# A file that parses can still be anything; comparing needs at least one known metric, and the
+# known ones have to be numbers (or null).
 function Test-TuneupMeasurementShape {
     param([AllowNull()]$Data)
     if ($null -eq $Data -or $Data -isnot [pscustomobject] -or $Data.metrics -isnot [pscustomobject]) { return $false }
-    foreach ($property in $Data.metrics.PSObject.Properties) {
-        $value = $property.Value
+    $found = 0
+    foreach ($metric in $script:MeasureMetrics) {
+        $value = $Data.metrics.$metric
         if ($null -eq $value) { continue }
         if ($value -isnot [int] -and $value -isnot [long] -and $value -isnot [double] -and $value -isnot [decimal]) { return $false }
+        $found++
     }
-    $true
+    $found -gt 0
 }
 function Get-TuneupMeasurementList {
     [CmdletBinding()]
@@ -5670,6 +5730,33 @@ git commit -m "feat: mediciones guardadas con las reglas de confianza de las cor
 Agregar al final de `tests/Output.Tests.ps1`:
 
 ```powershell
+Describe 'Format-TuneupMetric' {
+    BeforeAll {
+        # The separators follow the culture of the process; the tests pin one.
+        $script:SavedCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+    }
+
+    AfterAll {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $script:SavedCulture
+    }
+
+    It 'shows a plus sign on a positive difference only' -TestCases @(
+        @{ Value = 0.75; Expected = '+0.75' }
+        @{ Value = 9; Expected = '+9' }
+        @{ Value = -600; Expected = '-600' }
+        @{ Value = 0; Expected = '0' }
+        @{ Value = $null; Expected = 'n/a' }
+    ) {
+        param($Value, $Expected)
+        Format-TuneupMetric -Value $Value -Signed | Should -Be $Expected
+    }
+
+    It 'shows a plain value without a sign' {
+        Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
+    }
+}
+
 Describe 'Write-TuneupMeasureReport' {
     BeforeAll {
         $before = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 } }
@@ -5738,6 +5825,24 @@ y agregar dentro de `Describe 'tuneup.ps1'`:
         $result = Invoke-Tuneup @('-Measure', '-Compare', '19990101-000000', '-Json')
         $result.ExitCode | Should -Be 1
         (ConvertFrom-PureJson $result.Output).message | Should -Be 'Measurement 19990101-000000 does not exist.'
+    }
+
+    It 'says there is nothing to compare against when no measurement was saved' {
+        $result = Invoke-Tuneup @('-Measure', '-Compare', 'last', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'There are no saved measurements to compare against.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
+    }
+
+    It 'rejects -IdleSeconds <Seconds> as out of range, in the JSON document' -TestCases @(
+        @{ Seconds = '-1' }
+        @{ Seconds = '3601' }
+    ) {
+        param($Seconds)
+        $result = Invoke-Tuneup @('-Measure', '-IdleSeconds', $Seconds, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-IdleSeconds must be between 0 and 3600.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
     }
 
     It 'prints a measurement for people in the chosen language' {
@@ -5831,7 +5936,7 @@ por
     [switch]$Repair,
     [switch]$Measure,
     [string]$Compare,
-    [ValidateRange(0, 3600)][int]$IdleSeconds = 0
+    [int]$IdleSeconds = 0
 )
 ```
 
@@ -5850,6 +5955,16 @@ if ($Compare) { $present += 'Compare' }
 if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
 ```
 
+El rango de `-IdleSeconds` no se valida con `ValidateRange` (su error de enlace de parÃ¡metros no sale como documento JSON): se valida en el cuerpo, justo despuÃ©s de la regla de combinaciones, con este bloque:
+
+```powershell
+# Checked here and not with ValidateRange, so that -Json gets its error as a JSON document.
+$maxIdleSeconds = 3600
+if ($PSBoundParameters.ContainsKey('IdleSeconds') -and ($IdleSeconds -lt 0 -or $IdleSeconds -gt $maxIdleSeconds)) {
+    Stop-Tuneup -Message (Get-TuneupText -Key 'err.idleSecondsRange' -Format 0, $maxIdleSeconds)
+}
+```
+
 3. Reemplazar
 
 ```powershell
@@ -5864,7 +5979,10 @@ por
         $against = $null
         if ($Compare) {
             $against = Invoke-TuneupStep { Resolve-TuneupMeasurement -StateRoot $StateRoot -Id $Compare }
-            if (-not $against) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare) }
+            if (-not $against) {
+                $missing = $(if ($Compare -eq 'last') { Get-TuneupText -Key 'err.noMeasurements' } else { Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare })
+                Stop-Tuneup -Message $missing
+            }
         }
         if ($IdleSeconds -gt 0 -and -not $Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
         $measurement = Invoke-TuneupStep { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
@@ -5882,6 +6000,8 @@ En `i18n/es.json`, agregar una coma al final de la línea `"health.recommendatio
 
 ```json
   "err.measurementNotFound": "No existe la medición {0}.",
+  "err.noMeasurements": "No hay mediciones guardadas para comparar.",
+  "err.idleSecondsRange": "-IdleSeconds debe estar entre {0} y {1}.",
   "measure.waiting": "Esperando {0} segundos en reposo antes de medir...",
   "measure.header": "Medición {0}:",
   "measure.line": "  {0}: {1}",
@@ -5907,6 +6027,8 @@ En `i18n/en.json`, en el mismo lugar:
 
 ```json
   "err.measurementNotFound": "Measurement {0} does not exist.",
+  "err.noMeasurements": "There are no saved measurements to compare against.",
+  "err.idleSecondsRange": "-IdleSeconds must be between {0} and {1}.",
   "measure.waiting": "Waiting {0} seconds idle before measuring...",
   "measure.header": "Measurement {0}:",
   "measure.line": "  {0}: {1}",
@@ -6052,6 +6174,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleS
 
 Las mediciones quedan en `measurements\` dentro de la misma carpeta de estado que las corridas.
 Measurements are kept in `measurements\` inside the same state folder as the runs.
+
+Compara solo mediciones tomadas con el mismo nivel de elevación: algunos conteos (por ejemplo la duración del arranque, y a veces servicios y tareas) cambian si PowerShell está o no como administrador.
+Compare only measurements taken at the same elevation: some counts (for example the boot duration, and sometimes services and tasks) differ when PowerShell is or is not running as administrator.
 
 ## Desarrollo / Development
 

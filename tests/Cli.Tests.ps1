@@ -340,11 +340,30 @@ Describe 'tuneup.ps1' {
         (ConvertFrom-PureJson $result.Output).message | Should -Be 'Measurement 19990101-000000 does not exist.'
     }
 
+    It 'says there is nothing to compare against when no measurement was saved' {
+        $result = Invoke-Tuneup @('-Measure', '-Compare', 'last', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'There are no saved measurements to compare against.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
+    }
+
+    It 'rejects -IdleSeconds <Seconds> as out of range, in the JSON document' -TestCases @(
+        @{ Seconds = '-1' }
+        @{ Seconds = '3601' }
+    ) {
+        param($Seconds)
+        $result = Invoke-Tuneup @('-Measure', '-IdleSeconds', $Seconds, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-IdleSeconds must be between 0 and 3600.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
+    }
+
     It 'prints a measurement for people in the chosen language' {
         $result = Invoke-Tuneup @('-Measure') -Lang 'es'
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'Procesos: \d+'
     }
+
     It 'refuses to apply with -Json but without -Yes' {
         (Invoke-Tuneup @('-Json')).ExitCode | Should -Be 1
         Test-Path -LiteralPath $Key | Should -BeFalse

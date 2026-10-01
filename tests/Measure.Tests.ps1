@@ -54,7 +54,7 @@ Describe 'Measure-TuneupSystem' {
     BeforeEach {
         $script:Boot = (Get-Date).AddMinutes(-90)
         $script:BootDuration = [pscustomobject]@{ milliseconds = 53789; reason = $null }
-        Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ TotalVisibleMemorySize = [uint64]16777216; FreePhysicalMemory = [uint64]8388608; LastBootUpTime = $script:Boot } } -ParameterFilter { $ClassName -eq 'Win32_OperatingSystem' }
+        Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ TotalVisibleMemorySize = [uint64]16777216; FreePhysicalMemory = [uint64]4194304; LastBootUpTime = $script:Boot } } -ParameterFilter { $ClassName -eq 'Win32_OperatingSystem' }
         Mock -ModuleName Tuneup Get-CimInstance { [pscustomobject]@{ FreeSpace = [uint64]107374182400 } } -ParameterFilter { $ClassName -eq 'Win32_LogicalDisk' }
         Mock -ModuleName Tuneup Get-Process { 1..150 | ForEach-Object { [pscustomobject]@{ Id = $_ } } }
         Mock -ModuleName Tuneup Get-Service { [pscustomobject]@{ Status = 'Running' }; [pscustomobject]@{ Status = 'Stopped' }; [pscustomobject]@{ Status = 'Running' } }
@@ -66,7 +66,7 @@ Describe 'Measure-TuneupSystem' {
     It 'collects the metrics without waiting by default' {
         $measurement = Measure-TuneupSystem -Environment (New-TestEnvironment)
         $measurement.schemaVersion | Should -Be 1
-        $measurement.metrics.ramInUseMB | Should -Be 8192
+        $measurement.metrics.ramInUseMB | Should -Be 12288
         $measurement.metrics.processCount | Should -Be 150
         $measurement.metrics.runningServices | Should -Be 2
         $measurement.metrics.enabledTasks | Should -Be 2
@@ -105,6 +105,13 @@ Describe 'Compare-TuneupMeasurement' {
         $items[4].delta | Should -Be 0.75
         $items[5].after | Should -Be 40000
         $items[5].delta | Should -BeNullOrEmpty
+    }
+
+    It 'rounds the difference to two decimals' {
+        $before = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.90 } }
+        $after = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.98 } }
+        $item = @(Compare-TuneupMeasurement -Before $before -After $after) | Where-Object { $_.metric -eq 'systemDriveFreeGB' }
+        $item.delta | Should -Be 0.08
     }
 }
 
@@ -145,6 +152,25 @@ Describe 'Measurement files' {
         $last.Measurement.metrics.ramInUseMB | Should -Be 4000
     }
 
+    It 'never overwrites a file that already has the id' {
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        $existing = Join-Path $Root 'measurements\20260930-120000.json'
+        [System.IO.File]::WriteAllText($existing, 'keep me')
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root
+        $saved.Id | Should -Be '20260930-120000-02'
+        [System.IO.File]::ReadAllText($existing) | Should -Be 'keep me'
+    }
+
+    It 'gives up after the last suffix instead of overwriting' {
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        foreach ($name in @('20260930-120000') + @(2..99 | ForEach-Object { '20260930-120000-{0:D2}' -f $_ })) {
+            [System.IO.File]::WriteAllText((Join-Path $Root "measurements\$name.json"), 'keep me')
+        }
+        { Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root } | Should -Throw '*Cannot find a free measurement id*'
+    }
+
     It 'ignores files that are not measurements and warns about unreadable ones' {
         Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root | Out-Null
         [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\notes.json'), '{}')
@@ -158,6 +184,9 @@ Describe 'Measurement files' {
         @{ Name = 'no metrics'; Json = '{}' }
         @{ Name = 'a text metric'; Json = '{"metrics":{"ramInUseMB":"lots"}}' }
         @{ Name = 'metrics that are not an object'; Json = '{"metrics":5}' }
+        @{ Name = 'empty metrics'; Json = '{"metrics":{}}' }
+        @{ Name = 'only unknown metrics'; Json = '{"metrics":{"other":1}}' }
+        @{ Name = 'only empty metrics'; Json = '{"metrics":{"ramInUseMB":null}}' }
     ) {
         param($Name, $Json)
         New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
@@ -209,6 +238,13 @@ Describe 'Machine measurements' {
         Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -UserRoot $UserRoot | Out-Null
         $list = @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot)
         ($list | ForEach-Object { "$($_.Id)/$($_.Root)" }) -join ',' | Should -Be '20260930-120000/machine,20260930-120005/user'
+    }
+
+    It 'gives distinct ids in the machine folder and keeps the first file' {
+        $first = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot
+        $second = Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -Machine -MachineRoot $MachineRoot
+        $second.Id | Should -Be '20260930-120000-02'
+        (Get-Content -LiteralPath $first.Path -Raw | ConvertFrom-Json).metrics.ramInUseMB | Should -Be 5000
     }
 
     It 'ignores a machine measurements folder that others can write' {

@@ -274,6 +274,33 @@ Describe 'Write-TuneupHealthReport' {
     }
 }
 
+Describe 'Format-TuneupMetric' {
+    BeforeAll {
+        # The separators follow the culture of the process; the tests pin one.
+        $script:SavedCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+    }
+
+    AfterAll {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $script:SavedCulture
+    }
+
+    It 'shows a plus sign on a positive difference only' -TestCases @(
+        @{ Value = 0.75; Expected = '+0.75' }
+        @{ Value = 9; Expected = '+9' }
+        @{ Value = -600; Expected = '-600' }
+        @{ Value = 0; Expected = '0' }
+        @{ Value = $null; Expected = 'n/a' }
+    ) {
+        param($Value, $Expected)
+        Format-TuneupMetric -Value $Value -Signed | Should -Be $Expected
+    }
+
+    It 'shows a plain value without a sign' {
+        Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
+    }
+}
+
 Describe 'Write-TuneupMeasureReport' {
     BeforeAll {
         $before = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 } }

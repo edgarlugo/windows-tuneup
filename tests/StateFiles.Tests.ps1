@@ -75,6 +75,15 @@ Describe 'Journal' {
     }
 }
 
+Describe 'Create-new state files' {
+    It 'refuses to replace a file that exists and leaves it as it was' {
+        $path = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.json')
+        Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 1 }) -Root 'custom' -CreateNew
+        { Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 2 }) -Root 'custom' -CreateNew } | Should -Throw
+        (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).n | Should -Be 1
+    }
+}
+
 Describe 'State roots' {
     It 'uses the user folder unless the machine folder is asked for' {
         Get-TuneupStateRoot | Should -Be (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'windows-tuneup')

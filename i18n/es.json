@@ -98,6 +98,8 @@
   "health.recommendation.manual-repair-sfc": "SFC sigue sin poder reparar algunos archivos: revisa las líneas \"Cannot repair\" de %windir%\\Logs\\CBS\\CBS.log o haz una reparación con actualización en el mismo lugar.",
   "health.recommendation.check-logs": "No se pudo confirmar el resultado: revisa %windir%\\Logs\\CBS\\CBS.log.",
   "err.measurementNotFound": "No existe la medición {0}.",
+  "err.noMeasurements": "No hay mediciones guardadas para comparar.",
+  "err.idleSecondsRange": "-IdleSeconds debe estar entre {0} y {1}.",
   "measure.waiting": "Esperando {0} segundos en reposo antes de medir...",
   "measure.header": "Medición {0}:",
   "measure.line": "  {0}: {1}",

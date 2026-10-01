@@ -98,6 +98,8 @@
   "health.recommendation.manual-repair-sfc": "SFC still cannot repair some files: check the \"Cannot repair\" lines of %windir%\\Logs\\CBS\\CBS.log or do an in-place repair upgrade.",
   "health.recommendation.check-logs": "The result could not be confirmed: check %windir%\\Logs\\CBS\\CBS.log.",
   "err.measurementNotFound": "Measurement {0} does not exist.",
+  "err.noMeasurements": "There are no saved measurements to compare against.",
+  "err.idleSecondsRange": "-IdleSeconds must be between {0} and {1}.",
   "measure.waiting": "Waiting {0} seconds idle before measuring...",
   "measure.header": "Measurement {0}:",
   "measure.line": "  {0}: {1}",

@@ -32,7 +32,7 @@ param(
     [switch]$Repair,
     [switch]$Measure,
     [string]$Compare,
-    [ValidateRange(0, 3600)][int]$IdleSeconds = 0
+    [int]$IdleSeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -97,6 +97,11 @@ if ($PSBoundParameters.ContainsKey('Compare') -and $Compare) { $present += 'Comp
 if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
 $conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
+# Checked here and not with ValidateRange, so that -Json gets its error as a JSON document.
+$maxIdleSeconds = 3600
+if ($PSBoundParameters.ContainsKey('IdleSeconds') -and ($IdleSeconds -lt 0 -or $IdleSeconds -gt $maxIdleSeconds)) {
+    Stop-Tuneup -Message (Get-TuneupText -Key 'err.idleSecondsRange' -Format 0, $maxIdleSeconds)
+}
 
 try {
     # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
@@ -156,7 +161,10 @@ try {
         $against = $null
         if ($Compare) {
             $against = Invoke-TuneupStep { Resolve-TuneupMeasurement -StateRoot $StateRoot -Id $Compare }
-            if (-not $against) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare) }
+            if (-not $against) {
+                $missing = $(if ($Compare -eq 'last') { Get-TuneupText -Key 'err.noMeasurements' } else { Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare })
+                Stop-Tuneup -Message $missing
+            }
         }
         if ($IdleSeconds -gt 0 -and -not $Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
         $measurement = Invoke-TuneupStep { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }

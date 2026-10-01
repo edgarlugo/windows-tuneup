@@ -96,29 +96,36 @@ function Save-TuneupMeasurement {
     $dir = Join-Path $root 'measurements'
     if ($kind -ne 'machine') { New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null }
     $baseId = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $id = $baseId
-    $counter = 1
-    while (Test-Path -LiteralPath (Join-Path $dir "$id.json")) {
-        $counter++
-        $id = '{0}-{1:D2}' -f $baseId, $counter
-    }
     $saved = $Measurement | Select-Object -Property *
-    $saved | Add-Member -NotePropertyName id -NotePropertyValue $id -Force
-    $path = Join-Path $dir "$id.json"
-    Save-TuneupJson -Path $path -Object $saved -Root $kind
-    [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
+    # The file is created, never replaced: a second measurement in the same second takes the next suffix.
+    for ($counter = 1; $counter -le 99; $counter++) {
+        $id = $(if ($counter -eq 1) { $baseId } else { '{0}-{1:D2}' -f $baseId, $counter })
+        $path = Join-Path $dir "$id.json"
+        $saved | Add-Member -NotePropertyName id -NotePropertyValue $id -Force
+        try {
+            Save-TuneupJson -Path $path -Object $saved -Root $kind -CreateNew
+            return [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
+        }
+        catch {
+            if (-not ($_.Exception.GetBaseException() -is [System.IO.IOException] -and (Test-Path -LiteralPath $path))) { throw }
+        }
+    }
+    throw "Cannot find a free measurement id for $baseId"
 }
 
-# A file that parses can still be anything; comparing needs an object of numbers (or nulls).
+# A file that parses can still be anything; comparing needs at least one known metric, and the
+# known ones have to be numbers (or null).
 function Test-TuneupMeasurementShape {
     param([AllowNull()]$Data)
     if ($null -eq $Data -or $Data -isnot [pscustomobject] -or $Data.metrics -isnot [pscustomobject]) { return $false }
-    foreach ($property in $Data.metrics.PSObject.Properties) {
-        $value = $property.Value
+    $found = 0
+    foreach ($metric in $script:MeasureMetrics) {
+        $value = $Data.metrics.$metric
         if ($null -eq $value) { continue }
         if ($value -isnot [int] -and $value -isnot [long] -and $value -isnot [double] -and $value -isnot [decimal]) { return $false }
+        $found++
     }
-    $true
+    $found -gt 0
 }
 
 function Get-TuneupMeasurementList {

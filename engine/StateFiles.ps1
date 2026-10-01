@@ -69,10 +69,18 @@ function Write-TuneupStateFile {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][AllowEmptyString()][string]$Text,
         [switch]$Append,
-        [string]$Root
+        [string]$Root,
+        # Fails with an IOException when the file exists, instead of replacing it.
+        [switch]$CreateNew
     )
     if ((Resolve-TuneupFileRoot -Path $Path -Root $Root) -ne 'machine') {
         if ($Append) { [System.IO.File]::AppendAllText($Path, $Text, $script:Utf8NoBom) }
+        elseif ($CreateNew) {
+            $bytes = $script:Utf8NoBom.GetBytes($Text)
+            $stream = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            try { $stream.Write($bytes, 0, $bytes.Length) }
+            finally { $stream.Dispose() }
+        }
         else { [System.IO.File]::WriteAllText($Path, $Text, $script:Utf8NoBom) }
         return
     }
@@ -82,7 +90,7 @@ function Write-TuneupStateFile {
     else {
         $parent = Split-Path -Parent $Path
         if (-not (Test-TuneupTrustedItem -Path $parent)) { throw (Get-TuneupUntrustedMessage -Path $parent) }
-        if (Test-Path -LiteralPath $Path) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+        if (-not $CreateNew -and (Test-Path -LiteralPath $Path)) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
         $stream = New-TuneupSecureFile -Path $Path -Security (New-TuneupStateSecurity -File)
     }
     try {
@@ -95,9 +103,9 @@ function Write-TuneupStateFile {
 }
 
 function Save-TuneupJson {
-    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object, [string]$Root)
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)]$Object, [string]$Root, [switch]$CreateNew)
     $json = ConvertTo-Json -InputObject $Object -Depth 10
-    Write-TuneupStateFile -Path $Path -Text $json -Root $Root
+    Write-TuneupStateFile -Path $Path -Text $json -Root $Root -CreateNew:$CreateNew
 }
 
 function Read-TuneupTrustedJson {
