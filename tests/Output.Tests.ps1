@@ -299,11 +299,34 @@ Describe 'Format-TuneupMetric' {
     It 'shows a plain value without a sign' {
         Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
     }
+
+    It 'follows the language of the output, not the culture of the process' {
+        $root = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        $thread = [System.Threading.Thread]::CurrentThread
+        try {
+            Initialize-TuneupI18n -Root $root -Lang 'es'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+            Format-TuneupMetric -Value 101.25 | Should -Be '101,25'
+            Format-TuneupMetric -Value 0.75 -Signed | Should -Be '+0,75'
+            Format-TuneupMetric -Value -600 -Signed | Should -Be '-600'
+            Format-TuneupMetric -Value $null | Should -Be 's/d'
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('es-ES')
+            Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
+            Format-TuneupMetric -Value 0.75 -Signed | Should -Be '+0.75'
+        } finally {
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+        }
+    }
 }
 
 Describe 'Write-TuneupMeasureReport' {
     BeforeAll {
-        $before = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 } }
+        $before = [pscustomobject]@{
+            metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 }
+            notes   = [pscustomobject]@{ bootDurationMs = 'no-event' }
+        }
         $measurement = [pscustomobject]@{
             schemaVersion = 1; takenAt = '2026-09-30T12:00:00'; idleSeconds = 120; environment = $null; id = '20260930-120000'
             metrics = [pscustomobject]@{ ramInUseMB = 5400; processCount = 140; runningServices = 110; enabledTasks = 130; systemDriveFreeGB = 101.25; bootDurationMs = $null; uptimeMinutes = 2 }
@@ -327,7 +350,30 @@ Describe 'Write-TuneupMeasureReport' {
         $text | Should -Match 'Last boot duration \(ms\): needs administrator'
         $text | Should -Match 'Difference from measurement 20260929-090000'
         $text | Should -Match 'RAM in use \(MB\): 6000 -> 5400 \(-600\)'
-        $text | Should -Match 'Last boot duration \(ms\): n/a -> n/a \(n/a\)'
+        $text | Should -Match 'Last boot duration \(ms\): Windows did not record it -> needs administrator \(n/a\)'
+    }
+
+    It 'keeps the reason of a missing value in the comparison, and n/a when there is none' {
+        $item = @($MeasureReport.comparison.items | Where-Object { $_.metric -eq 'bootDurationMs' })[0]
+        $item.beforeNote | Should -Be 'no-event'
+        $item.afterNote | Should -Be 'needs-admin'
+        @($MeasureReport.comparison.items | Where-Object { $_.metric -eq 'ramInUseMB' })[0].beforeNote | Should -BeNullOrEmpty
+        $plain = New-TuneupMeasureReport -Saved ([pscustomobject]@{ Id = 'b'; Path = 'p'; Measurement = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = $null }; notes = [pscustomobject]@{} } }) `
+            -Against ([pscustomobject]@{ Id = 'a'; Measurement = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 1 } } })
+        @($plain.comparison.items | Where-Object { $_.metric -eq 'ramInUseMB' })[0].afterNote | Should -BeNullOrEmpty
+    }
+
+    It 'writes the numbers of the report the way the chosen language does' {
+        $root = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        try {
+            Initialize-TuneupI18n -Root $root -Lang 'es'
+            $text = (Write-TuneupMeasureReport -Report $MeasureReport 6>&1 | Out-String)
+            $text | Should -Match 'Espacio libre en el disco del sistema \(GB\): 101,25'
+            $text | Should -Match 'Espacio libre en el disco del sistema \(GB\): 100,5 -> 101,25 \(\+0,75\)'
+            $text | Should -Match 'Duraci.n del .ltimo arranque \(ms\): Windows no lo registr. -> requiere administrador \(s/d\)'
+        } finally {
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+        }
     }
 
     It 'writes one JSON document with the warnings' {

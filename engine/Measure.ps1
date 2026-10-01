@@ -68,7 +68,10 @@ function Compare-TuneupMeasurement {
         $new = $After.metrics.$metric
         $delta = $null
         if ($null -ne $old -and $null -ne $new) { $delta = [math]::Round([double]$new - [double]$old, 2) }
-        [pscustomobject]@{ metric = $metric; before = $old; after = $new; delta = $delta }
+        # Why a side has no value (for example needs-admin), so the comparison can say it too.
+        $beforeNote = $(if ($null -eq $old -and $Before.notes.$metric) { [string]$Before.notes.$metric } else { $null })
+        $afterNote = $(if ($null -eq $new -and $After.notes.$metric) { [string]$After.notes.$metric } else { $null })
+        [pscustomobject]@{ metric = $metric; before = $old; after = $new; delta = $delta; beforeNote = $beforeNote; afterNote = $afterNote }
     }
 }
 

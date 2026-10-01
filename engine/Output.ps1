@@ -329,11 +329,32 @@ function New-TuneupMeasureReport {
     }
 }
 
+# Numbers follow the language of the output (decimal comma in Spanish, point in English), not the
+# regional settings of the machine, so a report reads the same wherever it runs.
+function Get-TuneupNumberFormat {
+    if ((Get-TuneupLang) -eq 'es') {
+        try {
+            return [System.Globalization.CultureInfo]::GetCultureInfo('es-ES')
+        } catch {
+            # No es-ES data on this system (invariant globalization): the same separator by hand.
+            $format = [System.Globalization.NumberFormatInfo][System.Globalization.CultureInfo]::InvariantCulture.NumberFormat.Clone()
+            $format.NumberDecimalSeparator = ','
+            return $format
+        }
+    }
+    [System.Globalization.CultureInfo]::InvariantCulture
+}
+
 function Format-TuneupMetric {
-    param([AllowNull()]$Value, [switch]$Signed)
-    if ($null -eq $Value) { return (Get-TuneupText -Key 'measure.none') }
-    if ($Signed) { return ('{0:+0.##;-0.##;0}' -f [double]$Value) }
-    '{0:0.##}' -f [double]$Value
+    param([AllowNull()]$Value, [switch]$Signed, [string]$Note)
+    if ($null -eq $Value) {
+        # A value that is missing for a known reason says the reason instead of n/a.
+        if ($Note) { return (Get-TuneupText -Key "measure.reason.$Note") }
+        return (Get-TuneupText -Key 'measure.none')
+    }
+    $format = Get-TuneupNumberFormat
+    if ($Signed) { return ([double]$Value).ToString('+0.##;-0.##;0', $format) }
+    ([double]$Value).ToString('0.##', $format)
 }
 
 function Write-TuneupMeasureReport {
@@ -346,9 +367,7 @@ function Write-TuneupMeasureReport {
     $metrics = $Report.measurement.metrics
     Write-Host (Get-TuneupText -Key 'measure.header' -Format $Report.id)
     foreach ($metric in @(Get-TuneupMetricName)) {
-        $value = Format-TuneupMetric -Value $metrics.$metric
-        $note = $Report.measurement.notes.$metric
-        if ($null -eq $metrics.$metric -and $note) { $value = Get-TuneupText -Key "measure.reason.$note" }
+        $value = Format-TuneupMetric -Value $metrics.$metric -Note $Report.measurement.notes.$metric
         Write-Host (Get-TuneupText -Key 'measure.line' -Format (Get-TuneupText -Key "metric.$metric"), $value)
     }
     Write-Host (Get-TuneupText -Key 'measure.saved' -Format $Report.path)
@@ -357,6 +376,7 @@ function Write-TuneupMeasureReport {
     Write-Host (Get-TuneupText -Key 'measure.compareHeader' -Format $Report.comparison.againstId)
     foreach ($item in $Report.comparison.items) {
         Write-Host (Get-TuneupText -Key 'measure.delta' -Format (Get-TuneupText -Key "metric.$($item.metric)"),
-            (Format-TuneupMetric -Value $item.before), (Format-TuneupMetric -Value $item.after), (Format-TuneupMetric -Value $item.delta -Signed))
+            (Format-TuneupMetric -Value $item.before -Note $item.beforeNote), (Format-TuneupMetric -Value $item.after -Note $item.afterNote),
+            (Format-TuneupMetric -Value $item.delta -Signed))
     }
 }

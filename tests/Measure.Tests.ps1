@@ -107,6 +107,16 @@ Describe 'Compare-TuneupMeasurement' {
         $items[5].delta | Should -BeNullOrEmpty
     }
 
+    It 'keeps the reason of a side that has no value' {
+        $before = [pscustomobject]@{ metrics = [pscustomobject]@{ bootDurationMs = $null; ramInUseMB = 1 }; notes = [pscustomobject]@{ bootDurationMs = 'no-event' } }
+        $after = [pscustomobject]@{ metrics = [pscustomobject]@{ bootDurationMs = 40000; ramInUseMB = $null }; notes = [pscustomobject]@{ bootDurationMs = $null } }
+        $items = @(Compare-TuneupMeasurement -Before $before -After $after)
+        $boot = $items | Where-Object { $_.metric -eq 'bootDurationMs' }
+        $boot.beforeNote | Should -Be 'no-event'
+        $boot.afterNote | Should -BeNullOrEmpty
+        ($items | Where-Object { $_.metric -eq 'ramInUseMB' }).afterNote | Should -BeNullOrEmpty
+    }
+
     It 'rounds the difference to two decimals' {
         $before = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.90 } }
         $after = [pscustomobject]@{ metrics = [pscustomobject]@{ systemDriveFreeGB = 184.98 } }
