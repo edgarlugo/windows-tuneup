@@ -36,7 +36,7 @@
   "reason.other-user": "pertenece a otro usuario",
   "reason.reinstalled": "reinstalada desde Microsoft Store para el usuario actual",
   "reason.not-reprovisioned": "solo estaba provisionada para usuarios nuevos y no se puede volver a provisionar desde la Store",
-  "reason.other-users": "lo tenían otros usuarios: cada uno debe reinstalarla desde la Store",
+  "reason.installed-for-other-users": "lo tenían otros usuarios: cada uno debe reinstalarla desde la Store",
   "status.applied": "aplicado",
   "status.partial": "parcial",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",

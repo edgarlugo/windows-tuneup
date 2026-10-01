@@ -57,13 +57,11 @@ function Remove-TuneupAppxProvisionedPackage {
     }
 }
 
-function Get-TuneupCurrentUserSid {
-    [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
-}
 
 function Get-TuneupAppxUserSid {
     param([Parameter(Mandatory)]$User)
-    # Each entry names its user either as an object with a Sid or as text like "S-1-5-21-...[PC\me]".
+    # Windows returns a struct with string Sid and Username fields; its text form is only the type name.
+    # Text that carries the SID itself (like "S-1-5-21-...[PC\me]") is an edge case that is read too.
     $id = $User.UserSecurityId
     if ("$($id.Sid) $id" -match 'S-1-[0-9]+(?:-[0-9]+)+') { $Matches[0] }
 }
@@ -96,10 +94,12 @@ function Get-AppxTweakState {
     $provisioned = @(Get-TuneupAppxProvisionedPackage -Name $name)
     $sids = @(Get-TuneupAppxInstalledSid -Packages $installed)
     $me = Get-TuneupCurrentUserSid
+    $currentUserHad = ($sids -contains $me)
     $versions = @(@($installed | ForEach-Object { [string]$_.Version }) + @($provisioned | ForEach-Object { [string]$_.Version }) | Where-Object { $_ })
     [pscustomobject]@{
         installedUsers = ($sids.Count -gt 0)
-        currentUserHad = ($sids -contains $me)
+        currentUserHad = $currentUserHad
+        currentUserSid = $(if ($currentUserHad) { $me } else { $null })
         otherUsers     = @($sids | Where-Object { $_ -ne $me }).Count
         provisioned    = ($provisioned.Count -gt 0)
         version        = $(if ($versions.Count) { $versions[0] } else { $null })
@@ -152,7 +152,8 @@ function Set-AppxTweakDesired {
 }
 
 # winget exit codes that mean the app is there already: APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED
-# (0x8A150061) and APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (0x8A15002B, what --no-upgrade answers).
+# (0x8A150061, what install --no-upgrade returns for an installed app) and
+# APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (0x8A15002B), in case a winget version answers that.
 $script:WingetSuccessCode = @(0, -1978335135, -1978335189)
 
 function Get-TuneupWingetPath {
@@ -200,6 +201,11 @@ function Restore-AppxTweakState {
     if ($null -ne $State.PSObject.Properties['currentUserHad']) { $currentUserHad = [bool]$State.currentUserHad }
     $others = 0
     if ($null -ne $State.PSObject.Properties['otherUsers']) { $others = [int]$State.otherUsers }
+    # The copy belongs to the account that applied the tweak: another account cannot give it back.
+    if ($currentUserHad -and $null -ne $State.PSObject.Properties['currentUserSid'] -and $State.currentUserSid -and $State.currentUserSid -ne (Get-TuneupCurrentUserSid)) {
+        $currentUserHad = $false
+        $others++
+    }
     # What the Store cannot give back: the provisioning and the other users' copies.
     $notes = New-Object System.Collections.Generic.List[string]
     if ($State.provisioned) { $notes.Add('not provisioned again for new users') }
@@ -219,6 +225,8 @@ function Restore-AppxTweakState {
         return (New-TuneupOutcome -Reason 'reinstalled' -Detail $detail)
     }
     if (-not $notes.Count) { return }
-    $reason = $(if ($others -gt 0) { 'other-users' } else { 'not-reprovisioned' })
+    # The current user kept the app and only the provisioning is gone: a note, not a reason.
+    if ($currentUserHad -and $others -eq 0) { return (New-TuneupOutcome -Detail ($notes -join '; ')) }
+    $reason = $(if ($others -gt 0) { 'installed-for-other-users' } else { 'not-reprovisioned' })
     New-TuneupOutcome -Reason $reason -Detail "$($notes -join '; '). To install it by hand: $manual"
 }

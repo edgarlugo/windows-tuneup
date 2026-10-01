@@ -6,11 +6,11 @@ BeforeAll {
     $script:Me = 'S-1-5-21-1-1-1-1001'
     $script:Other = 'S-1-5-21-1-1-1-1002'
     $script:Third = 'S-1-5-21-1-1-1-1003'
+    # Windows returns a struct with string Sid and Username fields whose text form is only its type name.
     function New-FakeUser([string]$Sid, [string]$InstallState = 'Installed') {
-        [pscustomobject]@{
-            UserSecurityId = [pscustomobject]@{ Sid = $Sid; UserName = "PC\$Sid" }
-            InstallState   = $InstallState
-        }
+        $id = [pscustomobject]@{ Sid = $Sid; Username = "PC\$Sid" }
+        $id | Add-Member -MemberType ScriptMethod -Name ToString -Force -Value { 'Microsoft.Windows.Appx.PackageManager.Commands.AppxUserSecurityId' }
+        [pscustomobject]@{ UserSecurityId = $id; InstallState = $InstallState }
     }
     function New-FakePackage([string]$InstallState = 'Installed', [object[]]$Users = $null) {
         if ($null -eq $Users) { $Users = @(New-FakeUser -Sid $script:Me -InstallState $InstallState) }
@@ -44,6 +44,7 @@ Describe 'Appx handler' {
         $state.provisioned | Should -BeTrue
         $state.version | Should -Be '4.55.62231.0'
         $state.currentUserHad | Should -BeTrue
+        $state.currentUserSid | Should -Be $Me
         $state.otherUsers | Should -Be 0
         Test-AppxTweakState -Tweak $Tweak | Should -Be 'not-applied'
     }
@@ -65,10 +66,11 @@ Describe 'Appx handler' {
         $state = Get-AppxTweakState -Tweak $Tweak
         $state.installedUsers | Should -BeTrue
         $state.currentUserHad | Should -BeFalse
+        $state.currentUserSid | Should -BeNullOrEmpty
         $state.otherUsers | Should -Be 2
     }
 
-    It 'reads the user id from a user entry that only has its text form' {
+    It 'reads the user id from an entry that only has its text form' {
         $user = [pscustomobject]@{ UserSecurityId = 'S-1-5-21-1-1-1-1001[PC\me]'; InstallState = 'Installed' }
         $installed = New-FakePackage -Users @($user)
         Mock -ModuleName Tuneup Get-TuneupAppxPackage { $installed }.GetNewClosure()
@@ -303,6 +305,7 @@ Describe 'Appx definition' {
 Describe 'Appx restore' {
     BeforeEach {
         Clear-TuneupAppxCache
+        Mock -ModuleName Tuneup Get-TuneupCurrentUserSid { 'S-1-5-21-1-1-1-1001' }
         Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
         Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = 0; Output = 'Successfully installed' } }
     }
@@ -359,9 +362,32 @@ Describe 'Appx restore' {
         Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
         $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 1; provisioned = $true; version = '1.0' }
         $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
-        $outcome.reason | Should -Be 'other-users'
+        $outcome.reason | Should -Be 'installed-for-other-users'
         $outcome.detail | Should -BeLike '*1 other user not restored*'
         $outcome.detail | Should -BeLike '*not provisioned again*'
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'only notes the lost provisioning, without a reason, when the current user kept the app' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; otherUsers = 0; provisioned = $true; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.reason | Should -BeNullOrEmpty
+        $outcome.detail | Should -Be 'not provisioned again for new users'
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'reinstalls when the user who applied the tweak is the current user' {
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = $Me; otherUsers = 0; provisioned = $false; version = '1.0' }
+        (Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)).reason | Should -Be 'reinstalled'
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly
+    }
+
+    It 'does not install for another account than the one that applied the tweak' {
+        $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = $Other; otherUsers = 1; provisioned = $false; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.reason | Should -Be 'installed-for-other-users'
+        $outcome.detail | Should -BeLike '*2 other users not restored*winget install --id 9WZDNCRFHVFW --source msstore*'
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
     }
 
@@ -382,7 +408,7 @@ Describe 'Appx restore' {
     It 'does not install an app that only other users had' {
         $state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $false; otherUsers = 2; provisioned = $true; version = '1.0' }
         $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
-        $outcome.reason | Should -Be 'other-users'
+        $outcome.reason | Should -Be 'installed-for-other-users'
         $outcome.detail | Should -BeLike '*2 other users*winget install --id 9WZDNCRFHVFW --source msstore*'
         $outcome.detail | Should -BeLike '*not provisioned again*'
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
