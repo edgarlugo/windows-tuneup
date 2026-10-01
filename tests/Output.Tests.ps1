@@ -273,3 +273,40 @@ Describe 'Write-TuneupHealthReport' {
         @($json.warnings) -join ',' | Should -Be 'careful'
     }
 }
+
+Describe 'Write-TuneupMeasureReport' {
+    BeforeAll {
+        $before = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 } }
+        $measurement = [pscustomobject]@{
+            schemaVersion = 1; takenAt = '2026-09-30T12:00:00'; idleSeconds = 120; environment = $null; id = '20260930-120000'
+            metrics = [pscustomobject]@{ ramInUseMB = 5400; processCount = 140; runningServices = 110; enabledTasks = 130; systemDriveFreeGB = 101.25; bootDurationMs = $null; uptimeMinutes = 2 }
+            notes = [pscustomobject]@{ bootDurationMs = 'needs-admin' }
+        }
+        $saved = [pscustomobject]@{ Id = '20260930-120000'; Path = 'C:\state\measurements\20260930-120000.json'; Root = 'custom'; Measurement = $measurement }
+        $against = [pscustomobject]@{ Id = '20260929-090000'; Measurement = $before }
+        $script:MeasureReport = New-TuneupMeasureReport -Saved $saved -Against $against
+    }
+
+    It 'builds the report with the comparison' {
+        $MeasureReport.command | Should -Be 'measure'
+        $MeasureReport.id | Should -Be '20260930-120000'
+        $MeasureReport.comparison.againstId | Should -Be '20260929-090000'
+        @($MeasureReport.comparison.items).Count | Should -Be 7
+    }
+
+    It 'shows the metrics, the reason for a missing one and the differences' {
+        $text = (Write-TuneupMeasureReport -Report $MeasureReport 6>&1 | Out-String)
+        $text | Should -Match 'RAM in use \(MB\): 5400'
+        $text | Should -Match 'Last boot duration \(ms\): needs administrator'
+        $text | Should -Match 'Difference from measurement 20260929-090000'
+        $text | Should -Match 'RAM in use \(MB\): 6000 -> 5400 \(-600\)'
+        $text | Should -Match 'Last boot duration \(ms\): n/a -> n/a \(n/a\)'
+    }
+
+    It 'writes one JSON document with the warnings' {
+        $json = Write-TuneupMeasureReport -Report $MeasureReport -Warnings @('careful') -Json | ConvertFrom-Json
+        $json.command | Should -Be 'measure'
+        $json.measurement.metrics.ramInUseMB | Should -Be 5400
+        @($json.warnings) -join ',' | Should -Be 'careful'
+    }
+}

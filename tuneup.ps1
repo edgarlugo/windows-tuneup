@@ -29,7 +29,10 @@ param(
     [string]$ProfilesPath,
     [string]$ActionsPath,
     [switch]$Health,
-    [switch]$Repair
+    [switch]$Repair,
+    [switch]$Measure,
+    [string]$Compare,
+    [ValidateRange(0, 3600)][int]$IdleSeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -89,6 +92,9 @@ if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
 if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
 if ($PSBoundParameters.ContainsKey('Health') -and $Health) { $present += 'Health' }
 if ($PSBoundParameters.ContainsKey('Repair') -and $Repair) { $present += 'Repair' }
+if ($PSBoundParameters.ContainsKey('Measure') -and $Measure) { $present += 'Measure' }
+if ($PSBoundParameters.ContainsKey('Compare') -and $Compare) { $present += 'Compare' }
+if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
 $conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
@@ -144,6 +150,19 @@ try {
         $healthReport = Invoke-TuneupStep { Invoke-TuneupHealth -Repair:$Repair @phaseArguments }
         Write-TuneupHealthReport -Report $healthReport -Warnings $script:Warnings.ToArray() -Json:$Json
         exit (Get-TuneupHealthExitCode -Report $healthReport)
+    }
+    if ($Measure) {
+        # Resolved before measuring, so 'last' is never the new measurement.
+        $against = $null
+        if ($Compare) {
+            $against = Invoke-TuneupStep { Resolve-TuneupMeasurement -StateRoot $StateRoot -Id $Compare }
+            if (-not $against) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare) }
+        }
+        if ($IdleSeconds -gt 0 -and -not $Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
+        $measurement = Invoke-TuneupStep { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
+        $saved = Invoke-TuneupStep { Save-TuneupMeasurement -Measurement $measurement -StateRoot $StateRoot -Machine:$environment.IsAdmin }
+        Write-TuneupMeasureReport -Report (New-TuneupMeasureReport -Saved $saved -Against $against) -Warnings $script:Warnings.ToArray() -Json:$Json
+        exit 0
     }
     if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
     if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {

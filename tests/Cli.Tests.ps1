@@ -302,6 +302,10 @@ Describe 'tuneup.ps1' {
         @{ Arguments = @('-Health', '-Status') }
         @{ Arguments = @('-Health', '-Profile', 'extra') }
         @{ Arguments = @('-Health', '-Undo', 'last') }
+        @{ Arguments = @('-Compare', 'last') }
+        @{ Arguments = @('-IdleSeconds', '5') }
+        @{ Arguments = @('-Measure', '-Status') }
+        @{ Arguments = @('-Measure', '-Yes') }
     ) {
         param($Arguments)
         $result = Invoke-Tuneup (@($Arguments) + '-Json')
@@ -316,6 +320,31 @@ Describe 'tuneup.ps1' {
         (ConvertFrom-PureJson $result.Output).message | Should -Be '-Health needs PowerShell as administrator.'
     }
 
+    It 'measures, saves and compares against the last measurement' {
+        $first = Invoke-Tuneup @('-Measure', '-Json')
+        $first.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $first.Output
+        $json.command | Should -Be 'measure'
+        $json.comparison | Should -BeNullOrEmpty
+        $json.measurement.metrics.processCount | Should -BeGreaterThan 0
+        $json.PSObject.Properties.Name | Should -Contain 'warnings'
+        Test-Path -LiteralPath $json.path | Should -BeTrue
+        $second = ConvertFrom-PureJson (Invoke-Tuneup @('-Measure', '-Compare', 'last', '-Json')).Output
+        $second.comparison.againstId | Should -Be $json.id
+        @($second.comparison.items).Count | Should -Be 7
+    }
+
+    It 'says when the measurement to compare does not exist' {
+        $result = Invoke-Tuneup @('-Measure', '-Compare', '19990101-000000', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'Measurement 19990101-000000 does not exist.'
+    }
+
+    It 'prints a measurement for people in the chosen language' {
+        $result = Invoke-Tuneup @('-Measure') -Lang 'es'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Procesos: \d+'
+    }
     It 'refuses to apply with -Json but without -Yes' {
         (Invoke-Tuneup @('-Json')).ExitCode | Should -Be 1
         Test-Path -LiteralPath $Key | Should -BeFalse

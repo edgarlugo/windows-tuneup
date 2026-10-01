@@ -310,3 +310,53 @@ function Write-TuneupHealthReport {
     Write-Host (Get-TuneupText -Key $key) -ForegroundColor $color
     if ($Report.rebootRecommended) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
 }
+function New-TuneupMeasureReport {
+    param([Parameter(Mandatory)]$Saved, [AllowNull()]$Against)
+    $comparison = $null
+    if ($null -ne $Against) {
+        $comparison = [pscustomobject]@{
+            againstId = $Against.Id
+            items     = @(Compare-TuneupMeasurement -Before $Against.Measurement -After $Saved.Measurement)
+        }
+    }
+    [pscustomobject]@{
+        schemaVersion = 1
+        command       = 'measure'
+        id            = $Saved.Id
+        path          = $Saved.Path
+        measurement   = $Saved.Measurement
+        comparison    = $comparison
+    }
+}
+
+function Format-TuneupMetric {
+    param([AllowNull()]$Value, [switch]$Signed)
+    if ($null -eq $Value) { return (Get-TuneupText -Key 'measure.none') }
+    if ($Signed) { return ('{0:+0.##;-0.##;0}' -f [double]$Value) }
+    '{0:0.##}' -f [double]$Value
+}
+
+function Write-TuneupMeasureReport {
+    param(
+        [Parameter(Mandatory)]$Report,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
+    if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
+    $metrics = $Report.measurement.metrics
+    Write-Host (Get-TuneupText -Key 'measure.header' -Format $Report.id)
+    foreach ($metric in @(Get-TuneupMetricName)) {
+        $value = Format-TuneupMetric -Value $metrics.$metric
+        $note = $Report.measurement.notes.$metric
+        if ($null -eq $metrics.$metric -and $note) { $value = Get-TuneupText -Key "measure.reason.$note" }
+        Write-Host (Get-TuneupText -Key 'measure.line' -Format (Get-TuneupText -Key "metric.$metric"), $value)
+    }
+    Write-Host (Get-TuneupText -Key 'measure.saved' -Format $Report.path)
+    if ($null -eq $Report.comparison) { return }
+    Write-Host ''
+    Write-Host (Get-TuneupText -Key 'measure.compareHeader' -Format $Report.comparison.againstId)
+    foreach ($item in $Report.comparison.items) {
+        Write-Host (Get-TuneupText -Key 'measure.delta' -Format (Get-TuneupText -Key "metric.$($item.metric)"),
+            (Format-TuneupMetric -Value $item.before), (Format-TuneupMetric -Value $item.after), (Format-TuneupMetric -Value $item.delta -Signed))
+    }
+}
