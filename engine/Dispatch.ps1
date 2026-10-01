@@ -54,7 +54,9 @@ function Restore-TuneupState {
 # What a handler's Set or Restore can report besides doing its work. The type name marks it, so
 # anything else a handler or a cmdlet prints is never mistaken for it. Refused: Set looked at the
 # system and chose not to change anything (for example, files that only live in the cloud); the
-# tweak is reported as skipped with that reason instead of failed.
+# tweak is reported as skipped with that reason instead of failed. The contract: a refusal is only
+# valid before anything was changed. The executor reads the state again and compares it with the
+# journaled one; if it differs, the refusal is not believed (the tweak fails and stays undoable).
 function New-TuneupOutcome {
     param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason, [switch]$Refused)
     if ($Partial -and -not $Detail) { throw 'A partial outcome needs a detail' }

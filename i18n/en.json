@@ -53,7 +53,7 @@
   "status.unknown": "could not be read",
   "status.needs-admin": "needs administrator to check",
   "result.line": "  [{0}] {1}",
-  "summary": "Applied: {0} | Partial: {1} | No effect: {2} | Failed: {3} | Skipped: {4}",
+  "summary": "Applied: {0} | Partial: {1} | No effect: {2} | Failed: {3} | Skipped: {4} | Refused: {5}",
   "run.saved": "Run {0} saved in {1}. To undo: .\\tuneup.ps1 -Undo {0}",
   "reboot": "Restart the computer to finish the changes.",
   "signOut": "Sign out and sign in again to finish the changes.",

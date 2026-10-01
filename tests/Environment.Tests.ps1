@@ -55,3 +55,39 @@ Describe 'Get-TuneupEnvironment' {
         $environment.PendingReboot | Should -BeOfType [bool]
     }
 }
+
+Describe 'Test-TuneupHasBattery' {
+    BeforeEach {
+        $script:Batteries = @()
+        $script:Chassis = @()
+        Mock -ModuleName Tuneup Get-CimInstance { $script:Batteries } -ParameterFilter { $ClassName -eq 'Win32_Battery' }
+        Mock -ModuleName Tuneup Get-CimInstance { $script:Chassis } -ParameterFilter { $ClassName -eq 'Win32_SystemEnclosure' }
+    }
+
+    It 'is false without a battery, whatever the chassis' {
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]10) })
+        Test-TuneupHasBattery | Should -BeFalse
+    }
+
+    It 'is true for a battery in a portable chassis (<Type>)' -TestCases @(
+        @{ Type = 8 }, @{ Type = 9 }, @{ Type = 10 }, @{ Type = 14 }, @{ Type = 30 }, @{ Type = 31 }, @{ Type = 32 }
+    ) {
+        param($Type)
+        $script:Batteries = @([pscustomobject]@{ Name = 'Battery' })
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]$Type) })
+        Test-TuneupHasBattery | Should -BeTrue
+    }
+
+    It 'is false for a battery in a desktop chassis (a UPS that reports as a battery)' {
+        $script:Batteries = @([pscustomobject]@{ Name = 'UPS' })
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]3) })
+        Test-TuneupHasBattery | Should -BeFalse
+    }
+
+    It 'trusts the battery when there is no chassis information' {
+        $script:Batteries = @([pscustomobject]@{ Name = 'Battery' })
+        Test-TuneupHasBattery | Should -BeTrue
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = $null })
+        Test-TuneupHasBattery | Should -BeTrue
+    }
+}

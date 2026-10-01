@@ -50,6 +50,21 @@ function Test-TuneupPendingReboot {
     [bool]$sessionManager.PendingFileRenameOperations
 }
 
+# SMBIOS chassis types of portable machines: portable, laptop, notebook, sub-notebook, tablet,
+# convertible and detachable.
+$script:PortableChassisTypes = @(8, 9, 10, 14, 30, 31, 32)
+
+# A battery on a portable chassis. A desktop whose UPS reports as a battery has a battery but a
+# desktop chassis, so it does not count. When the chassis cannot be read, the battery decides (so a
+# desktop with a UPS and no chassis information still counts as having one).
+function Test-TuneupHasBattery {
+    if (-not @(Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue).Count) { return $false }
+    $types = @(Get-CimInstance -ClassName Win32_SystemEnclosure -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.ChassisTypes } | Where-Object { $null -ne $_ })
+    if (-not $types.Count) { return $true }
+    @($types | Where-Object { $script:PortableChassisTypes -contains [int]$_ }).Count -gt 0
+}
+
 function Get-TuneupEnvironment {
     $currentVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $build = [int]$currentVersion.CurrentBuild
@@ -63,7 +78,7 @@ function Get-TuneupEnvironment {
         IsServer      = ($edition -eq 'Server')
         IsManaged     = ([bool]$computer.PartOfDomain -or (Test-TuneupMdmEnrollment))
         IsAdmin       = [bool](Test-TuneupAdmin)
-        HasBattery    = (@(Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue).Count -gt 0)
+        HasBattery    = [bool](Test-TuneupHasBattery)
         PendingReboot = [bool](Test-TuneupPendingReboot)
     }
 }

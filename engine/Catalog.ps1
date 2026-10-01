@@ -61,8 +61,9 @@ function Test-TuneupTweak {
     if ($null -ne $signOutProperty -and $signOutProperty.Value -isnot [bool]) { $errors.Add("$id signOutRequired must be true or false") }
     $requiresProperty = $Tweak.PSObject.Properties['requires']
     if ($null -ne $requiresProperty) {
+        # A bare string is not a list, even though it would work as a list of one.
         $requires = @($requiresProperty.Value)
-        if (-not $requires.Count -or @($requires | Where-Object { $_ -isnot [string] -or $script:TweakRequirements -cnotcontains $_ }).Count) {
+        if ($requiresProperty.Value -isnot [System.Array] -or -not $requires.Count -or @($requires | Where-Object { $_ -isnot [string] -or $script:TweakRequirements -cnotcontains $_ }).Count) {
             $errors.Add("$id has invalid requires: use a list of $($script:TweakRequirements -join ', ')")
         } elseif ($requires -ccontains 'battery' -and $requires -ccontains 'no-battery') {
             $errors.Add("$id requires both battery and no-battery")

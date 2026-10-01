@@ -5,6 +5,10 @@ function Invoke-TuneupUndo {
     if ($Run.Undone -or (Test-TuneupRunMarker -Dir $Run.Dir -Name 'undone.json' -Root $Run.Root)) {
         throw (Get-TuneupText -Key 'err.runAlreadyUndone' -Format $Run.Id)
     }
+    # With -TweakId the run is read as usual: a tweak noted as undone answers already-undone.
+    if (-not $TweakId -and (Test-TuneupRunAllNotedUndone -Run $Run)) {
+        throw (Get-TuneupText -Key 'err.runAlreadyUndone' -Format $Run.Id)
+    }
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
     $entries = @($journal.Entries)

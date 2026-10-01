@@ -207,9 +207,13 @@ Describe 'New-TuneupPlan with hardware requirements' {
         Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
     }
 
-    It 'reports the edition before the hardware, and the hardware before reading the state' {
-        $plan = Invoke-Plan -Include 'power.old-laptop', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true) -TestState { throw 'must not read' }
+    It 'reports the edition before the hardware (a battery-only tweak of another edition, on a machine without a battery)' {
+        $plan = Invoke-Plan -Include 'power.old-laptop' -Environment (New-TestEnvironment -HasBattery $false)
         Get-Reason $plan 'power.old-laptop' | Should -Be 'incompatible'
+    }
+
+    It 'reports the hardware before reading the state' {
+        $plan = Invoke-Plan -Include 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true) -TestState { throw 'must not read' }
         Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
     }
 

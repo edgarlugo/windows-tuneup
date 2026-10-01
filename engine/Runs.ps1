@@ -121,6 +121,21 @@ function Get-TuneupUndoneTweakId {
     if ($text) { $text -split "`r?`n" | Where-Object { $_ } }
 }
 
+# A run is also done when every tweak of its journal is noted as undone, without an undone.json: the
+# tweaks that refused to change anything are noted when applied, so a run made only of them has
+# nothing left to restore. Run.Undone only reflects the undone.json marker; `last` and -Undo ask this
+# as well.
+function Test-TuneupRunAllNotedUndone {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    $undoneIds = @(Get-TuneupUndoneTweakId -Run $Run)
+    if (-not $undoneIds.Count) { return $false }
+    $journalIds = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root |
+        ForEach-Object { [string]$_.id })
+    if (-not $journalIds.Count) { return $false }
+    @($journalIds | Where-Object { $undoneIds -notcontains $_ }).Count -eq 0
+}
+
 function Get-TuneupRunList {
     [CmdletBinding()]
     param([string]$StateRoot, [string]$MachineRoot, [string]$UserRoot)
@@ -223,7 +238,8 @@ function Resolve-TuneupRun {
     }
     $elevated = [bool](Test-TuneupAdmin)
     $currentSid = Get-TuneupCurrentUserSid
-    $pending = @($runs | Where-Object { -not $_.Undone })
+    # A run whose tweaks were all noted as undone (they all refused to change anything) has nothing to restore.
+    $pending = @($runs | Where-Object { -not $_.Undone -and -not (Test-TuneupRunAllNotedUndone -Run $_) })
     for ($i = $pending.Count - 1; $i -ge 0; $i--) {
         if (Test-TuneupRunSelectable -Run $pending[$i] -Elevated:$elevated -CurrentSid $currentSid) { return $pending[$i] }
     }

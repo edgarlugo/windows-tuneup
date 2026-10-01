@@ -132,7 +132,7 @@ Every document carries `schemaVersion` (currently `1`), `command` and `warnings`
 | `command` | Campos principales / Main fields |
 |---|---|
 | `plan` | `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `items` (`id`, `title`, `risk`, `scope`, `action`, `reason`, `rebootRequired`), `summary` (`apply`, `skip`) |
-| `apply` | `runId`, `runDir`, `finishedAt`, `environment`, `restorePoint`, `rebootRequired`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `journalErrors`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`) |
+| `apply` | `runId`, `runDir`, `finishedAt`, `environment`, `restorePoint`, `rebootRequired`, `signOutRequired`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `refused`, `journalErrors`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`, `refused`) |
 | `status` | `items` (`id`, `title`, `status`, `runId`) |
 | `undo` | `runId`, `rebootRequired`, `results` (mismos campos que `apply` / same fields as `apply`), `summary` (`restored`, `failed`, `skipped`) |
 | `health` | `startedAt`, `finishedAt`, `repairRequested`, `repairRan`, `before`, `after` (`sfc`, `componentStore`, `corruptComponents`), `recommendation`, `rebootRecommended` |

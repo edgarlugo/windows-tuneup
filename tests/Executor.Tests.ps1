@@ -192,3 +192,102 @@ Describe 'Invoke-TuneupPlan and signing out' {
         $results[1].signOutRequired | Should -BeFalse
     }
 }
+
+Describe 'Invoke-TuneupPlan with a refusal that comes after a change' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            New-Item -Path $Tweak.set.path -Force | Out-Null
+            New-ItemProperty -LiteralPath $Tweak.set.path -Name $Tweak.set.name -PropertyType DWord -Value 7 -Force | Out-Null
+            New-TuneupOutcome -Refused -Reason 'sample-refusal' -Detail 'it should not have changed anything'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'fails the tweak instead of skipping it, and does not note it as needing no undo' {
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'failed'
+        $results[0].error | Should -Be 'refused after changing; undo can restore it'
+        $results[0].refused | Should -BeFalse
+        $results[1].status | Should -Be 'applied'
+        @(Get-TuneupUndoneTweakId -Run $Run) | Should -BeNullOrEmpty
+    }
+
+    It 'keeps the restore reachable: undoing the run puts the changed value back' {
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir | Out-Null
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 7
+        $results = @(Invoke-TuneupUndo -Run $Run)
+        ($results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored,test.one=restored'
+        (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).One | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Runs whose tweaks all refused' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { New-TuneupOutcome -Refused -Reason 'sample-refusal' -Detail 'nothing was changed' }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'treats the run as already undone: `last` skips it and an undo says so' {
+        $real = New-TuneupRun -StateRoot $Root
+        Add-TuneupJournalEntry -Path (Join-Path $real.Dir 'snapshot.jsonl') -Tweak $One -State (Get-TuneupState -Tweak $One)
+        $refusing = New-TuneupRun -StateRoot $Root
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $refusing.Dir | Out-Null
+        @(Get-TuneupUndoneTweakId -Run $refusing) -join ',' | Should -Be 'test.one,test.two'
+        (Resolve-TuneupRun -StateRoot $Root -RunId 'last').Id | Should -Be $real.Id
+        { Invoke-TuneupUndo -Run $refusing } | Should -Throw '*already*'
+        $one = Invoke-TuneupUndo -Run $refusing -TweakId 'test.one'
+        $one.status | Should -Be 'skipped'
+        $one.reason | Should -Be 'already-undone'
+    }
+
+    It 'does not treat a run with a tweak that was changed as undone' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            New-Item -Path $Tweak.set.path -Force | Out-Null
+            New-ItemProperty -LiteralPath $Tweak.set.path -Name $Tweak.set.name -PropertyType String -Value 'x' -Force | Out-Null
+        } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $run = New-TuneupRun -StateRoot $Root
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $run.Dir | Out-Null
+        (Resolve-TuneupRun -StateRoot $Root -RunId 'last').Id | Should -Be $run.Id
+    }
+}
+
+Describe 'Results that were skipped or refused' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { New-TuneupOutcome -Refused -Reason 'sample-refusal' -Detail 'nothing was changed' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'marks a refusal as refused and asks for no restart or sign-out, whatever the catalog says' {
+        $asking = New-TestTweak -Id 'test.one' -RebootRequired $true -Set $One.set
+        $asking | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $plan = @(New-TuneupPlan -Catalog @($asking, $Two) -Profiles @(New-TestProfile -Id 'base' -Include @('test.one', 'test.two')) `
+            -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+        $results = @(Invoke-TuneupPlan -Plan $plan -RunDir $Run.Dir)
+        $results[0].refused | Should -BeTrue
+        $results[0].rebootRequired | Should -BeFalse
+        $results[0].signOutRequired | Should -BeFalse
+        $results[1].refused | Should -BeFalse
+        $results[1].rebootRequired | Should -BeTrue
+    }
+
+    It 'asks for no restart on a tweak the plan skipped' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'Two' -PropertyType String -Value 'x' | Out-Null
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[1].status | Should -Be 'skipped'
+        $results[1].reason | Should -Be 'already-applied'
+        $results[1].rebootRequired | Should -BeFalse
+    }
+}

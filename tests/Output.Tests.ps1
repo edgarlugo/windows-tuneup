@@ -59,7 +59,16 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.partial | Should -Be 1
         $report.summary.applied | Should -Be 1
         $report.rebootRequired | Should -BeTrue
-        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,journalErrors'
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors'
+    }
+
+    It 'counts the tweaks that refused to change anything apart from the skipped ones' {
+        $refused = New-TestResult -Status 'skipped' -Reason 'other-user'
+        $refused | Add-Member -NotePropertyName refused -NotePropertyValue $true
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $refused, $PlanSkip)
+        $report.summary.refused | Should -Be 1
+        $report.summary.skipped | Should -Be 1
+        $report.summary.applied | Should -Be 1
     }
 }
 
@@ -73,6 +82,7 @@ Describe 'Get-TuneupApplyExitCode' {
         @{ Name = 'a journal error after a failure'; Statuses = @('failed', 'journal-error'); NotSaved = $false; Expected = 2 }
         @{ Name = 'an unsaved result'; Statuses = @('applied'); NotSaved = $true; Expected = 2 }
         @{ Name = 'an unsaved result with nothing applied'; Statuses = @('journal-error'); NotSaved = $true; Expected = 1 }
+        @{ Name = 'a tweak that refused to change anything, with everything else applied'; Statuses = @('applied', 'refused'); NotSaved = $false; Expected = 0 }
         @{ Name = 'a partial tweak'; Statuses = @('applied', 'partial'); NotSaved = $false; Expected = 2 }
         @{ Name = 'a journal error after a partial change'; Statuses = @('partial', 'journal-error'); NotSaved = $false; Expected = 2 }
     ) {
@@ -81,6 +91,11 @@ Describe 'Get-TuneupApplyExitCode' {
             switch ($status) {
                 'plan-skip' { $PlanSkip }
                 'journal-error' { $JournalError }
+                'refused' {
+                    $refused = New-TestResult -Status 'skipped' -Reason 'other-user'
+                    $refused | Add-Member -NotePropertyName refused -NotePropertyValue $true
+                    $refused
+                }
                 default { New-TestResult -Status $status }
             }
         })
@@ -177,7 +192,7 @@ Describe 'Write-TuneupApplyReport' {
         $text = (Write-TuneupApplyReport -Report (New-TestReport @($partial)) 6>&1 | Out-String)
         $text | Should -Match '\[partial\] Title partial'
         $text | Should -Match 'Stopping it failed'
-        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0'
+        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0 \| Refused: 0'
     }
 }
 

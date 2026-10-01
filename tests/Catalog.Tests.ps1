@@ -271,6 +271,21 @@ Describe 'Test-TuneupTweak requires' {
         (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'invalid requires'
     }
 
+    It 'rejects a requires that is a bare string instead of a list' {
+        $tweak = New-TestTweak
+        $tweak | Add-Member -NotePropertyName requires -NotePropertyValue 'battery'
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'invalid requires'
+    }
+
+    It 'rejects a bare string in requires read from a catalog file' {
+        $dir = Join-Path $TestDrive 'requires-bare-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $json = ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = @((New-TestTweak -Id 'power.sample')) }) -Depth 10
+        $json = $json -replace '"rebootRequired":\s+false', '"rebootRequired": false, "requires": "battery"'
+        Set-Content -LiteralPath (Join-Path $dir 'power.json') -Value $json -Encoding UTF8
+        (Test-TuneupCatalog -Catalog @(Import-TuneupCatalog -Path $dir)) -join '; ' | Should -Match 'invalid requires'
+    }
+
     It 'rejects battery and no-battery together' {
         (Test-TuneupTweak -Tweak (New-TestTweak -Requires @('battery', 'no-battery'))) -join '; ' | Should -Match 'requires both battery and no-battery'
     }
