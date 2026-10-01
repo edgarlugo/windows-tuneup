@@ -46,6 +46,7 @@
   "reason.onedrive-scan-incomplete": "no se tocó: no se pudo revisar cada archivo de OneDrive, así que no hay certeza de que ninguno esté solo en la nube",
   "reason.onedrive-other-accounts": "no se tocó: está instalado para todos los usuarios y otra cuenta del equipo tiene carpetas o archivos de OneDrive en riesgo",
   "reason.onedrive-session-user": "no se tocó: el proceso no corre con la cuenta que inició sesión en este escritorio, dueña de OneDrive y sus archivos",
+  "reason.session-user": "no se tocó: el proceso no corre con la cuenta que inició sesión en este escritorio, y el ajuste quedaría en otra cuenta",
   "reason.reinstalled-onedrive": "OneDrive reinstalado con winget; vuelve a iniciar sesión en OneDrive",
   "status.applied": "aplicado",
   "status.partial": "parcial",

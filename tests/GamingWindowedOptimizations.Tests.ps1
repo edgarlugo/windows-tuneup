@@ -12,6 +12,7 @@ Describe 'gaming-windowed-optimizations action' {
     BeforeEach {
         # The real value is in the user's DirectX preferences; the tests use the test key instead.
         Mock -ModuleName Tuneup Get-GamingWindowedOptimizationsActionHelperValue { [pscustomobject]@{ path = $Key; name = 'DirectXUserGlobalSettings' } }
+        Mock -ModuleName Tuneup Test-TuneupSessionUser { $true }
     }
 
     AfterEach {
@@ -55,6 +56,21 @@ Describe 'gaming-windowed-optimizations action' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'AutoHDREnable=1; SwapEffectUpgradeEnable=1 ;' | Out-Null
         Test-TuneupState -Tweak $Tweak | Should -Be 'applied'
+    }
+
+    It 'refuses, changing nothing, when the process does not run as the account at this desktop' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'AutoHDREnable=1;' | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupSessionUser { $false }
+        $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $Tweak)
+        $outcome.refused | Should -BeTrue
+        $outcome.reason | Should -Be 'session-user'
+        $outcome.detail | Should -BeLike '*nothing was changed*'
+        Get-TestValue | Should -BeExactly 'AutoHDREnable=1;'
+        foreach ($lang in 'es', 'en') {
+            Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang $lang
+            Get-TuneupText -Key 'reason.session-user' | Should -Not -Be 'reason.session-user'
+        }
     }
 
     It 'saves whose setting it is, so the undo of another account leaves it for its owner' {

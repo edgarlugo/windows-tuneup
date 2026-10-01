@@ -91,3 +91,26 @@ Describe 'Test-TuneupHasBattery' {
         Test-TuneupHasBattery | Should -BeTrue
     }
 }
+
+Describe 'Test-TuneupSessionUser' {
+    BeforeAll {
+        $script:Me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    }
+
+    It 'is true only when the account at this desktop is the one of this process: <Name>' -TestCases @(
+        @{ Name = 'the same account'; Owners = @('ME'); Expected = $true }
+        @{ Name = 'another administrator'; Owners = @('S-1-5-21-1000000000-2000000000-3000000000-1001'); Expected = $false }
+        @{ Name = 'two accounts'; Owners = @('ME', 'S-1-5-21-1000000000-2000000000-3000000000-1001'); Expected = $false }
+        @{ Name = 'no desktop'; Owners = @(); Expected = $false }
+        @{ Name = 'the desktop cannot be read'; Owners = @('throw'); Expected = $false }
+    ) {
+        param($Owners, $Expected)
+        $script:Owners = @($Owners | ForEach-Object { $_ -replace '^ME$', $Me })
+        Mock -ModuleName Tuneup Get-TuneupSessionUserSid { if ($script:Owners -contains 'throw') { throw 'denied' }; $script:Owners }
+        Test-TuneupSessionUser | Should -Be $Expected
+    }
+
+    It 'reads the owners of explorer.exe in this session without changing anything' {
+        foreach ($sid in @(Get-TuneupSessionUserSid)) { $sid | Should -Match '^S-1-' }
+    }
+}

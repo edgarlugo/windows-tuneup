@@ -340,6 +340,12 @@ Describe 'Programs that run elevated' {
         Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeFalse
     }
 
+    It 'does not trust a folder in place of the program' {
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity 'O:SYD:P(A;;FA;;;SY)' }
+        Test-TuneupTrustedExecutable -Path $Folder -StopAt $Base | Should -BeFalse
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeTrue
+    }
+
     It 'does not trust a program behind a junction' {
         $junction = Join-Path $Base 'Linked'
         New-Item -ItemType Junction -Path $junction -Value $Folder | Out-Null

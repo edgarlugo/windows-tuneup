@@ -7,7 +7,8 @@
 # out) and leaves it alone if the user changed it after the apply.
 # The value lives in HKCU. Action tweaks run elevated, which on a normal UAC prompt is the same
 # account; with an administrator account typed at the prompt it would be that account's setting, so
-# the state saves whose it is and the undo of another account leaves it for its owner.
+# the apply refuses when the process is not the account at this desktop, the state saves whose it is
+# and the undo of another account leaves it for its owner.
 
 function Get-GamingWindowedOptimizationsActionHelperValue {
     param()
@@ -105,6 +106,11 @@ function Set-GamingWindowedOptimizationsActionDesired {
     $state = Get-GamingWindowedOptimizationsActionState -Tweak $Tweak
     if ($state.exists -and $state.kind -ne 'String') {
         throw "DirectXUserGlobalSettings is a $($state.kind) value, not text; it is left as it is"
+    }
+    # HKCU is the account of this process: elevated with another administrator's password it would be
+    # that administrator's setting, not the one of the account at this desktop.
+    if (-not (Test-TuneupSessionUser)) {
+        return (New-TuneupOutcome -Refused -Reason 'session-user' -Detail "$($Tweak.id): this process does not run as the account signed in at this desktop (it was elevated with another administrator's password, or there is no desktop to compare with), so the setting would land in another account. Run windows-tuneup from an elevated prompt of the account that is signed in; nothing was changed")
     }
     $value = Get-GamingWindowedOptimizationsActionHelperValue
     $text = Edit-GamingWindowedOptimizationsActionHelperList -Text ([string]$state.value) -Value '1'

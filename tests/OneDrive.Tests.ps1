@@ -30,7 +30,7 @@ Describe 'onedrive action' {
         }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperSystemSetup { $script:SystemSetup }
         Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $true }
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperSessionUser { $script:MeSid }
+        Mock -ModuleName Tuneup Get-TuneupSessionUserSid { $script:MeSid }
         Mock -ModuleName Tuneup Test-OnedriveActionHelperRedirected { $false }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperRoot { }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileFolder { }
@@ -131,7 +131,7 @@ Describe 'onedrive action' {
         $script:Scan = New-TestScan -Count $Count -First 'Projects' -Errors $Errors
         $script:AtRisk = $AtRisk
         $script:FolderThrows = $FolderThrows
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperSessionUser { if ($script:Session -contains 'throw') { throw 'no access' }; $script:Session }
+        Mock -ModuleName Tuneup Get-TuneupSessionUserSid { if ($script:Session -contains 'throw') { throw 'no access' }; $script:Session }
         Mock -ModuleName Tuneup Test-OnedriveActionHelperRedirected { $script:Redirected }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileFolder { if ($script:FolderThrows) { throw 'Access denied' } }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { $script:Scan }
@@ -290,13 +290,12 @@ Describe 'onedrive install detection' {
         }
     }
 
-    It 'reads the accounts of this PC and the desktop owner without changing anything' {
+    It 'reads the accounts of this PC without changing anything' {
         foreach ($account in @(& (Get-Module Tuneup) { Get-OnedriveActionHelperProfile })) {
             $account.sid | Should -Not -Be $MeSid
             $account.sid | Should -Match '^S-1-(5-21|12-1)-'
             $account.path | Should -Not -BeNullOrEmpty
         }
-        foreach ($sid in @(& (Get-Module Tuneup) { Get-OnedriveActionHelperSessionUser })) { $sid | Should -Match '^S-1-' }
     }
 }
 
@@ -429,6 +428,99 @@ Describe 'onedrive detection helpers' {
         }
         Mock -ModuleName Tuneup Get-Item { throw 'Access to the path is denied.' }
         (& (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root).errors | Should -Be 1
+    }
+
+    It 'does not skip an online-only file behind a junction: it counts it as not checked' {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $target = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $root, $target | Out-Null
+        Set-Content -LiteralPath (Join-Path $target 'cloud.txt') -Value 'x'
+        (Get-Item -LiteralPath (Join-Path $target 'cloud.txt')).Attributes = [System.IO.FileAttributes]::Offline
+        New-Item -ItemType Junction -Path (Join-Path $root 'Linked') -Value $target | Out-Null
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+        $scan.errors | Should -BeGreaterThan 0
+    }
+
+    It 'walks into a reparse folder that is not a link, as OneDrive keeps its folders' {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $target = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $root, $target | Out-Null
+        Set-Content -LiteralPath (Join-Path $target 'cloud.txt') -Value 'x'
+        (Get-Item -LiteralPath (Join-Path $target 'cloud.txt')).Attributes = [System.IO.FileAttributes]::Offline
+        New-Item -ItemType Junction -Path (Join-Path $root 'Synced') -Value $target | Out-Null
+        # A cloud files reparse point is neither a junction nor a symbolic link.
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperLinkType { $null }
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+        "$($scan.count)/$($scan.firstFolder)/$($scan.errors)" | Should -Be '1/Synced/0'
+    }
+
+    It 'finds an online-only file deep in nested folders' {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $deep = Join-Path $root 'Top\a\b\c\d\e\f\g\h'
+        New-Item -ItemType Directory -Path $deep -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $deep 'cloud.txt') -Value 'x'
+        (Get-Item -LiteralPath (Join-Path $deep 'cloud.txt')).Attributes = [System.IO.FileAttributes]::Offline
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+        "$($scan.count)/$($scan.firstFolder)/$($scan.errors)" | Should -Be '1/Top/0'
+    }
+
+    It 'reads the OneDrive sync roots of every account from the machine registry' {
+        $key = "$RegistryRoot\SyncRootManager"
+        New-Item -Path "$key\OneDrive!S-1-5-21-1-1-1-1001!Personal|1\UserSyncRoots" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$key\OneDrive!S-1-5-21-1-1-1-1001!Personal|1\UserSyncRoots" -Name 'S-1-5-21-1-1-1-1001' -Value 'D:\Ana\OneDrive' | Out-Null
+        New-Item -Path "$key\OneDrive!S-1-5-21-1-1-1-1002!Business1|Contoso\UserSyncRoots" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$key\OneDrive!S-1-5-21-1-1-1-1002!Business1|Contoso\UserSyncRoots" -Name 'S-1-5-21-1-1-1-1002' -Value 'D:\Beto\Contoso' | Out-Null
+        # Other sync providers are not removed with OneDrive.
+        New-Item -Path "$key\Dropbox!S-1-5-21-1-1-1-1001!Personal\UserSyncRoots" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$key\Dropbox!S-1-5-21-1-1-1-1001!Personal\UserSyncRoots" -Name 'S-1-5-21-1-1-1-1001' -Value 'D:\Ana\Dropbox' | Out-Null
+        $roots = @(& (Get-Module Tuneup) { param($k) Get-OnedriveActionHelperSyncRoot -Key $k } $key)
+        ($roots | Sort-Object sid | ForEach-Object { "$($_.sid)=$($_.path)" }) -join ',' | Should -Be 'S-1-5-21-1-1-1-1001=D:\Ana\OneDrive,S-1-5-21-1-1-1-1002=D:\Beto\Contoso'
+        @(& (Get-Module Tuneup) { param($k) Get-OnedriveActionHelperSyncRoot -Key $k } "$RegistryRoot\missing").Count | Should -Be 0
+    }
+
+    It 'sees the risk of a signed-out account in its sync roots: <Name>' -TestCases @(
+        @{ Name = 'a root with files'; Content = $true; Expected = 'signed-out' }
+        @{ Name = 'an empty root'; Content = $false; Expected = $null }
+        @{ Name = 'a root it cannot read'; Throws = $true; Expected = 'unreadable' }
+    ) {
+        param([bool]$Content, [bool]$Throws, $Expected)
+        $profilePath = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $syncRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $profilePath, $syncRoot | Out-Null
+        if ($Content) { Set-Content -LiteralPath (Join-Path $syncRoot 'a.txt') -Value 'x' }
+        $script:SyncRoot = $syncRoot
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperSyncRoot {
+            [pscustomobject]@{ sid = $OtherSid; path = $script:SyncRoot }
+            [pscustomobject]@{ sid = 'S-1-5-21-9-9-9-9'; path = 'C:\Windows' }
+        }
+        if ($Throws) { Mock -ModuleName Tuneup Test-OnedriveActionHelperNonEmpty { throw 'Access denied' } }
+        $account = [pscustomobject]@{ sid = $OtherSid; name = 'Ana'; path = $profilePath; software = $null }
+        & (Get-Module Tuneup) { param($a) Get-OnedriveActionHelperProfileRisk -Account $a } $account | Should -Be $Expected
+    }
+
+    It 'expands a profile path with the folders of Windows, not the variables of the process' {
+        $windows = [Environment]::GetFolderPath('Windows')
+        $drive = [System.IO.Path]::GetPathRoot($windows).TrimEnd('\')
+        $saved = $env:SystemDrive
+        try {
+            $env:SystemDrive = 'Z:'
+            & (Get-Module Tuneup) { Get-OnedriveActionHelperProfilePath -Raw '%SystemDrive%\Perfiles\Ana' } | Should -Be "$drive\Perfiles\Ana"
+            & (Get-Module Tuneup) { Get-OnedriveActionHelperProfilePath -Raw '%systemroot%\ServiceProfiles\x' } | Should -Be "$windows\ServiceProfiles\x"
+        } finally {
+            $env:SystemDrive = $saved
+        }
+        # A variable it does not know is left as it is, and that profile cannot be checked.
+        $account = [pscustomobject]@{ sid = $OtherSid; name = 'Ana'; path = '%OTHER%\Ana'; software = $null }
+        & (Get-Module Tuneup) { param($a) Get-OnedriveActionHelperProfileRisk -Account $a } $account | Should -Be 'unreadable'
+    }
+
+    It 'counts other accounts with their own OneDrive wherever their profile is' {
+        $profilePath = Join-Path $TestDrive 'Perfiles\Ana'
+        New-Item -ItemType Directory -Path (Join-Path $profilePath 'AppData\Local\Microsoft\OneDrive') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $profilePath 'AppData\Local\Microsoft\OneDrive\OneDrive.exe') -Value 'fake'
+        $script:ProfilePath = $profilePath
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfile { [pscustomobject]@{ sid = $OtherSid; name = 'Ana'; path = $script:ProfilePath; software = $null } }
+        & (Get-Module Tuneup) { Get-OnedriveActionHelperOtherProfile } | Should -Be 1
     }
 
     It 'skips a root that does not exist' {

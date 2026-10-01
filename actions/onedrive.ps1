@@ -103,10 +103,21 @@ function Get-OnedriveActionHelperTopFolder {
     Split-Path -Path $Root -Leaf
 }
 
+function Get-OnedriveActionHelperLinkType {
+    param([Parameter(Mandatory)]$Item)
+    # Junction or SymbolicLink for a link; nothing for other reparse points, such as the folders that
+    # OneDrive keeps as cloud files placeholders.
+    [string]$Item.LinkType
+}
+
 function Get-OnedriveActionHelperOnlineOnly {
     param([AllowEmptyCollection()][string[]]$Root = @())
-    # Lists every file and folder under the roots (listing downloads nothing) and fails closed: what
-    # could not be listed is counted, so a refusal can say that the check was not complete.
+    # Walks every file and folder under the roots (listing downloads nothing) and fails closed: what
+    # could not be listed is counted, so a refusal can say that the check was not complete. The walk
+    # is done by hand because Get-ChildItem -Recurse of Windows PowerShell does not enter reparse
+    # points, and every folder of OneDrive is one. It enters a folder that is a cloud placeholder or a
+    # reparse point that is not a link; a junction or a symbolic link inside a root is not followed
+    # (it could lead anywhere, even in a loop) and counts as not checked.
     $count = 0
     $first = $null
     $errors = 0
@@ -122,14 +133,39 @@ function Get-OnedriveActionHelperOnlineOnly {
         }
         if ($null -eq $rootItem -or -not $rootItem.PSIsContainer) { continue }
         $long = Get-OnedriveActionHelperLongPath -Path $folder.TrimEnd('\')
-        $listErrors = $null
-        Get-ChildItem -LiteralPath $long -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable listErrors | ForEach-Object {
-            if (Test-OnedriveActionHelperCloudAttribute -Attributes ([long]$_.Attributes)) {
-                $count++
-                if ($null -eq $first) { $first = Get-OnedriveActionHelperTopFolder -Root $long -Path $_.FullName -Folder:([bool]$_.PSIsContainer) }
+        $pending = New-Object System.Collections.Generic.Stack[string]
+        $pending.Push($long)
+        while ($pending.Count) {
+            $directory = $pending.Pop()
+            try {
+                $entries = @((New-Object System.IO.DirectoryInfo -ArgumentList $directory).EnumerateFileSystemInfos())
+            } catch {
+                $errors++
+                continue
+            }
+            foreach ($entry in $entries) {
+                $attributes = [long]$entry.Attributes
+                $cloud = Test-OnedriveActionHelperCloudAttribute -Attributes $attributes
+                $isFolder = $entry -is [System.IO.DirectoryInfo]
+                if ($cloud) {
+                    $count++
+                    if ($null -eq $first) { $first = Get-OnedriveActionHelperTopFolder -Root $long -Path $entry.FullName -Folder:$isFolder }
+                }
+                if (-not $isFolder) { continue }
+                if (($attributes -band [long][System.IO.FileAttributes]::ReparsePoint) -and -not $cloud) {
+                    try {
+                        $link = Get-OnedriveActionHelperLinkType -Item $entry
+                    } catch {
+                        $link = 'unknown'
+                    }
+                    if ($link) {
+                        $errors++
+                        continue
+                    }
+                }
+                $pending.Push($entry.FullName)
             }
         }
-        $errors += @($listErrors).Count
     }
     [pscustomobject]@{ count = $count; firstFolder = $first; errors = $errors }
 }
@@ -213,34 +249,66 @@ function Get-OnedriveActionHelperStep {
     $steps
 }
 
-function Get-OnedriveActionHelperSessionUser {
-    param()
-    # The accounts that own explorer.exe in the session of this process: who is signed in at this
-    # desktop. Elevating with another administrator's password keeps the session but not the account.
-    $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
-    @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe' AND SessionId = $session" -ErrorAction Stop |
-        ForEach-Object { [string](Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid } |
-        Where-Object { $_ } | Sort-Object -Unique)
+function Get-OnedriveActionHelperProfilePath {
+    param([Parameter(Mandatory)][string]$Raw)
+    # ProfileImagePath as Windows keeps it (%SystemDrive%\Users\Ana), expanded with the folders of
+    # Windows and not with the variables of this process, which a user can set. Any other variable is
+    # left as it is, and that profile is then treated as one that cannot be checked.
+    $windows = [Environment]::GetFolderPath('Windows')
+    $drive = [System.IO.Path]::GetPathRoot($windows).TrimEnd('\')
+    $path = $Raw -ireplace '%SystemRoot%', $windows.Replace('$', '$$')
+    $path -ireplace '%SystemDrive%', $drive.Replace('$', '$$')
 }
 
 function Get-OnedriveActionHelperProfile {
     param()
-    # The other accounts with a profile on this PC: its SID, folder and, when its registry is loaded
-    # (signed in, or a process of it running), the Software key of its hive.
+    # The other accounts with a profile on this PC, told apart by their SID wherever their folder is:
+    # its SID, folder and, when its registry is loaded (signed in, or a process of it running), the
+    # Software key of its hive.
     $me = Get-TuneupCurrentUserSid
     foreach ($key in @(Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction Stop)) {
         $sid = [string]$key.PSChildName
         if ($sid -notmatch '^S-1-(?:5-21|12-1)-[0-9-]+(?:\.bak)?$' -or $sid -eq $me) { continue }
-        $path = [string](Get-ItemProperty -LiteralPath $key.PSPath -ErrorAction Stop).ProfileImagePath
-        if (-not $path) { continue }
+        $raw = [string]$key.GetValue('ProfileImagePath', $null, 'DoNotExpandEnvironmentNames')
+        if (-not $raw) { continue }
+        $path = Get-OnedriveActionHelperProfilePath -Raw $raw
         $software = "Registry::HKEY_USERS\$($sid -replace '\.bak$', '')\Software"
         [pscustomobject]@{
             sid      = $sid
             name     = Split-Path -Path $path -Leaf
-            path     = [Environment]::ExpandEnvironmentVariables($path)
+            path     = $path
             software = $(if (Test-Path -LiteralPath $software) { $software } else { $null })
         }
     }
+}
+
+function Get-OnedriveActionHelperSyncRoot {
+    param([string]$Key = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\SyncRootManager')
+    # The roots that OneDrive registered with Windows for every account (one key per account and
+    # library, named OneDrive!<SID>!..., whose UserSyncRoots value is named after the SID). They are
+    # readable without loading the registry of an account that is signed out. Other sync providers
+    # are not touched by removing OneDrive.
+    if (-not (Test-Path -LiteralPath $Key)) { return }
+    foreach ($provider in @(Get-ChildItem -LiteralPath $Key -ErrorAction Stop)) {
+        if ([string]$provider.PSChildName -notlike 'OneDrive!*') { continue }
+        $roots = Join-Path -Path $provider.PSPath -ChildPath 'UserSyncRoots'
+        if (-not (Test-Path -LiteralPath $roots)) { continue }
+        $item = Get-Item -LiteralPath $roots -ErrorAction Stop
+        try {
+            foreach ($name in @($item.GetValueNames())) {
+                $path = [string]$item.GetValue($name, $null, 'DoNotExpandEnvironmentNames')
+                if ($name -and $path) { [pscustomobject]@{ sid = [string]$name; path = $path } }
+            }
+        } finally {
+            $item.Close()
+        }
+    }
+}
+
+function Test-OnedriveActionHelperNonEmpty {
+    param([Parameter(Mandatory)][string]$Path)
+    # Whether a folder holds anything; a folder that cannot be listed throws.
+    @(Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop | Select-Object -First 1).Count -gt 0
 }
 
 function Get-OnedriveActionHelperProfileFolder {
@@ -252,23 +320,35 @@ function Get-OnedriveActionHelperProfileFolder {
 function Get-OnedriveActionHelperProfileRisk {
     param([Parameter(Mandatory)]$Account)
     # Why removing OneDrive for all users could cost this account its files, or nothing.
-    if (-not (Test-Path -LiteralPath $Account.path -PathType Container)) { return }
+    if ([string]$Account.path -match '%') { return 'unreadable' }
+    $sid = [string]$Account.sid -replace '\.bak$', ''
     try {
-        $folders = @(Get-OnedriveActionHelperProfileFolder -ProfilePath $Account.path)
+        $syncRoots = @(Get-OnedriveActionHelperSyncRoot | Where-Object { $_.sid -eq $sid } | ForEach-Object { $_.path })
     } catch {
         return 'unreadable'
     }
+    $folders = @()
+    if (Test-Path -LiteralPath $Account.path -PathType Container) {
+        try {
+            $folders = @(Get-OnedriveActionHelperProfileFolder -ProfilePath $Account.path)
+        } catch {
+            return 'unreadable'
+        }
+    }
     if ($Account.software) {
         if (Test-OnedriveActionHelperRedirected -SoftwareKey $Account.software -ProfilePath $Account.path) { return 'known-folders' }
-        $scan = Get-OnedriveActionHelperOnlineOnly -Root (@(Get-OnedriveActionHelperRoot -SoftwareKey $Account.software) + $folders)
+        $scan = Get-OnedriveActionHelperOnlineOnly -Root (@(Get-OnedriveActionHelperRoot -SoftwareKey $Account.software) + $syncRoots + $folders)
         if ($scan.errors -gt 0) { return 'unreadable' }
         if ($scan.count -gt 0) { return 'online-only' }
         return
     }
-    # Signed out: its settings cannot be read, so a OneDrive folder with anything in it is a risk.
-    foreach ($folder in $folders) {
+    # Signed out: its settings cannot be read, so a OneDrive folder or sync root with anything in it
+    # is a risk. A root that no longer exists holds nothing.
+    foreach ($folder in @($folders) + @($syncRoots)) {
+        if (-not $folder) { continue }
         try {
-            if (@(Get-ChildItem -LiteralPath $folder -Force -ErrorAction Stop | Select-Object -First 1).Count) { return 'signed-out' }
+            if (-not (Test-Path -LiteralPath $folder)) { continue }
+            if (Test-OnedriveActionHelperNonEmpty -Path $folder) { return 'signed-out' }
         } catch {
             return 'unreadable'
         }
@@ -286,12 +366,14 @@ function Get-OnedriveActionHelperProfileAtRisk {
 function Get-OnedriveActionHelperOtherProfile {
     param()
     # Other accounts with their own per-user OneDrive: it can only be removed signed in as them.
-    $mine = [Environment]::GetFolderPath('UserProfile')
     $count = 0
-    foreach ($profileKey in Get-ChildItem -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction SilentlyContinue) {
-        $path = (Get-ItemProperty -LiteralPath $profileKey.PSPath -ErrorAction SilentlyContinue).ProfileImagePath
-        if (-not $path -or $path -ieq $mine -or $path -notlike '*\Users\*') { continue }
-        if (Test-Path -LiteralPath (Join-Path -Path $path -ChildPath 'AppData\Local\Microsoft\OneDrive\OneDrive.exe') -PathType Leaf) { $count++ }
+    try {
+        $accounts = @(Get-OnedriveActionHelperProfile)
+    } catch {
+        $accounts = @()
+    }
+    foreach ($account in $accounts) {
+        if (Test-Path -LiteralPath (Join-Path -Path $account.path -ChildPath 'AppData\Local\Microsoft\OneDrive\OneDrive.exe') -PathType Leaf) { $count++ }
     }
     $count
 }
@@ -339,9 +421,7 @@ function Set-OnedriveActionDesired {
     $install = Get-OnedriveActionHelperInstall
     if (-not ($install.perUser -or $install.perMachine)) { return }
     # The refusals come before anything is touched.
-    $me = Get-TuneupCurrentUserSid
-    try { $sessionUsers = @(Get-OnedriveActionHelperSessionUser) } catch { $sessionUsers = @() }
-    if ($sessionUsers.Count -ne 1 -or $sessionUsers[0] -ne $me) {
+    if (-not (Test-TuneupSessionUser)) {
         return (New-TuneupOutcome -Refused -Reason 'onedrive-session-user' -Detail "$($Tweak.id): this process does not run as the account signed in at this desktop (it was elevated with another administrator's password, or there is no desktop to compare with), and OneDrive, its folders and its files belong to that account. Run windows-tuneup from an elevated prompt of the account that is signed in; nothing was changed")
     }
     if (Test-OnedriveActionHelperRedirected -SoftwareKey 'HKCU:\Software' -ProfilePath ([Environment]::GetFolderPath('UserProfile')) -Environment) {

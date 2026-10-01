@@ -33,6 +33,26 @@ function Test-TuneupAdmin {
     $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# The accounts that own explorer.exe in the session of this process: who is signed in at this desktop.
+function Get-TuneupSessionUserSid {
+    $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe' AND SessionId = $session" -ErrorAction Stop |
+        ForEach-Object { [string](Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid } |
+        Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# True only when the one account at this desktop is the account of this process. Elevating with
+# another administrator's password keeps the session but not the account: HKCU, AppData and the
+# user's files would be those of the administrator. Without a desktop to compare with, false.
+function Test-TuneupSessionUser {
+    try {
+        $owners = @(Get-TuneupSessionUserSid)
+    } catch {
+        return $false
+    }
+    $owners.Count -eq 1 -and $owners[0] -eq (Get-TuneupCurrentUserSid)
+}
+
 function Test-TuneupMdmEnrollment {
     $root = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
     if (-not (Test-Path -LiteralPath $root)) { return $false }
