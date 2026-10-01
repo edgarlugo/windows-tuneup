@@ -6,4 +6,6 @@ foreach ($folder in @($engineRoot, (Join-Path $engineRoot 'handlers'))) {
         . $file.FullName
     }
 }
+# Action scripts are parsed, never run: only their functions are defined (handlers/Action.ps1).
+Import-TuneupActionLibrary -Path (Join-Path (Split-Path $engineRoot -Parent) 'actions')
 Export-ModuleMember -Function *
