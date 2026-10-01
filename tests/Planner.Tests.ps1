@@ -14,7 +14,10 @@ BeforeAll {
         (New-TestTweak -Id 'ui.future' -MinBuild 30000),
         (New-TestTweak -Id 'ui.edge-build' -MinBuild 26100),
         (New-TestTweak -Id 'ui.only-11' -Families @('11')),
-        (New-TestTweak -Id 'svc.policy-path' -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\Policies\Microsoft\Example'; name = 'Spooler'; startup = 'Disabled' }))
+        (New-TestTweak -Id 'svc.policy-path' -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\Policies\Microsoft\Example'; name = 'Spooler'; startup = 'Disabled' })),
+        (New-TestTweak -Id 'power.on-battery' -Requires @('battery')),
+        (New-TestTweak -Id 'power.plugged-in' -Requires @('no-battery')),
+        (New-TestTweak -Id 'power.old-laptop' -Requires @('battery') -Editions @('Home'))
     )
     $script:Profiles = @(
         (New-TestProfile -Id 'base' -Include @('ui.a')),
@@ -188,5 +191,90 @@ Describe 'New-TuneupPlan with state that needs elevation to read' {
         $plan = @(New-TuneupPlan -Catalog $AppCatalog -Profiles $AppProfiles -Environment (New-TestEnvironment) -TestState { 'applied' })
         $plan[0].Action | Should -Be 'skip'
         $plan[0].Reason | Should -Be 'already-applied'
+    }
+}
+
+Describe 'New-TuneupPlan with hardware requirements' {
+    It 'skips a tweak for machines with a battery on a machine without one' {
+        $plan = Invoke-Plan -Include 'power.on-battery', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $false)
+        Get-Reason $plan 'power.on-battery' | Should -Be 'not-applicable-hardware'
+        Get-Action $plan 'power.plugged-in' | Should -Be 'apply'
+    }
+
+    It 'skips a tweak for machines without a battery on a laptop' {
+        $plan = Invoke-Plan -Include 'power.on-battery', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true)
+        Get-Action $plan 'power.on-battery' | Should -Be 'apply'
+        Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
+    }
+
+    It 'reports the edition before the hardware (a battery-only tweak of another edition, on a machine without a battery)' {
+        $plan = Invoke-Plan -Include 'power.old-laptop' -Environment (New-TestEnvironment -HasBattery $false)
+        Get-Reason $plan 'power.old-laptop' | Should -Be 'incompatible'
+    }
+
+    It 'reports the hardware before reading the state' {
+        $plan = Invoke-Plan -Include 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true) -TestState { throw 'must not read' }
+        Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
+    }
+
+    It 'has a text for the new reason in both languages' {
+        foreach ($lang in 'es', 'en') {
+            Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang $lang
+            Get-TuneupText -Key 'reason.not-applicable-hardware' | Should -Not -Be 'reason.not-applicable-hardware'
+        }
+        Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+    }
+}
+
+Describe 'Test-TuneupTweakNeedsAdmin' {
+    It 'is true for a machine tweak and for a policy value under HKCU, whatever the case of the path' -TestCases @(
+        @{ Scope = 'machine'; Path = 'HKLM:\SOFTWARE\windows-tuneup-test'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Policies\Microsoft\Windows\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\SOFTWARE\POLICIES\Microsoft\Windows\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Expected = $true }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Expected = $false }
+        @{ Scope = 'user'; Path = 'HKCU:\Software\PoliciesNot\X'; Expected = $false }
+    ) {
+        param($Scope, $Path, $Expected)
+        $tweak = New-TestTweak -Scope $Scope -Set ([pscustomobject]@{ path = $Path; name = 'X'; kind = 'DWord'; value = 1 })
+        Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -Be $Expected
+    }
+
+    It 'is false for a tweak of another type, even with Policies in its name' {
+        $tweak = New-TestTweak -Type 'service' -Scope 'user' -Set ([pscustomobject]@{ name = 'Policies'; startup = 'Disabled' })
+        Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -BeFalse
+    }
+}
+
+Describe 'New-TuneupPlan when elevated as another account' {
+    BeforeAll {
+        $script:Foreign = New-TestEnvironment -IsAdmin $true -IsSessionUser $false
+    }
+
+    It 'skips every user tweak, even one asked for by name, because it would land in the other account' {
+        $plan = Invoke-Plan -ProfileIds 'gaming' -Include 'ui.a' -Environment $Foreign
+        foreach ($id in 'ui.a', 'ui.b') { Get-Reason $plan $id | Should -Be 'session-user' -Because $id }
+        Get-Action $plan 'ui.a' | Should -Be 'skip'
+    }
+
+    It 'still plans the machine tweaks' {
+        $plan = Invoke-Plan -ProfileIds 'lite' -Include 'policy.example' -Environment $Foreign
+        Get-Action $plan 'policy.example' | Should -Be 'apply'
+    }
+
+    It 'does not read the state of a user tweak it leaves out' {
+        $plan = Invoke-Plan -Include 'ui.b' -Environment $Foreign -TestState { param($tweak) if ($tweak.scope -eq 'user') { throw 'must not read' }; 'not-applied' }
+        Get-Reason $plan 'ui.b' | Should -Be 'session-user'
+    }
+
+    It 'leaves a run that is not elevated alone, and a run as the account at the desktop' {
+        $notElevated = Invoke-Plan -ProfileIds 'gaming' -Environment (New-TestEnvironment -IsAdmin $false -IsSessionUser $false)
+        Get-Action $notElevated 'ui.b' | Should -Be 'apply'
+        $sameAccount = Invoke-Plan -ProfileIds 'gaming' -Environment (New-TestEnvironment -IsAdmin $true -IsSessionUser $true)
+        Get-Action $sameAccount 'ui.b' | Should -Be 'apply'
+    }
+
+    It 'reports the exclusion before the account' {
+        Get-Reason (Invoke-Plan -ProfileIds 'gaming' -Exclude 'ui.b' -Environment $Foreign) 'ui.b' | Should -Be 'excluded'
     }
 }

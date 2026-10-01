@@ -33,6 +33,26 @@ function Test-TuneupAdmin {
     $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# The accounts that own explorer.exe in the session of this process: who is signed in at this desktop.
+function Get-TuneupSessionUserSid {
+    $session = [System.Diagnostics.Process]::GetCurrentProcess().SessionId
+    @(Get-CimInstance -ClassName Win32_Process -Filter "Name = 'explorer.exe' AND SessionId = $session" -ErrorAction Stop |
+        ForEach-Object { [string](Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop).Sid } |
+        Where-Object { $_ } | Sort-Object -Unique)
+}
+
+# True only when the one account at this desktop is the account of this process. Elevating with
+# another administrator's password keeps the session but not the account: HKCU, AppData and the
+# user's files would be those of the administrator. Without a desktop to compare with, false.
+function Test-TuneupSessionUser {
+    try {
+        $owners = @(Get-TuneupSessionUserSid)
+    } catch {
+        return $false
+    }
+    $owners.Count -eq 1 -and $owners[0] -eq (Get-TuneupCurrentUserSid)
+}
+
 function Test-TuneupMdmEnrollment {
     $root = 'HKLM:\SOFTWARE\Microsoft\Enrollments'
     if (-not (Test-Path -LiteralPath $root)) { return $false }
@@ -50,11 +70,27 @@ function Test-TuneupPendingReboot {
     [bool]$sessionManager.PendingFileRenameOperations
 }
 
+# SMBIOS chassis types of portable machines: portable, laptop, notebook, sub-notebook, tablet,
+# convertible and detachable.
+$script:PortableChassisTypes = @(8, 9, 10, 14, 30, 31, 32)
+
+# A battery on a portable chassis. A desktop whose UPS reports as a battery has a battery but a
+# desktop chassis, so it does not count. When the chassis cannot be read, the battery decides (so a
+# desktop with a UPS and no chassis information still counts as having one).
+function Test-TuneupHasBattery {
+    if (-not @(Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue).Count) { return $false }
+    $types = @(Get-CimInstance -ClassName Win32_SystemEnclosure -ErrorAction SilentlyContinue |
+        ForEach-Object { $_.ChassisTypes } | Where-Object { $null -ne $_ })
+    if (-not $types.Count) { return $true }
+    @($types | Where-Object { $script:PortableChassisTypes -contains [int]$_ }).Count -gt 0
+}
+
 function Get-TuneupEnvironment {
     $currentVersion = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
     $build = [int]$currentVersion.CurrentBuild
     $edition = Resolve-TuneupEdition -EditionId ([string]$currentVersion.EditionID) -InstallationType ([string]$currentVersion.InstallationType)
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
+    $isAdmin = [bool](Test-TuneupAdmin)
     [pscustomobject]@{
         Build         = $build
         UBR           = [int]$currentVersion.UBR
@@ -62,8 +98,10 @@ function Get-TuneupEnvironment {
         Edition       = $edition
         IsServer      = ($edition -eq 'Server')
         IsManaged     = ([bool]$computer.PartOfDomain -or (Test-TuneupMdmEnrollment))
-        IsAdmin       = [bool](Test-TuneupAdmin)
-        HasBattery    = (@(Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue).Count -gt 0)
+        IsAdmin       = $isAdmin
+        # Only an elevated process can be another account than the one at the desktop.
+        IsSessionUser = (-not $isAdmin) -or [bool](Test-TuneupSessionUser)
+        HasBattery    = [bool](Test-TuneupHasBattery)
         PendingReboot = [bool](Test-TuneupPendingReboot)
     }
 }

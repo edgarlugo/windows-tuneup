@@ -2,7 +2,32 @@
   "id": "base",
   "aliases": [],
   "title": { "es": "Base", "en": "Base" },
-  "description": { "es": "Lo seguro para cualquier equipo. Siempre se aplica.", "en": "Safe for any machine. Always applied." },
-  "include": ["ui.show-file-extensions", "privacy.advertising-id", "services.retail-demo"],
+  "description": {
+    "es": "Lo seguro para cualquier equipo, sin administrador: sin anuncios ni sugerencias, ID de publicidad apagado y extensiones de archivo visibles. Siempre se aplica.",
+    "en": "Safe for any machine, without administrator rights: no ads or suggestions, advertising ID off and file extensions shown. Always applied."
+  },
+  "include": [
+    "ui.show-file-extensions",
+    "privacy.advertising-id",
+    "privacy.tailored-experiences",
+    "privacy.feedback-never",
+    "ads.start-suggestions",
+    "ads.start-system-pane",
+    "ads.start-recommendations",
+    "ads.start-account-notifications",
+    "ads.tips-and-tricks",
+    "ads.welcome-experience",
+    "ads.settings-suggestions-1",
+    "ads.settings-suggestions-2",
+    "ads.settings-suggestions-3",
+    "ads.finish-setup-prompts",
+    "ads.sync-provider-notifications",
+    "ads.silent-installed-apps",
+    "ads.suggested-notifications",
+    "ads.phone-link-suggestions",
+    "ads.lockscreen-tips",
+    "ads.lockscreen-overlay",
+    "ads.search-highlights-off"
+  ],
   "keep": []
 }

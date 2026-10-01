@@ -96,6 +96,9 @@ BeforeAll {
 
     $script:Files = @(Get-ChildItem -LiteralPath (Join-Path $Repo 'engine') -Filter '*.ps1' -File) +
         @(Get-ChildItem -LiteralPath (Join-Path $Repo 'engine\handlers') -Filter '*.ps1' -File)
+    # Action scripts report their own reasons (a refusal, a reinstall), which the reports look up too.
+    $actionsFolder = Join-Path $Repo 'actions'
+    if (Test-Path -LiteralPath $actionsFolder) { $script:Files += @(Get-ChildItem -LiteralPath $actionsFolder -Filter '*.ps1' -File) }
     $script:AllFound = @($Files | ForEach-Object { Get-EmittedI18nKey -Path $_.FullName })
 }
 

@@ -3,7 +3,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $script:AdminSid = 'S-1-5-32-544'
     $script:OtherSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'
-    $script:TrustedInstallerSid = 'S-1-5-80-956008885-3425145150-2718476148-1766412592'
+    $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
     $script:MeSid = Get-TestCurrentSid
 }
 
@@ -114,7 +114,7 @@ Describe 'Base folder' {
 
     It 'accepts the C:\ProgramData ACL owned by <Name>' -TestCases @(
         @{ Name = 'SYSTEM'; Owner = 'SY' }
-        @{ Name = 'TrustedInstaller'; Owner = 'S-1-5-80-956008885-3425145150-2718476148-1766412592' }
+        @{ Name = 'TrustedInstaller'; Owner = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464' }
         @{ Name = 'Administrators'; Owner = 'BA' }
     ) {
         # The default ACL of C:\ProgramData: CREATOR OWNER inherit-only full control and Users create/append.
@@ -293,5 +293,73 @@ Describe 'Trust checks' {
         Test-TuneupTrustedItem -Path $file | Should -BeTrue
         New-Item -ItemType HardLink -Path (Join-Path $TestDrive ([guid]::NewGuid().ToString())) -Value $file | Out-Null
         Test-TuneupTrustedItem -Path $file | Should -BeFalse
+    }
+}
+
+Describe 'Programs that run elevated' {
+    BeforeEach {
+        $script:Base = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Folder = Join-Path $Base 'Package_1.0_x64__8wekyb3d8bbwe'
+        $script:Program = Join-Path $Folder 'tool.exe'
+        New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+        [System.IO.File]::WriteAllText($Program, 'fake')
+    }
+
+    It 'knows the real SID of TrustedInstaller and trusts it as an owner' {
+        $sid = ([System.Security.Principal.NTAccount]'NT SERVICE\TrustedInstaller').Translate([System.Security.Principal.SecurityIdentifier]).Value
+        (& (Get-Module Tuneup) { $script:TrustedInstallerSid }) | Should -Be $sid
+        @(& (Get-Module Tuneup) { $script:BaseTrustedSids }) | Should -Contain $sid
+    }
+
+    It 'trusts a program of Windows, also when it is a hard link into WinSxS' {
+        $program = Join-Path ([Environment]::GetFolderPath('System')) 'cmd.exe'
+        Test-TuneupTrustedExecutable -Path $program -StopAt ([Environment]::GetFolderPath('Windows')) | Should -BeTrue
+    }
+
+    It 'does not trust a program that the user owns' {
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeFalse
+    }
+
+    It 'does not trust a program outside the folder it must be in, also through ..' {
+        $program = Join-Path ([Environment]::GetFolderPath('System')) 'cmd.exe'
+        $programFiles = [Environment]::GetFolderPath('ProgramFiles')
+        Test-TuneupTrustedExecutable -Path $program -StopAt $programFiles | Should -BeFalse
+        Test-TuneupTrustedExecutable -Path "$programFiles\..\Windows\System32\cmd.exe" -StopAt $programFiles | Should -BeFalse
+        Test-TuneupTrustedExecutable -Path $programFiles -StopAt $programFiles | Should -BeFalse
+    }
+
+    It 'trusts the program and its folders only when no one else can change them' {
+        $script:FolderSddl = 'O:SYD:PAI(A;OICIIO;GA;;;CO)(A;OICI;FA;;;SY)(A;OICI;0x1200a9;;;BU)'
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity 'O:SYD:P(A;;FA;;;SY)(A;;0x1200a9;;;BU)' } -ParameterFilter { $LiteralPath -eq $Program }
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity $script:FolderSddl } -ParameterFilter { $LiteralPath -eq $Folder }
+        # CREATOR OWNER inherit-only full control only applies to what is created inside.
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeTrue
+        $script:FolderSddl = 'O:SYD:PAI(A;OICI;FA;;;SY)(A;;0x2;;;BU)'
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeFalse
+        $script:FolderSddl = 'O:S-1-5-21-1000000000-2000000000-3000000000-1001D:PAI(A;OICI;FA;;;SY)'
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeFalse
+    }
+
+    It 'does not trust a folder in place of the program' {
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity 'O:SYD:P(A;;FA;;;SY)' }
+        Test-TuneupTrustedExecutable -Path $Folder -StopAt $Base | Should -BeFalse
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeTrue
+    }
+
+    It 'does not trust a program behind a junction' {
+        $junction = Join-Path $Base 'Linked'
+        New-Item -ItemType Junction -Path $junction -Value $Folder | Out-Null
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity 'O:SYD:P(A;;FA;;;SY)' }
+        Test-TuneupTrustedExecutable -Path (Join-Path $junction 'tool.exe') -StopAt $Base | Should -BeFalse
+        Test-TuneupTrustedExecutable -Path $Program -StopAt $Base | Should -BeTrue
+    }
+
+    It 'tells an ACL that Windows does not let it read from any other failure' {
+        Mock -ModuleName Tuneup Get-Acl { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'Access denied') }
+        Test-TuneupAclDenied -Path $Program | Should -BeTrue
+        Mock -ModuleName Tuneup Get-Acl { throw 'Something else' }
+        Test-TuneupAclDenied -Path $Program | Should -BeFalse
+        Mock -ModuleName Tuneup Get-Acl { New-SddlSecurity 'O:SYD:P(A;;FA;;;SY)' }
+        Test-TuneupAclDenied -Path $Program | Should -BeFalse
     }
 }

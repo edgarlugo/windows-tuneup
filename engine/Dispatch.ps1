@@ -52,25 +52,33 @@ function Restore-TuneupState {
 }
 
 # What a handler's Set or Restore can report besides doing its work. The type name marks it, so
-# anything else a handler or a cmdlet prints is never mistaken for it.
+# anything else a handler or a cmdlet prints is never mistaken for it. Refused: Set looked at the
+# system and chose not to change anything (for example, files that only live in the cloud); the
+# tweak is reported as skipped with that reason instead of failed. The contract: a refusal is only
+# valid before anything was changed. The executor reads the state again and compares it with the
+# journaled one; if it differs, the refusal is not believed (the tweak fails and stays undoable).
 function New-TuneupOutcome {
-    param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason)
+    param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason, [switch]$Refused)
     if ($Partial -and -not $Detail) { throw 'A partial outcome needs a detail' }
+    if ($Refused -and (-not $Reason -or -not $Detail)) { throw 'A refused outcome needs a reason and a detail' }
+    if ($Refused -and $Partial) { throw 'An outcome cannot be refused and partial: a refusal changes nothing' }
     [pscustomobject]@{
         PSTypeName     = 'Tuneup.Outcome'
         partial        = [bool]$Partial
         detail         = $(if ($Detail) { $Detail } else { $null })
         rebootRequired = [bool]$RebootRequired
         reason         = $(if ($Reason) { $Reason } else { $null })
+        refused        = [bool]$Refused
     }
 }
 
 function Get-TuneupOutcome {
     param([AllowNull()][AllowEmptyCollection()][object[]]$Output = @())
-    $merged = [pscustomobject]@{ partial = $false; detail = $null; rebootRequired = $false; reason = $null }
+    $merged = [pscustomobject]@{ partial = $false; detail = $null; rebootRequired = $false; reason = $null; refused = $false }
     foreach ($item in @($Output)) {
         if ($null -eq $item -or $item.PSObject.TypeNames -notcontains 'Tuneup.Outcome') { continue }
         if ($item.partial) { $merged.partial = $true }
+        if ($item.PSObject.Properties['refused'] -and $item.refused) { $merged.refused = $true }
         if ($item.rebootRequired) { $merged.rebootRequired = $true }
         if ($item.reason) { $merged.reason = $item.reason }
         if ($item.detail) {

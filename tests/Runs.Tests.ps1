@@ -280,6 +280,36 @@ Describe 'Runs of other users' {
         "$($warned[0])" | Should -BeLike "Ignoring appx entry 'test.appx-other' of run 20250101-000000*belongs to another user*"
     }
 
+    It 'skips any entry whose state says it belongs to another user, an action too' {
+        $action = New-TestTweak -Id 'test.action' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'fixture-toggle' })
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak)
+        $states = @(
+            @{ id = 'mine'; state = [pscustomobject]@{ value = 1; currentUserSid = $MeSid } }
+            @{ id = 'other'; state = [pscustomobject]@{ value = 1; currentUserSid = $OtherSid } }
+            @{ id = 'nobody'; state = [pscustomobject]@{ value = 1; currentUserSid = $null } }
+            @{ id = 'old'; state = [pscustomobject]@{ value = 1 } }
+        )
+        foreach ($item in $states) {
+            $tweak = New-TestTweak -Id "test.action-$($item.id)" -Type 'action' -Scope 'machine' -Set $action.set
+            Add-TuneupJournalEntry -Path (Join-Path $dir 'snapshot.jsonl') -Tweak $tweak -State $item.state -Root 'custom'
+        }
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $MeSid }
+        $journal = Get-TuneupRunJournal -Run $run -WarningVariable warned -WarningAction SilentlyContinue
+        ($journal.Entries | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine,test.action-mine,test.action-nobody,test.action-old'
+        @($journal.Skipped) -join ',' | Should -Be 'test.action-other'
+        "$($warned[0])" | Should -BeLike "Ignoring action entry 'test.action-other' of run 20250101-000000*belongs to another user*"
+        (& (Get-Module Tuneup) { param($e, $s) Test-TuneupEntryOfOtherUser -Entry $e -CurrentSid $s } $journal.SkippedEntries[0] $MeSid) | Should -BeTrue
+    }
+
+    It 'does not resolve last, when elevated, to a run whose action entry belongs to another user' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        $action = New-TestTweak -Id 'test.action' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'fixture-toggle' })
+        $mine = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak)
+        $theirs = New-RunFolder -Root $MachineRoot -Id '20250101-000001' -Tweaks @() -UserSid $OtherSid
+        Add-TuneupJournalEntry -Path (Join-Path $theirs 'snapshot.jsonl') -Tweak $action -State ([pscustomobject]@{ value = 1; currentUserSid = $OtherSid }) -Root 'custom'
+        (Resolve-TuneupRun -MachineRoot $MachineRoot -UserRoot $UserRoot -RunId 'last' -WarningAction SilentlyContinue).Dir | Should -Be $mine
+    }
+
     It 'keeps every entry of a run made by the current user' {
         $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak, (New-TestTweak))
         $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $MeSid }

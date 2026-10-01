@@ -59,7 +59,16 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.partial | Should -Be 1
         $report.summary.applied | Should -Be 1
         $report.rebootRequired | Should -BeTrue
-        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,journalErrors'
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors'
+    }
+
+    It 'counts the tweaks that refused to change anything apart from the skipped ones' {
+        $refused = New-TestResult -Status 'skipped' -Reason 'other-user'
+        $refused | Add-Member -NotePropertyName refused -NotePropertyValue $true
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $refused, $PlanSkip)
+        $report.summary.refused | Should -Be 1
+        $report.summary.skipped | Should -Be 1
+        $report.summary.applied | Should -Be 1
     }
 }
 
@@ -73,6 +82,7 @@ Describe 'Get-TuneupApplyExitCode' {
         @{ Name = 'a journal error after a failure'; Statuses = @('failed', 'journal-error'); NotSaved = $false; Expected = 2 }
         @{ Name = 'an unsaved result'; Statuses = @('applied'); NotSaved = $true; Expected = 2 }
         @{ Name = 'an unsaved result with nothing applied'; Statuses = @('journal-error'); NotSaved = $true; Expected = 1 }
+        @{ Name = 'a tweak that refused to change anything, with everything else applied'; Statuses = @('applied', 'refused'); NotSaved = $false; Expected = 0 }
         @{ Name = 'a partial tweak'; Statuses = @('applied', 'partial'); NotSaved = $false; Expected = 2 }
         @{ Name = 'a journal error after a partial change'; Statuses = @('partial', 'journal-error'); NotSaved = $false; Expected = 2 }
     ) {
@@ -81,6 +91,11 @@ Describe 'Get-TuneupApplyExitCode' {
             switch ($status) {
                 'plan-skip' { $PlanSkip }
                 'journal-error' { $JournalError }
+                'refused' {
+                    $refused = New-TestResult -Status 'skipped' -Reason 'other-user'
+                    $refused | Add-Member -NotePropertyName refused -NotePropertyValue $true
+                    $refused
+                }
                 default { New-TestResult -Status $status }
             }
         })
@@ -143,16 +158,63 @@ Describe 'Write-TuneupApplyReport' {
         $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
 
+    It 'asks to sign out when an applied tweak needs it and no restart is needed' {
+        $signOut = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        $report = New-TestReport @($signOut)
+        $report.signOutRequired | Should -BeTrue
+        (Write-TuneupApplyReport -Report $report 6>&1 | Out-String) | Should -Match 'Sign out and sign in again'
+        ($report | ConvertTo-Json -Depth 10 | ConvertFrom-Json).signOutRequired | Should -BeTrue
+    }
+
+    It 'asks only to restart when one tweak needs a restart and another a sign-out' {
+        $signOut = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        $reboot = [pscustomobject]@{ id = 'test.boot'; title = 'Title boot'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $true; signOutRequired = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($signOut, $reboot)) 6>&1 | Out-String)
+        $text | Should -Match 'Restart the computer'
+        $text | Should -Not -Match 'Sign out and sign in again'
+    }
+
+    It 'does not ask to sign out for a tweak that was skipped' {
+        $skipped = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'skipped'; reason = 'already-applied'; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        (New-TestReport @($skipped)).signOutRequired | Should -BeFalse
+    }
+
+    It 'shows a tweak that refused to change anything, with its reason and detail' {
+        $refused = [pscustomobject]@{ id = 'test.refused'; title = 'Title refused'; status = 'skipped'; reason = 'other-user'; error = $null; detail = 'Nothing was changed'; rebootRequired = $false; refused = $true }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($refused, $PlanSkip)) 6>&1 | Out-String)
+        $text | Should -Match '\[skipped\] Title refused: belongs to another user'
+        $text | Should -Match 'Nothing was changed'
+        $text | Should -Not -Match 'Title skipped'
+    }
+
+    It 'decides what to show by the refused flag, not by the presence of a detail' {
+        $plain = [pscustomobject]@{ id = 'test.plain'; title = 'Title plain'; status = 'skipped'; reason = 'already-applied'; error = $null; detail = 'A note'; rebootRequired = $false; refused = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($plain)) 6>&1 | Out-String)
+        $text | Should -Not -Match 'Title plain'
+    }
+
     It 'shows a partial tweak with its explanation' {
         $partial = [pscustomobject]@{ id = 'test.partial'; title = 'Title partial'; status = 'partial'; reason = $null; error = $null; detail = 'Stopping it failed'; rebootRequired = $false }
         $text = (Write-TuneupApplyReport -Report (New-TestReport @($partial)) 6>&1 | Out-String)
         $text | Should -Match '\[partial\] Title partial'
         $text | Should -Match 'Stopping it failed'
-        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0'
+        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0 \| Refused: 0'
     }
 }
 
 Describe 'Write-TuneupPlanReport' {
+    It 'tells in each item whether it asks for a sign-out and which hardware it needs' {
+        $plain = New-TestPlanItem 'user' 'apply'
+        $special = New-TestPlanItem 'machine' 'apply'
+        $special.Tweak | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $special.Tweak | Add-Member -NotePropertyName requires -NotePropertyValue @('battery')
+        $json = Write-TuneupPlanReport -Plan @($plain, $special) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
+        $json.items[0].signOutRequired | Should -BeFalse
+        @($json.items[0].requires).Count | Should -Be 0
+        $json.items[1].signOutRequired | Should -BeTrue
+        @($json.items[1].requires) | Should -Be @('battery')
+    }
+
     It 'marks a plan with system changes as requiring elevation' {
         $json = Write-TuneupPlanReport -Plan @((New-TestPlanItem 'user' 'apply'), (New-TestPlanItem 'machine' 'apply')) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
         $json.requiresAdmin | Should -BeTrue
@@ -381,5 +443,15 @@ Describe 'Write-TuneupMeasureReport' {
         $json.command | Should -Be 'measure'
         $json.measurement.metrics.ramInUseMB | Should -Be 5400
         @($json.warnings) -join ',' | Should -Be 'careful'
+    }
+}
+
+Describe 'Write-TuneupPlanReport with a policy value under HKCU' {
+    It 'requires elevation, because the policy keys of HKCU are read-only for a standard user' {
+        $tweak = New-TestTweak -Id 'test.policy' -Scope 'user' -Set ([pscustomobject]@{ path = 'HKCU:\Software\Policies\windows-tuneup-test'; name = 'X'; kind = 'DWord'; value = 1 })
+        $plan = @([pscustomobject]@{ Id = $tweak.id; Tweak = $tweak; Action = 'apply'; Reason = $null })
+        (Write-TuneupPlanReport -Plan $plan -Environment (New-TestEnvironment) -Json | ConvertFrom-Json).requiresAdmin | Should -BeTrue
+        $skipped = @([pscustomobject]@{ Id = $tweak.id; Tweak = $tweak; Action = 'skip'; Reason = 'already-applied' })
+        (Write-TuneupPlanReport -Plan $skipped -Environment (New-TestEnvironment) -Json | ConvertFrom-Json).requiresAdmin | Should -BeFalse
     }
 }

@@ -72,10 +72,13 @@ function Test-TuneupRunMarker {
     $false
 }
 
-function Test-TuneupAppxEntryOfOtherUser {
+function Test-TuneupEntryOfOtherUser {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][AllowEmptyString()][string]$CurrentSid)
-    if ([string]$Entry.tweak.type -cne 'appx' -or $null -eq $Entry.state) { return $false }
-    # No SID saved means that nobody had the app for themselves (or the state is older than the field).
+    # Any state that saves currentUserSid belongs to that account: a Store app that the user had, or an
+    # action that changed something of the user (OneDrive, the DirectX preferences in HKCU).
+    if ($null -eq $Entry.state -or $Entry.state -is [string] -or $Entry.state -is [ValueType]) { return $false }
+    # No SID saved means that the change was nobody's own (an app that nobody had for themselves) or the
+    # state is older than the field.
     $sid = $Entry.state.PSObject.Properties['currentUserSid']
     $null -ne $sid -and [bool]$sid.Value -and [string]$sid.Value -ne $CurrentSid
 }
@@ -93,9 +96,10 @@ function Get-TuneupRunJournal {
         $kind = $null
         if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
             $kind = 'user-scope entry'
-        } elseif (Test-TuneupAppxEntryOfOtherUser -Entry $entry -CurrentSid $currentSid) {
-            # The copy of a Store app belongs to the account that had it: only that account can get it back.
-            $kind = 'appx entry'
+        } elseif (Test-TuneupEntryOfOtherUser -Entry $entry -CurrentSid $currentSid) {
+            # The copy of a Store app, or what an action changed for an account, belongs to that account:
+            # only that account can get it back.
+            $kind = "$([string]$entry.tweak.type) entry"
         }
         if ($null -ne $kind) {
             Write-Warning "Ignoring $kind '$($entry.id)' of run $($Run.Id): it belongs to another user"
@@ -119,6 +123,21 @@ function Get-TuneupUndoneTweakId {
     param([Parameter(Mandatory)]$Run)
     $text = Read-TuneupStateFile -Path (Join-Path $Run.Dir 'undone-tweaks.txt') -Root $Run.Root -IgnoreUntrusted
     if ($text) { $text -split "`r?`n" | Where-Object { $_ } }
+}
+
+# A run is also done when every tweak of its journal is noted as undone, without an undone.json: the
+# tweaks that refused to change anything are noted when applied, so a run made only of them has
+# nothing left to restore. Run.Undone only reflects the undone.json marker; `last` and -Undo ask this
+# as well.
+function Test-TuneupRunAllNotedUndone {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run)
+    $undoneIds = @(Get-TuneupUndoneTweakId -Run $Run)
+    if (-not $undoneIds.Count) { return $false }
+    $journalIds = @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root |
+        ForEach-Object { [string]$_.id })
+    if (-not $journalIds.Count) { return $false }
+    @($journalIds | Where-Object { $undoneIds -notcontains $_ }).Count -eq 0
 }
 
 function Get-TuneupRunList {
@@ -223,7 +242,8 @@ function Resolve-TuneupRun {
     }
     $elevated = [bool](Test-TuneupAdmin)
     $currentSid = Get-TuneupCurrentUserSid
-    $pending = @($runs | Where-Object { -not $_.Undone })
+    # A run whose tweaks were all noted as undone (they all refused to change anything) has nothing to restore.
+    $pending = @($runs | Where-Object { -not $_.Undone -and -not (Test-TuneupRunAllNotedUndone -Run $_) })
     for ($i = $pending.Count - 1; $i -ge 0; $i--) {
         if (Test-TuneupRunSelectable -Run $pending[$i] -Elevated:$elevated -CurrentSid $currentSid) { return $pending[$i] }
     }

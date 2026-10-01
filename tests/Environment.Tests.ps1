@@ -55,3 +55,77 @@ Describe 'Get-TuneupEnvironment' {
         $environment.PendingReboot | Should -BeOfType [bool]
     }
 }
+
+Describe 'Test-TuneupHasBattery' {
+    BeforeEach {
+        $script:Batteries = @()
+        $script:Chassis = @()
+        Mock -ModuleName Tuneup Get-CimInstance { $script:Batteries } -ParameterFilter { $ClassName -eq 'Win32_Battery' }
+        Mock -ModuleName Tuneup Get-CimInstance { $script:Chassis } -ParameterFilter { $ClassName -eq 'Win32_SystemEnclosure' }
+    }
+
+    It 'is false without a battery, whatever the chassis' {
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]10) })
+        Test-TuneupHasBattery | Should -BeFalse
+    }
+
+    It 'is true for a battery in a portable chassis (<Type>)' -TestCases @(
+        @{ Type = 8 }, @{ Type = 9 }, @{ Type = 10 }, @{ Type = 14 }, @{ Type = 30 }, @{ Type = 31 }, @{ Type = 32 }
+    ) {
+        param($Type)
+        $script:Batteries = @([pscustomobject]@{ Name = 'Battery' })
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]$Type) })
+        Test-TuneupHasBattery | Should -BeTrue
+    }
+
+    It 'is false for a battery in a desktop chassis (a UPS that reports as a battery)' {
+        $script:Batteries = @([pscustomobject]@{ Name = 'UPS' })
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = @([uint16]3) })
+        Test-TuneupHasBattery | Should -BeFalse
+    }
+
+    It 'trusts the battery when there is no chassis information' {
+        $script:Batteries = @([pscustomobject]@{ Name = 'Battery' })
+        Test-TuneupHasBattery | Should -BeTrue
+        $script:Chassis = @([pscustomobject]@{ ChassisTypes = $null })
+        Test-TuneupHasBattery | Should -BeTrue
+    }
+}
+
+Describe 'Test-TuneupSessionUser' {
+    BeforeAll {
+        $script:Me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    }
+
+    It 'is true only when the account at this desktop is the one of this process: <Name>' -TestCases @(
+        @{ Name = 'the same account'; Owners = @('ME'); Expected = $true }
+        @{ Name = 'another administrator'; Owners = @('S-1-5-21-1000000000-2000000000-3000000000-1001'); Expected = $false }
+        @{ Name = 'two accounts'; Owners = @('ME', 'S-1-5-21-1000000000-2000000000-3000000000-1001'); Expected = $false }
+        @{ Name = 'no desktop'; Owners = @(); Expected = $false }
+        @{ Name = 'the desktop cannot be read'; Owners = @('throw'); Expected = $false }
+    ) {
+        param($Owners, $Expected)
+        $script:Owners = @($Owners | ForEach-Object { $_ -replace '^ME$', $Me })
+        Mock -ModuleName Tuneup Get-TuneupSessionUserSid { if ($script:Owners -contains 'throw') { throw 'denied' }; $script:Owners }
+        Test-TuneupSessionUser | Should -Be $Expected
+    }
+
+    It 'reads the owners of explorer.exe in this session without changing anything' {
+        foreach ($sid in @(Get-TuneupSessionUserSid)) { $sid | Should -Match '^S-1-' }
+    }
+}
+
+Describe 'Get-TuneupEnvironment account at the desktop' {
+    It 'asks whether the process is the account at the desktop only when elevated' -TestCases @(
+        @{ Admin = $true; Same = $false; Expected = $false }
+        @{ Admin = $true; Same = $true; Expected = $true }
+        @{ Admin = $false; Same = $false; Expected = $true }
+    ) {
+        param($Admin, $Same, $Expected)
+        $script:Admin = $Admin
+        $script:Same = $Same
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $script:Admin }
+        Mock -ModuleName Tuneup Test-TuneupSessionUser { $script:Same }
+        (Get-TuneupEnvironment).IsSessionUser | Should -Be $Expected
+    }
+}

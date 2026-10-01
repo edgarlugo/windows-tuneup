@@ -88,6 +88,18 @@ Describe 'Handler outcomes' {
         $outcome.detail | Should -Be 'one; two'
     }
 
+    It 'builds a refused outcome only with a reason and a detail, and never together with partial' {
+        $outcome = Get-TuneupOutcome -Output @(New-TuneupOutcome -Refused -Reason 'sample-refusal' -Detail 'why')
+        $outcome.refused | Should -BeTrue
+        $outcome.reason | Should -Be 'sample-refusal'
+        $outcome.detail | Should -Be 'why'
+        $outcome.partial | Should -BeFalse
+        { New-TuneupOutcome -Refused -Detail 'why' } | Should -Throw '*refused outcome needs a reason and a detail*'
+        { New-TuneupOutcome -Refused -Reason 'sample-refusal' } | Should -Throw '*refused outcome needs a reason and a detail*'
+        { New-TuneupOutcome -Refused -Partial -Reason 'sample-refusal' -Detail 'why' } | Should -Throw '*cannot be refused and partial*'
+        (Get-TuneupOutcome -Output @(New-TuneupOutcome -Detail 'plain')).refused | Should -BeFalse
+    }
+
     It 'refuses a partial outcome without a detail' {
         { New-TuneupOutcome -Partial } | Should -Throw '*A partial outcome needs a detail*'
         { New-TuneupOutcome -Partial -Detail '' } | Should -Throw '*A partial outcome needs a detail*'

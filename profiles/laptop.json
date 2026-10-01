@@ -1,0 +1,19 @@
+{
+  "id": "laptop",
+  "aliases": ["portatil", "portátil"],
+  "title": { "es": "Portátil", "en": "Laptop" },
+  "description": {
+    "es": "Más batería: sin compartir descargas de Windows, Edge sin procesos al iniciar ni en segundo plano, escáner y mapas en manual, y sin red en suspensión con batería (pregunta antes). En Windows 10 también apaga las apps de la Store en segundo plano (pregunta antes).",
+    "en": "More battery: no sharing of Windows downloads, no Edge processes at startup or in the background, scanner and maps set to manual, and no network in standby on battery (asks first). On Windows 10 it also stops Store apps in the background (asks first)."
+  },
+  "include": [
+    "performance.background-apps-off",
+    "performance.delivery-optimization-http-only",
+    "edge.startup-boost-off",
+    "edge.background-mode-off",
+    "services.wia",
+    "services.maps-broker",
+    "power.standby-network-off-battery"
+  ],
+  "keep": []
+}

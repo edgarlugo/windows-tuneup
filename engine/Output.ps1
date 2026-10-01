@@ -9,6 +9,8 @@ function ConvertTo-TuneupPlanView {
             action         = $item.Action
             reason         = $item.Reason
             rebootRequired = [bool]$item.Tweak.rebootRequired
+            signOutRequired = ($null -ne $item.Tweak.PSObject.Properties['signOutRequired'] -and $item.Tweak.signOutRequired -eq $true)
+            requires       = @(if ($null -ne $item.Tweak.PSObject.Properties['requires']) { $item.Tweak.requires })
         }
     }
 }
@@ -53,7 +55,7 @@ function Write-TuneupPlanReport {
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
-    $requiresAdmin = @($items | Where-Object { $_.action -eq 'apply' -and $_.scope -eq 'machine' }).Count -gt 0
+    $requiresAdmin = @($Plan | Where-Object { $_.Action -eq 'apply' -and (Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak) }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
@@ -87,7 +89,8 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)]$Environment
     )
     # A tweak left out because its backup could not be written was not done: it is counted apart.
-    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' }).Count }
+    # A tweak that refused to change anything is counted apart from the skips of the plan.
+    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' -and $_.refused -ne $true }).Count }
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
@@ -97,12 +100,14 @@ function New-TuneupApplyReport {
         environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
+        signOutRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.signOutRequired }).Count -gt 0)
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
             partial       = & $count 'partial'
             notApplied    = & $count 'not-applied'
             failed        = & $count 'failed'
             skipped       = & $count 'skipped'
+            refused       = @($Results | Where-Object { $_.status -eq 'skipped' -and $_.refused -eq $true }).Count
             journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
         }
         results        = $Results
@@ -123,6 +128,8 @@ function Save-TuneupApplyReport {
 
 # 0: everything done. 2: not everything was completed (a partial, failed or ineffective tweak, a
 # backup that could not be written after some change, or an unsaved result; read the summary).
+# A tweak that refused to change anything (summary.refused) is an omission, like any skip: if
+# everything else was done, the code stays 0 and the summary and the line of that tweak say why.
 # 1: nothing was changed because the backups could not be written.
 function Get-TuneupApplyExitCode {
     param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
@@ -150,24 +157,30 @@ function Write-TuneupApplyReport {
         [switch]$Json
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
-    $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red' }
+    $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red'; 'skipped' = 'Yellow' }
     foreach ($result in $Report.results) {
         if ($result.reason -eq 'journal-error') {
             Write-Host ((Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key 'status.skipped'), $result.title) + ": $(Get-TuneupText -Key 'reason.journal-error')") -ForegroundColor Red
             if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
             continue
         }
-        if ($result.status -eq 'skipped') { continue }
-        Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title) -ForegroundColor $colors[$result.status]
+        # Skips of the plan were already shown; a tweak that refused to change anything when it was
+        # applied is shown with its reason.
+        if ($result.status -eq 'skipped' -and $result.refused -ne $true) { continue }
+        $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
+        if ($result.status -eq 'skipped' -and $result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
+        Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor Yellow }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
     $summary = $Report.summary
     Write-Host ''
-    Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped)
+    Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped, $summary.refused)
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
     Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+    # A restart also signs the user out, so the sign-out line is only needed without one.
+    elseif ($Report.signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
 }
 
 function Write-TuneupStatusReport {

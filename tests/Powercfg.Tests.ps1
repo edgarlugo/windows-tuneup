@@ -264,6 +264,46 @@ Describe 'Power setting' {
         { Restore-PowercfgTweakState -Tweak $SettingTweak -State $state } | Should -Throw '*activating the scheme again failed*'
     }
 
+    It 'writes, compares and restores only the AC value when the tweak gives no DC value' {
+        $tweak = New-TestTweak -Id 'power.ac-only' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $Sleep; setting = $StandbyIdle; ac = 0 })
+        Test-PowercfgTweakState -Tweak $tweak | Should -Be 'applied'
+        $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 600 }
+        Test-PowercfgTweakState -Tweak $tweak | Should -Be 'not-applied'
+        Set-PowercfgTweakDesired -Tweak $tweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setacvalueindex $Balanced $Sleep $StandbyIdle 0" }
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq '/setdcvalueindex' }
+        Restore-PowercfgTweakState -Tweak $tweak -State ([pscustomobject]@{ kind = 'setting'; scheme = $Balanced; present = $true; ac = 600; dc = 300 })
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setacvalueindex $Balanced $Sleep $StandbyIdle 600" }
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq '/setdcvalueindex' }
+    }
+
+    It 'treats a null value like an absent one and writes only DC' {
+        $tweak = New-TestTweak -Id 'power.dc-only' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $Sleep; setting = $StandbyIdle; ac = $null; dc = 600 })
+        Test-PowercfgTweakState -Tweak $tweak | Should -Be 'not-applied'
+        Set-PowercfgTweakDesired -Tweak $tweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Arguments[0] -eq '/setacvalueindex' }
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setdcvalueindex $Balanced $Sleep $StandbyIdle 600" }
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
+    }
+
+    It 'fails, without a partial result, when the only value cannot be written' {
+        $script:FailDc = $true
+        $tweak = New-TestTweak -Id 'power.dc-only' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $Sleep; setting = $StandbyIdle; dc = 600 })
+        { Set-PowercfgTweakDesired -Tweak $tweak } | Should -Throw '*setdcvalueindex failed*'
+    }
+
+    It 'names the one value that was changed when activating the scheme again fails' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { throw 'powercfg /setactive failed with exit code 1: Invalid Parameters' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        $tweak = New-TestTweak -Id 'power.ac-only' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = $Sleep; setting = $StandbyIdle; ac = 5 })
+        $outcome = Get-TuneupOutcome -Output @(Set-PowercfgTweakDesired -Tweak $tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -BeLike 'The value on AC power was changed, but activating the scheme again failed*'
+    }
+
     It 'restores the scheme that was active' {
         Restore-PowercfgTweakState -Tweak $SchemeTweak -State ([pscustomobject]@{ kind = 'scheme'; active = $Balanced; exists = $true })
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
@@ -274,6 +314,8 @@ Describe 'Powercfg definition and registration' {
     It 'accepts a valid <Kind> tweak' -TestCases @(
         @{ Kind = 'scheme'; Set = @{ kind = 'scheme'; scheme = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' } }
         @{ Kind = 'setting'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 4294967295 } }
+        @{ Kind = 'setting with only AC'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0 } }
+        @{ Kind = 'setting with only DC'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = $null; dc = 1 } }
     ) {
         param($Set)
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]$Set))) -join '; ' | Should -BeNullOrEmpty
@@ -287,6 +329,8 @@ Describe 'Powercfg definition and registration' {
         @{ Problem = 'a subgroup alias'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = 'SUB_SLEEP'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 0 }; Message = 'set.subgroup must be a GUID' }
         @{ Problem = 'a value out of range'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 4294967296; dc = 0 }; Message = 'set.ac must be an integer' }
         @{ Problem = 'a value that is text'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = '900' }; Message = 'set.dc must be an integer' }
+        @{ Problem = 'neither an AC nor a DC value'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da' }; Message = 'needs set.ac, set.dc or both' }
+        @{ Problem = 'both values null'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = $null; dc = $null }; Message = 'needs set.ac, set.dc or both' }
     ) {
         param($Set, $Message)
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'powercfg' -Scope 'machine' -Set ([pscustomobject]$Set))) -join '; ' | Should -Match ([regex]::Escape($Message))
