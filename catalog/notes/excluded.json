@@ -1,0 +1,131 @@
+{
+  "groups": [
+    {
+      "id": "apps-no-undo",
+      "title": { "es": "Apps que no se pueden reinstalar al deshacer", "en": "Apps that cannot be reinstalled on undo" },
+      "intro": {
+        "es": "Deshacer reinstala una app con winget desde la Microsoft Store. Para estas apps winget no encuentra el producto (código 0x8A150014, comprobado el 2026-10-01), así que quitarlas no se podría deshacer: quedan fuera.",
+        "en": "Undo reinstalls an app with winget from the Microsoft Store. For these apps winget does not find the product (code 0x8A150014, checked on 2026-10-01), so removing them could not be undone: they are left out."
+      },
+      "items": [
+        { "name": "Microsoft Solitaire Collection", "appx": "Microsoft.MicrosoftSolitaireCollection", "why": { "es": "winget no resuelve 9WZDNCRFHWD2.", "en": "winget does not resolve 9WZDNCRFHWD2." } },
+        { "name": "Microsoft Tips", "appx": "Microsoft.Getstarted", "why": { "es": "winget no resuelve 9WZDNCRDTBJJ.", "en": "winget does not resolve 9WZDNCRDTBJJ." } },
+        { "name": "People", "appx": "Microsoft.People", "why": { "es": "winget no resuelve 9NBLGGH10PG8.", "en": "winget does not resolve 9NBLGGH10PG8." } },
+        { "name": "Windows Maps", "appx": "Microsoft.WindowsMaps", "why": { "es": "winget no resuelve 9WZDNCRDTBVB.", "en": "winget does not resolve 9WZDNCRDTBVB." } },
+        { "name": "3D Viewer", "appx": "Microsoft.Microsoft3DViewer", "why": { "es": "winget no resuelve 9NBLGGH42THS.", "en": "winget does not resolve 9NBLGGH42THS." } },
+        { "name": "Paint 3D", "appx": "Microsoft.MSPaint", "why": { "es": "winget no resuelve 9NBLGGH5FV99 (no es el Paint actual).", "en": "winget does not resolve 9NBLGGH5FV99 (it is not the current Paint)." } },
+        { "name": "Print 3D", "appx": "Microsoft.Print3D", "why": { "es": "winget no resuelve 9PBPCH085S3S.", "en": "winget does not resolve 9PBPCH085S3S." } },
+        { "name": "3D Builder", "appx": "Microsoft.3DBuilder", "why": { "es": "winget no resuelve 9WZDNCRFJ3T6.", "en": "winget does not resolve 9WZDNCRFJ3T6." } },
+        { "name": "Microsoft Wallet", "appx": "Microsoft.Wallet", "why": { "es": "winget no resuelve 9NBLGGH52CKV.", "en": "winget does not resolve 9NBLGGH52CKV." } },
+        { "name": "Mobile Plans", "appx": "Microsoft.OneConnect", "why": { "es": "winget no resuelve 9NBLGGH5PNB1.", "en": "winget does not resolve 9NBLGGH5PNB1." } },
+        { "name": "MSN Sports", "appx": "Microsoft.BingSports", "why": { "es": "winget no resuelve 9WZDNCRFHVH4.", "en": "winget does not resolve 9WZDNCRFHVH4." } },
+        { "name": "Translator", "appx": "Microsoft.BingTranslator", "why": { "es": "winget no resuelve 9WZDNCRFJ3PG.", "en": "winget does not resolve 9WZDNCRFJ3PG." } },
+        { "name": "Xbox Game Bar Plugin", "appx": "Microsoft.XboxGameOverlay", "why": { "es": "winget no resuelve 9NBLGGH537C2.", "en": "winget does not resolve 9NBLGGH537C2." } },
+        { "name": "Xbox Console Companion", "appx": "Microsoft.XboxApp", "why": { "es": "winget no resuelve 9WZDNCRFJBD8.", "en": "winget does not resolve 9WZDNCRFJBD8." } },
+        { "name": "Cortana", "appx": "Microsoft.549981C3F5F10", "why": { "es": "winget no resuelve 9NFFX4SZZ23L; Cortana ya no existe en Windows 11.", "en": "winget does not resolve 9NFFX4SZZ23L; Cortana no longer exists in Windows 11." } },
+        { "name": "Microsoft PC Manager", "appx": "Microsoft.PCManager", "why": { "es": "winget no resuelve 9P35S3ZNMCHL.", "en": "winget does not resolve 9P35S3ZNMCHL." } },
+        { "name": "Network Speed Test", "appx": "Microsoft.NetworkSpeedTest", "why": { "es": "winget no resuelve 9WZDNCRFHX52.", "en": "winget does not resolve 9WZDNCRFHX52." } },
+        { "name": "Sway", "appx": "Microsoft.Office.Sway", "why": { "es": "winget no resuelve 9WZDNCRD2G0J.", "en": "winget does not resolve 9WZDNCRD2G0J." } }
+      ]
+    },
+    {
+      "id": "apps-no-store",
+      "title": { "es": "Apps sin producto en la Store", "en": "Apps without a Store product" },
+      "intro": {
+        "es": "Llegan con Windows o con Windows Update y no tienen un id de la Store con el que reinstalarlas, o no se pudo comprobar qué paquete instala su id.",
+        "en": "They come with Windows or Windows Update and have no Store id to reinstall them with, or it could not be checked which package their id installs."
+      },
+      "items": [
+        { "name": "Microsoft 365 Companions", "appx": "Microsoft.M365Companions", "why": { "es": "Sin producto en la Store.", "en": "No Store product." } },
+        { "name": "AI Hub", "appx": "Microsoft.Windows.AIHub", "why": { "es": "Sin producto en la Store.", "en": "No Store product." } },
+        { "name": "Cross Device Experience Host", "appx": "MicrosoftWindows.CrossDevice", "why": { "es": "Paquete del sistema que acompaña a Vínculo móvil; sin producto en la Store.", "en": "System package that goes with Phone Link; no Store product." } },
+        { "name": "Skype", "appx": "Microsoft.SkypeApp", "why": { "es": "Ya no tiene producto en la Store.", "en": "It no longer has a Store product." } },
+        { "name": { "es": "Microsoft Teams (clásico personal)", "en": "Microsoft Teams (classic personal)" }, "appx": "MicrosoftTeams", "why": { "es": "Sin producto en la Store; el Teams nuevo (MSTeams) sí está en el catálogo.", "en": "No Store product; the new Teams (MSTeams) is in the catalog." } },
+        { "name": "Microsoft Copilot (XP9CXNGPPJ97XX)", "why": { "es": "winget lo resuelve, pero no se pudo saber qué paquete Appx instala; la app Copilot de Windows (9NHT9RB2F4HD) sí está.", "en": "winget resolves it, but it could not be checked which Appx package it installs; the Windows Copilot app (9NHT9RB2F4HD) is included." } }
+      ]
+    },
+    {
+      "id": "apps-kept",
+      "title": { "es": "Apps que no se quitan nunca", "en": "Apps that are never removed" },
+      "intro": {
+        "es": "Otras apps dependen de ellas, Windows no deja quitarlas o guardan datos del usuario dentro de la app.",
+        "en": "Other apps depend on them, Windows does not let them be removed, or they keep the user's data inside the app."
+      },
+      "items": [
+        { "name": "Microsoft Store", "appx": "Microsoft.WindowsStore", "why": { "es": "Deshacer cualquier app depende de ella. Quitarla sería una opción aparte con advertencia; hoy no existe.", "en": "Undoing any app depends on it. Removing it would be a separate option with a warning; it does not exist today." } },
+        { "name": { "es": "Instalador de aplicación (winget)", "en": "App Installer (winget)" }, "appx": "Microsoft.DesktopAppInstaller", "why": { "es": "Es winget: sin él no hay deshacer. Windows no deja quitarlo.", "en": "It is winget: without it there is no undo. Windows does not let it be removed." } },
+        { "name": { "es": "Seguridad de Windows", "en": "Windows Security" }, "appx": "Microsoft.SecHealthUI", "why": { "es": "Interfaz de Defender; Windows no deja quitarla.", "en": "The Defender interface; Windows does not let it be removed." } },
+        { "name": "Xbox Identity Provider, Xbox TCUI, Xbox Speech To Text Overlay, Game Callable UI", "why": { "es": "La Store, Game Pass y los juegos los usan para iniciar sesión.", "en": "The Store, Game Pass and games use them to sign in." } },
+        { "name": { "es": "Fotos, Calculadora, Bloc de notas, Paint, Recortes, Cámara, Terminal", "en": "Photos, Calculator, Notepad, Paint, Snipping Tool, Camera, Terminal" }, "why": { "es": "Herramientas básicas y predeterminadas; no son apps basura.", "en": "Basic and default tools; they are not junk." } },
+        { "name": { "es": "Notas rápidas, Journal, Whiteboard, OneNote", "en": "Sticky Notes, Journal, Whiteboard, OneNote" }, "why": { "es": "Guardan notas del usuario dentro de la app: quitarlas las borra.", "en": "They keep the user's notes inside the app: removing them deletes those notes." } },
+        { "name": { "es": "Microsoft Edge, WebView2, códecs y frameworks (Microsoft.NET.*, Microsoft.VCLibs.*, Microsoft.UI.Xaml.*)", "en": "Microsoft Edge, WebView2, codecs and frameworks (Microsoft.NET.*, Microsoft.VCLibs.*, Microsoft.UI.Xaml.*)" }, "why": { "es": "Otras apps dependen de ellos.", "en": "Other apps depend on them." } }
+      ]
+    },
+    {
+      "id": "services-xbox",
+      "title": { "es": "Servicios de Xbox", "en": "Xbox services" },
+      "intro": {
+        "es": "Estaban en el catálogo y se quitaron: ya vienen en manual y Windows los inicia solos cuando un juego los necesita, así que deshabilitarlos no ahorra nada y rompe el inicio de sesión de Xbox y de los juegos de Game Pass. La app y la tarea de Xbox sí se pueden quitar (el perfil `gaming` las conserva).",
+        "en": "They were in the catalog and were removed: they are already Manual and Windows starts them by itself when a game needs them, so disabling them saves nothing and breaks the Xbox and Game Pass sign-in. The Xbox app and task can be removed (the `gaming` profile keeps them)."
+      },
+      "items": [
+        { "name": "XblGameSave", "why": { "es": "Partidas guardadas de Xbox Live; ya viene en manual.", "en": "Xbox Live game saves; it is already Manual." } },
+        { "name": "XblAuthManager", "why": { "es": "Inicio de sesión de Xbox Live; deshabilitarlo impide entrar a los juegos que lo usan.", "en": "Xbox Live sign-in; disabling it stops the games that use it from signing in." } },
+        { "name": "XboxNetApiSvc", "why": { "es": "Red de Xbox Live para el multijugador; ya viene en manual.", "en": "Xbox Live networking for multiplayer; it is already Manual." } }
+      ]
+    },
+    {
+      "id": "home-policies",
+      "title": { "es": "Directivas que Windows Home ignora", "en": "Policies that Windows Home ignores" },
+      "intro": {
+        "es": "Windows Home ignora muchas directivas de grupo. Los ajustes del catálogo que son directivas declaran las ediciones donde Microsoft las documenta y el plan los muestra como \"no aplica\" en Home (la lista está más arriba, en \"Ajustes que no se aplican en Home\"). Lo que sigue quedó fuera porque en Home no hay una forma que funcione y se pueda deshacer.",
+        "en": "Windows Home ignores many group policies. The catalog tweaks that are policies declare the editions where Microsoft documents them, and the plan shows them as \"does not apply\" on Home (the list is above, in \"Tweaks that do not apply on Home\"). What follows was left out because on Home there is no way that works and can be undone."
+      },
+      "items": [
+        { "name": { "es": "Telemetría al mínimo por directiva en Home", "en": "Minimum telemetry by policy on Home" }, "why": { "es": "AllowTelemetry en las directivas no rige en Home; lo único que corta la subida de datos ahí es el servicio DiagTrack (services.diagtrack, con pregunta).", "en": "AllowTelemetry in the policies does not apply on Home; the only thing that stops the upload there is the DiagTrack service (services.diagtrack, which asks first)." } },
+        { "name": { "es": "Contenido de consumidor y tarjetas de Microsoft 365 en Home y Pro", "en": "Consumer content and Microsoft 365 cards on Home and Pro" }, "why": { "es": "DisableWindowsConsumerFeatures y DisableConsumerAccountStateContent solo rigen en Enterprise y Education; en Home y Pro los ajustes de usuario de anuncios cubren lo que se puede.", "en": "DisableWindowsConsumerFeatures and DisableConsumerAccountStateContent only apply to Enterprise and Education; on Home and Pro the user ads tweaks cover what can be covered." } },
+        { "name": { "es": "Widgets en Home (TaskbarDa)", "en": "Widgets on Home (TaskbarDa)" }, "why": { "es": "Windows bloquea la escritura de ese valor desde PowerShell (UCPD); la directiva solo rige en Pro y superiores.", "en": "Windows blocks writing that value from PowerShell (UCPD); the policy only applies on Pro and later." } },
+        { "name": { "es": "Red en suspensión moderna y Delivery Optimization en Home", "en": "Modern standby network and Delivery Optimization on Home" }, "why": { "es": "Sin una directiva que Home respete hay que escribir en otras colmenas o subgrupos que el motor no admite.", "en": "Without a policy that Home honors they need other hives or power subgroups that the engine does not support." } }
+      ]
+    },
+    {
+      "id": "actions-dropped",
+      "title": { "es": "Acciones descartadas", "en": "Dropped actions" },
+      "intro": {
+        "es": "Se evaluaron como acciones propias y se descartaron porque no se pudo verificar, en solo lectura, que hacen lo que prometen y que se pueden deshacer.",
+        "en": "They were evaluated as actions of their own and dropped because it could not be verified, read-only, that they do what they promise and can be undone."
+      },
+      "items": [
+        { "name": { "es": "power-mode-overlay: modo de energía \"Mejor rendimiento\" con corriente", "en": "power-mode-overlay: \"Best performance\" power mode on AC" }, "why": { "es": "Es una superposición del plan que solo se cambia con una función de Windows sin documentar (PowerSetActiveOverlayScheme); no se sabe si cambia CA y CC juntos ni si escribir el registro surte efecto en caliente.", "en": "It is an overlay of the power plan that only an undocumented Windows function changes (PowerSetActiveOverlayScheme); it is unknown whether it changes AC and DC together or whether writing the registry takes effect live." } },
+        { "name": { "es": "dev-defender-performance-mode: modo de rendimiento de Defender para Dev Drive", "en": "dev-defender-performance-mode: Defender performance mode for Dev Drive" }, "why": { "es": "Microsoft lo activa por defecto en un Dev Drive de confianza y el valor leído en un equipo sin Dev Drive contradice esa documentación; sin un Dev Drive no se puede comprobar, y toca Defender.", "en": "Microsoft turns it on by default on a trusted Dev Drive, and the value read on a machine without a Dev Drive contradicts that documentation; it cannot be checked without a Dev Drive, and it touches Defender." } }
+      ]
+    },
+    {
+      "id": "unverified",
+      "title": { "es": "Ajustes que no se pudieron verificar", "en": "Tweaks that could not be verified" },
+      "intro": {
+        "es": "Quedan fuera hasta que se compruebe que hacen lo que prometen y que se pueden deshacer.",
+        "en": "Left out until it is checked that they do what they promise and that they can be undone."
+      },
+      "items": [
+        { "name": { "es": "Animaciones de la barra de tareas (TaskbarAnimations)", "en": "Taskbar animations (TaskbarAnimations)" }, "why": { "es": "Sin evidencia de efecto en Windows 11.", "en": "No evidence of an effect on Windows 11." } },
+        { "name": { "es": "Directiva AllowGameDVR", "en": "AllowGameDVR policy" }, "why": { "es": "Microsoft: solo rige en Windows 10 de escritorio; los valores de usuario de Game DVR ya cubren el objetivo.", "en": "Microsoft: it only applies to Windows 10 desktop; the user values of Game DVR already cover the goal." } },
+        { "name": { "es": "Búsqueda en la nube (IsMSACloudSearchEnabled, IsAADCloudSearchEnabled)", "en": "Cloud search (IsMSACloudSearchEnabled, IsAADCloudSearchEnabled)" }, "why": { "es": "Solo fuentes de la comunidad; la de cuentas de trabajo rompe la búsqueda de OneDrive y Outlook.", "en": "Community sources only; the work-account one breaks OneDrive and Outlook results in search." } },
+        { "name": { "es": "Servicios InventorySvc y PcaSvc", "en": "InventorySvc and PcaSvc services" }, "why": { "es": "Sin guía de Microsoft para equipos cliente; el primero alimenta las actualizaciones de función.", "en": "No Microsoft guidance for client machines; the first one feeds feature updates." } }
+      ]
+    },
+    {
+      "id": "engine-limits",
+      "title": { "es": "Pendientes de una capacidad del motor", "en": "Waiting for an engine capability" },
+      "intro": {
+        "es": "Serían útiles, pero el motor todavía no los puede aplicar y deshacer con exactitud.",
+        "en": "They would be useful, but the engine cannot apply and undo them exactly yet."
+      },
+      "items": [
+        { "name": { "es": "Efectos visuales (UserPreferencesMask)", "en": "Visual effects (UserPreferencesMask)" }, "why": { "es": "Es un valor binario y el catálogo todavía no acepta valores Binary.", "en": "It is a binary value and the catalog does not accept Binary values yet." } },
+        { "name": { "es": "Menú contextual clásico de Windows 11", "en": "Classic context menu of Windows 11" }, "why": { "es": "Usa el valor predeterminado de una clave, que el manejador de registro no admite; además es una preferencia.", "en": "It uses the default value of a key, which the registry handler does not support; it is also a preference." } },
+        { "name": { "es": "Hibernación, apps de inicio, reducir la indexación, impresoras", "en": "Hibernation, startup apps, smaller indexing, printers" }, "why": { "es": "Necesitan una acción propia con pregunta; quedan como ideas.", "en": "They need their own action with a question; they stay as ideas." } }
+      ]
+    }
+  ]
+}

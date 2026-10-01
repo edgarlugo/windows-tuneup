@@ -6470,7 +6470,7 @@ git commit -m "docs: lista negra en español e inglés"
 - Create: `docs/es/catalog.md`, `docs/en/catalog.md` (generados)
 - Create: `tests/CatalogDoc.Tests.ps1`
 
-`catalog/notes/excluded.json` guarda lo que se evaluó y quedó fuera, con el motivo en los dos idiomas (apps sin deshacer, apps sin producto en la Store, apps que no se quitan nunca, ajustes sin verificar y los que esperan una capacidad del motor). Está en una subcarpeta para que `Import-TuneupCatalog` (que solo lee `catalog\*.json`) no lo tome por catálogo. `build/catalog-doc.ps1` arma una página por idioma: resumen por categoría, perfiles, ajustes que preguntan, de riesgo alto y que no rigen en Home, cada ajuste con su tipo, ámbito, riesgo, perfiles, ediciones, `requires`, qué pide después de aplicar y sus fuentes, y al final "No incluido". El script es ASCII (regla del repo): todos los textos en español están en `build/catalog-doc.labels.json`. La salida es UTF-8 sin BOM con CRLF y siempre la misma para la misma entrada, así una prueba la regenera en una carpeta temporal y la compara con la del repo.
+`catalog/notes/excluded.json` guarda lo que se evaluó y quedó fuera, con el motivo en los dos idiomas (apps sin deshacer, apps sin producto en la Store, apps que no se quitan nunca, los servicios de Xbox que se sacaron del catálogo, las directivas que Windows Home ignora, las acciones descartadas `power-mode-overlay` y `dev-defender-performance-mode`, ajustes sin verificar y los que esperan una capacidad del motor). Está en una subcarpeta para que `Import-TuneupCatalog` (que solo lee `catalog\*.json`) no lo tome por catálogo. `build/catalog-doc.ps1` arma una página por idioma: resumen por categoría, perfiles, ajustes que preguntan, de riesgo alto y que no rigen en Home, cada ajuste con su tipo, ámbito, riesgo, perfiles, ediciones, `requires`, qué pide después de aplicar y sus fuentes, y al final "No incluido". El script es ASCII (regla del repo): todos los textos en español están en `build/catalog-doc.labels.json`. La salida es UTF-8 sin BOM con CRLF y siempre la misma para la misma entrada, así una prueba la regenera en una carpeta temporal y la compara con la del repo.
 
 - [ ] **Step 1: Pruebas que fallan**
 
@@ -6527,6 +6527,18 @@ Describe 'Notes on what is not included' {
                 }
             }
         }
+    }
+
+    It 'explains the Xbox services, the Home policies, the dropped actions and the apps without undo that were left out' {
+        $ids = @($Excluded.groups | ForEach-Object { $_.id })
+        foreach ($groupId in 'apps-no-undo', 'services-xbox', 'home-policies', 'actions-dropped') { $ids | Should -Contain $groupId }
+        $services = @($Excluded.groups | Where-Object { $_.id -eq 'services-xbox' } | ForEach-Object { $_.items } | ForEach-Object { $_.name })
+        ($services | Sort-Object) -join ',' | Should -Be 'XblAuthManager,XblGameSave,XboxNetApiSvc'
+        $catalogServices = @($Catalog | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
+        foreach ($name in $services) { $catalogServices | Should -Not -Contain $name }
+        $dropped = @($Excluded.groups | Where-Object { $_.id -eq 'actions-dropped' } | ForEach-Object { $_.items } | ForEach-Object { $_.name.en })
+        ($dropped -join '|').Contains('power-mode-overlay') | Should -BeTrue
+        ($dropped -join '|').Contains('dev-defender-performance-mode') | Should -BeTrue
     }
 
     It 'never lists an app that the catalog removes' {
@@ -6610,6 +6622,45 @@ Expected: FAIL, no se encuentra `catalog\notes\excluded.json`.
       ]
     },
     {
+      "id": "services-xbox",
+      "title": { "es": "Servicios de Xbox", "en": "Xbox services" },
+      "intro": {
+        "es": "Estaban en el catálogo y se quitaron: ya vienen en manual y Windows los inicia solos cuando un juego los necesita, así que deshabilitarlos no ahorra nada y rompe el inicio de sesión de Xbox y de los juegos de Game Pass. La app y la tarea de Xbox sí se pueden quitar (el perfil `gaming` las conserva).",
+        "en": "They were in the catalog and were removed: they are already Manual and Windows starts them by itself when a game needs them, so disabling them saves nothing and breaks the Xbox and Game Pass sign-in. The Xbox app and task can be removed (the `gaming` profile keeps them)."
+      },
+      "items": [
+        { "name": "XblGameSave", "why": { "es": "Partidas guardadas de Xbox Live; ya viene en manual.", "en": "Xbox Live game saves; it is already Manual." } },
+        { "name": "XblAuthManager", "why": { "es": "Inicio de sesión de Xbox Live; deshabilitarlo impide entrar a los juegos que lo usan.", "en": "Xbox Live sign-in; disabling it stops the games that use it from signing in." } },
+        { "name": "XboxNetApiSvc", "why": { "es": "Red de Xbox Live para el multijugador; ya viene en manual.", "en": "Xbox Live networking for multiplayer; it is already Manual." } }
+      ]
+    },
+    {
+      "id": "home-policies",
+      "title": { "es": "Directivas que Windows Home ignora", "en": "Policies that Windows Home ignores" },
+      "intro": {
+        "es": "Windows Home ignora muchas directivas de grupo. Los ajustes del catálogo que son directivas declaran las ediciones donde Microsoft las documenta y el plan los muestra como \"no aplica\" en Home (la lista está más arriba, en \"Ajustes que no se aplican en Home\"). Lo que sigue quedó fuera porque en Home no hay una forma que funcione y se pueda deshacer.",
+        "en": "Windows Home ignores many group policies. The catalog tweaks that are policies declare the editions where Microsoft documents them, and the plan shows them as \"does not apply\" on Home (the list is above, in \"Tweaks that do not apply on Home\"). What follows was left out because on Home there is no way that works and can be undone."
+      },
+      "items": [
+        { "name": { "es": "Telemetría al mínimo por directiva en Home", "en": "Minimum telemetry by policy on Home" }, "why": { "es": "AllowTelemetry en las directivas no rige en Home; lo único que corta la subida de datos ahí es el servicio DiagTrack (services.diagtrack, con pregunta).", "en": "AllowTelemetry in the policies does not apply on Home; the only thing that stops the upload there is the DiagTrack service (services.diagtrack, which asks first)." } },
+        { "name": { "es": "Contenido de consumidor y tarjetas de Microsoft 365 en Home y Pro", "en": "Consumer content and Microsoft 365 cards on Home and Pro" }, "why": { "es": "DisableWindowsConsumerFeatures y DisableConsumerAccountStateContent solo rigen en Enterprise y Education; en Home y Pro los ajustes de usuario de anuncios cubren lo que se puede.", "en": "DisableWindowsConsumerFeatures and DisableConsumerAccountStateContent only apply to Enterprise and Education; on Home and Pro the user ads tweaks cover what can be covered." } },
+        { "name": { "es": "Widgets en Home (TaskbarDa)", "en": "Widgets on Home (TaskbarDa)" }, "why": { "es": "Windows bloquea la escritura de ese valor desde PowerShell (UCPD); la directiva solo rige en Pro y superiores.", "en": "Windows blocks writing that value from PowerShell (UCPD); the policy only applies on Pro and later." } },
+        { "name": { "es": "Red en suspensión moderna y Delivery Optimization en Home", "en": "Modern standby network and Delivery Optimization on Home" }, "why": { "es": "Sin una directiva que Home respete hay que escribir en otras colmenas o subgrupos que el motor no admite.", "en": "Without a policy that Home honors they need other hives or power subgroups that the engine does not support." } }
+      ]
+    },
+    {
+      "id": "actions-dropped",
+      "title": { "es": "Acciones descartadas", "en": "Dropped actions" },
+      "intro": {
+        "es": "Se evaluaron como acciones propias y se descartaron porque no se pudo verificar, en solo lectura, que hacen lo que prometen y que se pueden deshacer.",
+        "en": "They were evaluated as actions of their own and dropped because it could not be verified, read-only, that they do what they promise and can be undone."
+      },
+      "items": [
+        { "name": { "es": "power-mode-overlay: modo de energía \"Mejor rendimiento\" con corriente", "en": "power-mode-overlay: \"Best performance\" power mode on AC" }, "why": { "es": "Es una superposición del plan que solo se cambia con una función de Windows sin documentar (PowerSetActiveOverlayScheme); no se sabe si cambia CA y CC juntos ni si escribir el registro surte efecto en caliente.", "en": "It is an overlay of the power plan that only an undocumented Windows function changes (PowerSetActiveOverlayScheme); it is unknown whether it changes AC and DC together or whether writing the registry takes effect live." } },
+        { "name": { "es": "dev-defender-performance-mode: modo de rendimiento de Defender para Dev Drive", "en": "dev-defender-performance-mode: Defender performance mode for Dev Drive" }, "why": { "es": "Microsoft lo activa por defecto en un Dev Drive de confianza y el valor leído en un equipo sin Dev Drive contradice esa documentación; sin un Dev Drive no se puede comprobar, y toca Defender.", "en": "Microsoft turns it on by default on a trusted Dev Drive, and the value read on a machine without a Dev Drive contradicts that documentation; it cannot be checked without a Dev Drive, and it touches Defender." } }
+      ]
+    },
+    {
       "id": "unverified",
       "title": { "es": "Ajustes que no se pudieron verificar", "en": "Tweaks that could not be verified" },
       "intro": {
@@ -6617,8 +6668,6 @@ Expected: FAIL, no se encuentra `catalog\notes\excluded.json`.
         "en": "Left out until it is checked that they do what they promise and that they can be undone."
       },
       "items": [
-        { "name": { "es": "Modo de energía \"Mejor rendimiento\"", "en": "\"Best performance\" power mode" }, "why": { "es": "Es una superposición del plan que solo se cambia con una función de Windows sin documentar (PowerSetActiveOverlayScheme); no se sabe si cambia CA y CC juntos.", "en": "It is an overlay of the power plan that only an undocumented Windows function changes (PowerSetActiveOverlayScheme); it is unknown whether it changes AC and DC together." } },
-        { "name": { "es": "Modo de rendimiento de Defender para Dev Drive", "en": "Defender performance mode for Dev Drive" }, "why": { "es": "Microsoft lo activa por defecto en un Dev Drive de confianza y el valor leído en un equipo sin Dev Drive contradice esa documentación; sin un Dev Drive no se puede comprobar.", "en": "Microsoft turns it on by default on a trusted Dev Drive, and the value read on a machine without a Dev Drive contradicts that documentation; it cannot be checked without a Dev Drive." } },
         { "name": { "es": "Animaciones de la barra de tareas (TaskbarAnimations)", "en": "Taskbar animations (TaskbarAnimations)" }, "why": { "es": "Sin evidencia de efecto en Windows 11.", "en": "No evidence of an effect on Windows 11." } },
         { "name": { "es": "Directiva AllowGameDVR", "en": "AllowGameDVR policy" }, "why": { "es": "Microsoft: solo rige en Windows 10 de escritorio; los valores de usuario de Game DVR ya cubren el objetivo.", "en": "Microsoft: it only applies to Windows 10 desktop; the user values of Game DVR already cover the goal." } },
         { "name": { "es": "Búsqueda en la nube (IsMSACloudSearchEnabled, IsAADCloudSearchEnabled)", "en": "Cloud search (IsMSACloudSearchEnabled, IsAADCloudSearchEnabled)" }, "why": { "es": "Solo fuentes de la comunidad; la de cuentas de trabajo rompe la búsqueda de OneDrive y Outlook.", "en": "Community sources only; the work-account one breaks OneDrive and Outlook results in search." } },
@@ -6635,8 +6684,6 @@ Expected: FAIL, no se encuentra `catalog\notes\excluded.json`.
       "items": [
         { "name": { "es": "Efectos visuales (UserPreferencesMask)", "en": "Visual effects (UserPreferencesMask)" }, "why": { "es": "Es un valor binario y el catálogo todavía no acepta valores Binary.", "en": "It is a binary value and the catalog does not accept Binary values yet." } },
         { "name": { "es": "Menú contextual clásico de Windows 11", "en": "Classic context menu of Windows 11" }, "why": { "es": "Usa el valor predeterminado de una clave, que el manejador de registro no admite; además es una preferencia.", "en": "It uses the default value of a key, which the registry handler does not support; it is also a preference." } },
-        { "name": { "es": "Widgets en Home (TaskbarDa)", "en": "Widgets on Home (TaskbarDa)" }, "why": { "es": "Windows bloquea la escritura de ese valor desde PowerShell (UCPD); la directiva solo rige en Pro y superiores.", "en": "Windows blocks writing that value from PowerShell (UCPD); the policy only applies on Pro and later." } },
-        { "name": { "es": "Red en suspensión moderna y Delivery Optimization en Home", "en": "Modern standby network and Delivery Optimization on Home" }, "why": { "es": "Sin una directiva que Home respete hay que escribir en otras colmenas o subgrupos que el motor no admite.", "en": "Without a policy that Home honors they need other hives or power subgroups that the engine does not support." } },
         { "name": { "es": "Hibernación, apps de inicio, reducir la indexación, impresoras", "en": "Hibernation, startup apps, smaller indexing, printers" }, "why": { "es": "Necesitan una acción propia con pregunta; quedan como ideas.", "en": "They need their own action with a question; they stay as ideas." } }
       ]
     }
@@ -6950,7 +6997,7 @@ Revisar a mano el principio de `docs/es/catalog.md`: el resumen dice `| **Total*
 - [ ] **Step 7: Verificar que pasa**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/CatalogDoc.Tests.ps1`
-Expected: PASS (`Tests Passed: 6, Failed: 0`).
+Expected: PASS (`Tests Passed: 7, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/lint.ps1`
 Expected: `PSScriptAnalyzer: no findings` (el lint ya recorre `build/`).
