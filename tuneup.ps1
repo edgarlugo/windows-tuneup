@@ -63,9 +63,7 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
 }
 $context = New-TuneupContext -Json:$Json
 try {
-    Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments
-} catch {
-    Write-TuneupCommandError -Context $context -Message $_.Exception.Message
+    Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments }
 } finally {
     exit $context.ExitCode
 }

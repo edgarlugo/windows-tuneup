@@ -56,6 +56,7 @@ Describe 'Commands' {
         Invoke-TuneupApplyCommand -Context $context 6>$null
         $context.ExitCode | Should -Be 1
         $context.Io.Output -join "`n" | Should -Match 'Apply 2 changes\? \(y/n\)'
+        $context.Io.Output -join "`n" | Should -Match 'Cancelled'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
 
@@ -118,6 +119,62 @@ Describe 'Commands' {
         $first[0].command | Should -Be 'measure'
         $second = @(Get-JsonOutput { Invoke-TuneupMeasureCommand -Context $context -Compare 'last' })
         $second[0].comparison.againstId | Should -Be $first[0].id
+        $context.ExitCode | Should -Be 0
+    }
+
+    It 'starts with exit code 1, so a command that fails to report never looks successful' {
+        (New-TuneupContext).ExitCode | Should -Be 1
+        $context = New-TestContext -Json
+        Mock -ModuleName Tuneup Write-TuneupJson { throw 'disk full' }
+        { Invoke-TuneupStatusCommand -Context $context } | Should -Throw 'disk full'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'turns what a command throws into an error document and exit code 1' {
+        $context = New-TestContext -Json
+        $context.ExitCode = 0
+        $documents = @(Get-JsonOutput { Invoke-TuneupGuarded -Context $context -Command { throw 'boom' } })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'error'
+        $documents[0].message | Should -Be 'boom'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'leaves exit code 1 when the error report cannot be written either' {
+        $context = New-TestContext -Json
+        $context.ExitCode = 0
+        Mock -ModuleName Tuneup Write-TuneupJson { throw 'disk full' }
+        { Invoke-TuneupGuarded -Context $context -Command { throw 'boom' } } | Should -Throw 'disk full'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'leaves what a command wrote and its code alone when nothing is thrown' {
+        $context = New-TestContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupStatusCommand -Context $context } })
+        $documents[0].command | Should -Be 'status'
+        $context.ExitCode | Should -Be 0
+    }
+
+    It 'shows the waiting line of a measurement through Io' {
+        $context = New-TestContext
+        Mock -ModuleName Tuneup Measure-TuneupSystem { [pscustomobject]@{ schemaVersion = 1 } }
+        Mock -ModuleName Tuneup Save-TuneupMeasurement { [pscustomobject]@{ Id = 'm1' } }
+        Mock -ModuleName Tuneup New-TuneupMeasureReport { [pscustomobject]@{ schemaVersion = 1; command = 'measure' } }
+        Mock -ModuleName Tuneup Write-TuneupMeasureReport { }
+        Invoke-TuneupMeasureCommand -Context $context -IdleSeconds 5
+        $context.Io.Output -join "`n" | Should -Match 'Waiting 5 seconds idle'
+        $context.ExitCode | Should -Be 0
+    }
+
+    It 'shows the health lines through Io' {
+        $context = New-TestContext
+        $context.Environment = New-TestEnvironment -IsAdmin $true
+        Mock -ModuleName Tuneup Invoke-TuneupHealth { & $OnPhase 'sfc'; [pscustomobject]@{ recommendation = 'none' } }
+        Mock -ModuleName Tuneup Write-TuneupHealthReport { }
+        Invoke-TuneupHealthCommand -Context $context
+        $text = $context.Io.Output -join "`n"
+        $text | Should -Match 'Checking the health of Windows'
+        $text | Should -Match 'Running SFC: it checks'
         $context.ExitCode | Should -Be 0
     }
 

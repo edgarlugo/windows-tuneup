@@ -4,7 +4,8 @@
 # ends it is written as an error report with exit code 1.
 
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
-# collected so far, the questions and answers (Io), the exit code and the last result.
+# collected so far, the questions and answers (Io), the exit code and the last result. The exit code
+# starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
 function New-TuneupContext {
     param([switch]$Json, $Io)
     [pscustomobject]@{
@@ -17,7 +18,7 @@ function New-TuneupContext {
         Warnings     = New-Object System.Collections.Generic.List[string]
         Environment  = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
-        ExitCode     = 0
+        ExitCode     = 1
         Result       = $null
     }
 }
@@ -32,6 +33,18 @@ function Write-TuneupCommandError {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [AllowEmptyCollection()][string[]]$Details = @())
     Write-TuneupErrorReport -Message $Message -Details $Details -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = 1
+}
+
+# Runs a command line; whatever it throws becomes an error report and exit code 1. The code is set
+# before the report is written, so if the report cannot be written either, the failure still counts.
+function Invoke-TuneupGuarded {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][scriptblock]$Command)
+    try {
+        & $Command
+    } catch {
+        $Context.ExitCode = 1
+        Write-TuneupCommandError -Context $Context -Message $_.Exception.Message
+    }
 }
 
 function Get-TuneupContextEnvironment {
@@ -85,10 +98,13 @@ function Invoke-TuneupHealthCommand {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
         return
     }
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'health.running') }
     # One line per phase for people; with -Json nothing but the document goes to the output.
     $healthArguments = @{ Repair = $Repair }
-    if (-not $Context.Json) { $healthArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+    if (-not $Context.Json) {
+        $io = $Context.Io
+        $healthArguments.OnPhase = { param($Name) Write-TuneupIoLine -Io $io -Text (Get-TuneupText -Key "health.phase.$Name") }.GetNewClosure()
+    }
     $report = Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupHealth @healthArguments }
     $Context.Result = $report
     Write-TuneupHealthReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
@@ -108,7 +124,7 @@ function Invoke-TuneupMeasureCommand {
             return
         }
     }
-    if ($IdleSeconds -gt 0 -and -not $Context.Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
+    if ($IdleSeconds -gt 0 -and -not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
     $measurement = Invoke-TuneupContextStep -Context $Context -Step { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupMeasurement -Measurement $measurement -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
     $report = New-TuneupMeasureReport -Saved $saved -Against $against
@@ -214,7 +230,7 @@ function Invoke-TuneupPlannedApply {
         }
         Write-TuneupPlanReport -Plan $Plan -Environment $environment
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
-            Write-Host (Get-TuneupText -Key 'aborted')
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
