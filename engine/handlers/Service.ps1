@@ -1,3 +1,14 @@
+$script:ServiceStartTypes = @('Automatic', 'AutomaticDelayed', 'Manual', 'Disabled')
+
+function Test-ServiceTweakDefinition {
+    param([Parameter(Mandatory)]$Tweak)
+    $set = $Tweak.set
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    if ($script:ServiceStartTypes -cnotcontains $set.startType) { "has an invalid startType '$($set.startType)'" }
+    if ($set.stop -isnot [bool]) { 'set.stop must be true or false' }
+    if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
+}
+
 $script:ScStartArguments = @{
     Automatic        = 'auto'
     AutomaticDelayed = 'delayed-auto'
@@ -7,10 +18,9 @@ $script:ScStartArguments = @{
 
 function Invoke-TuneupSc {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Start)
-    $sc = Join-Path $env:SystemRoot 'System32\sc.exe'
-    $output = & $sc config $Name start= $Start 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "sc.exe config $Name start= $Start failed with exit code ${LASTEXITCODE}: $output"
+    $result = Invoke-TuneupNative -FilePath (Join-Path $env:SystemRoot 'System32\sc.exe') -Arguments @('config', $Name, 'start=', $Start)
+    if ($result.ExitCode -ne 0) {
+        throw "sc.exe config $Name start= $Start failed with exit code $($result.ExitCode): $($result.Output)"
     }
 }
 
@@ -68,7 +78,8 @@ function Set-ServiceTweakDesired {
             Stop-Service -Name $name -ErrorAction Stop
         }
         catch {
-            throw "Start type of $name set to $startType, but stopping it failed: $($_.Exception.Message)"
+            # The start type did change, so this is reported as partial instead of failed.
+            New-TuneupOutcome -Partial -Detail "Start type of $name set to $startType, but stopping it failed: $($_.Exception.Message)"
         }
     }
 }

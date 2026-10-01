@@ -83,4 +83,49 @@ Describe 'Invoke-TuneupPlan' {
         $results.Count | Should -Be 2
         @($results | Where-Object { $_ -is [string] }).Count | Should -Be 0
     }
+
+    It 'passes the reason of the Set outcome into the result' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            Write-TuneupRegistryValue -Path $Tweak.set.path -Name $Tweak.set.name -Kind $Tweak.set.kind -Value $Tweak.set.value
+            New-TuneupOutcome -Reason 'reinstalled' -Detail 'note'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'applied'
+        $results[0].reason | Should -Be 'reinstalled'
+        $results[0].detail | Should -Be 'note'
+        $results[1].reason | Should -BeNullOrEmpty
+    }
+
+    It 'reports a partial change with its explanation' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { 'noise'; New-TuneupOutcome -Partial -Detail 'half done' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results.Count | Should -Be 2
+        $results[0].status | Should -Be 'partial'
+        $results[0].detail | Should -Be 'half done'
+        $results[0].error | Should -BeNullOrEmpty
+        $results[1].status | Should -Be 'applied'
+        $results[1].detail | Should -BeNullOrEmpty
+        @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl')).Count | Should -Be 2
+    }
+
+    It 'reports partial even when the state reads as applied' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            Write-TuneupRegistryValue -Path $Tweak.set.path -Name $Tweak.set.name -Kind $Tweak.set.kind -Value $Tweak.set.value
+            New-TuneupOutcome -Partial -Detail 'x'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        Test-TuneupState -Tweak $One | Should -Be 'applied'
+        $results[0].status | Should -Be 'partial'
+        $results[0].detail | Should -Be 'x'
+    }
+
+    It 'adds a restart asked for by the handler to the catalog flag' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            Write-TuneupRegistryValue -Path $Tweak.set.path -Name $Tweak.set.name -Kind $Tweak.set.kind -Value $Tweak.set.value
+            New-TuneupOutcome -RebootRequired
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'applied'
+        $results[0].rebootRequired | Should -BeTrue
+    }
 }

@@ -2,9 +2,6 @@ $script:TweakRisks = @('low', 'medium', 'high')
 $script:TweakScopes = @('machine', 'user')
 $script:TweakFamilies = @('10', '11')
 $script:TweakEditions = @('Home', 'Pro', 'Enterprise', 'Education')
-$script:RegistryKinds = @('DWord', 'QWord', 'String', 'ExpandString')
-$script:ServiceStartTypes = @('Automatic', 'AutomaticDelayed', 'Manual', 'Disabled')
-$script:TaskStates = @('Enabled', 'Disabled')
 
 function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
@@ -21,16 +18,6 @@ function Import-TuneupCatalog {
             $tweak | Add-Member -NotePropertyName sourceFile -NotePropertyValue $file.Name -Force
             $tweak
         }
-    }
-}
-
-function Test-TuneupRegistryValue {
-    param([string]$Kind, $Value)
-    if ($Value -is [array]) { return $false }
-    switch ($Kind) {
-        'DWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -2147483648 -Max 4294967295) }
-        'QWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -9223372036854775808 -Max 9223372036854775807) }
-        default { return ($Value -is [string]) }
     }
 }
 
@@ -65,7 +52,7 @@ function Test-TuneupTweak {
         }
     }
     if ($script:TweakRisks -notcontains $Tweak.risk) { $errors.Add("$id has an invalid risk '$($Tweak.risk)'") }
-    if ($script:TweakScopes -notcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
+    if ($script:TweakScopes -cnotcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
     if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
     if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
 
@@ -86,37 +73,11 @@ function Test-TuneupTweak {
         $errors.Add("$id needs https sources")
     }
 
-    $set = $Tweak.set
-    switch ($Tweak.type) {
-        'registry' {
-            if ([string]$set.path -notmatch '^(HKLM|HKCU):\\.+') {
-                $errors.Add("$id has an invalid registry path")
-            } elseif (([string]$set.path -match '^HKCU:') -ne ($Tweak.scope -eq 'user')) {
-                $errors.Add("$id scope does not match its registry hive")
-            }
-            if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
-            if ($null -ne $set.value) {
-                if ($script:RegistryKinds -notcontains $set.kind) {
-                    $errors.Add("$id has an invalid registry kind '$($set.kind)'")
-                } elseif (-not (Test-TuneupRegistryValue -Kind $set.kind -Value $set.value)) {
-                    $errors.Add("$id has a value that does not match kind $($set.kind)")
-                }
-            }
-        }
-        'service' {
-            if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
-            if ($script:ServiceStartTypes -notcontains $set.startType) { $errors.Add("$id has an invalid startType '$($set.startType)'") }
-            if ($set.stop -isnot [bool]) { $errors.Add("$id set.stop must be true or false") }
-            if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
-        }
-        'task' {
-            if ([string]$set.path -notmatch '^\\(.*\\)?$') { $errors.Add("$id task path must start and end with a backslash") }
-            if ([string]::IsNullOrEmpty([string]$set.name)) { $errors.Add("$id is missing set.name") }
-            if (([string]$set.name + [string]$set.path) -match '[*?\[\]]') { $errors.Add("$id task name and path cannot contain wildcard characters") }
-            if ($script:TaskStates -notcontains $set.state) { $errors.Add("$id has an invalid task state '$($set.state)'") }
-            if ($Tweak.scope -ne 'machine') { $errors.Add("$id must use scope machine") }
-        }
-        default { $errors.Add("$id has an unsupported type '$($Tweak.type)'") }
+    $handler = Get-TuneupHandler -Type $Tweak.type
+    if ($null -eq $handler) {
+        $errors.Add("$id has an unsupported type '$($Tweak.type)'")
+    } else {
+        foreach ($problem in @(& "Test-$($handler.Name)TweakDefinition" -Tweak $Tweak)) { $errors.Add("$id $problem") }
     }
     $errors.ToArray()
 }

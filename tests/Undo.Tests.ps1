@@ -25,6 +25,30 @@ Describe 'Undo and status' {
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
+    It 'passes the note, detail and restart request of the restore into the result' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { New-TuneupOutcome -Reason 'reinstalled' -Detail 'for the current user only' -RebootRequired } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].id | Should -Be 'test.two'
+        $results[0].status | Should -Be 'restored'
+        $results[0].reason | Should -Be 'reinstalled'
+        $results[0].detail | Should -Be 'for the current user only'
+        $results[0].rebootRequired | Should -BeTrue
+        $results[1].reason | Should -BeNullOrEmpty
+        $results[1].rebootRequired | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        Get-TuneupUndoExitCode -Results $results | Should -Be 0
+    }
+
+    It 'does not let stray output of a restore leak into the results' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { 'noise'; 42; New-TuneupOutcome -Reason 'reinstalled'; [pscustomobject]@{ id = 'fake'; status = 'restored' } } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results.Count | Should -Be 2
+        ($results | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.two,test.one'
+        $results[0].reason | Should -Be 'reinstalled'
+    }
+
     It 'restores the exact previous state' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'Two' -PropertyType String -Value 'old' | Out-Null
@@ -69,6 +93,22 @@ Describe 'Undo and status' {
         (Get-ItemProperty -LiteralPath $Key).Two | Should -Be 'x'
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeFalse
+    }
+
+    It 'leaves the Store app of another user pending for its owner' {
+        $appx = New-TestTweak -Id 'test.appx' -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        Add-TuneupJournalEntry -Path $journal -Tweak $One -State ([pscustomobject]@{ keyExisted = $false; existingAncestor = 'HKCU:\Software'; exists = $false; kind = $null; value = $null })
+        Add-TuneupJournalEntry -Path $journal -Tweak $appx -State ([pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'; otherUsers = 0; provisioned = $false })
+        Mock -ModuleName Tuneup Restore-AppxTweakState { }
+        $results = @(Invoke-TuneupUndo -Run $run -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:restored:,test.appx:skipped:other-user'
+        Should -Invoke Restore-AppxTweakState -ModuleName Tuneup -Times 0 -Exactly
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt')) -join ',' | Should -Be 'test.one'
+        $single = @(Invoke-TuneupUndo -Run $run -TweakId 'test.appx' -WarningAction SilentlyContinue)
+        ($single | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.appx:skipped:other-user'
     }
 
     It 'skips a single tweak of another user' {
@@ -227,5 +267,31 @@ Describe 'Undo and status' {
         { Invoke-TuneupUndo -Run $resolved } | Should -Throw '*already undone*'
         { Invoke-TuneupUndo -Run $resolved -TweakId 'test.one' } | Should -Throw '*already undone*'
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 9
+    }
+
+    It 'keeps a partial tweak in the status' {
+        $run = Invoke-TestApply $Root
+        $results = @(
+            [pscustomobject]@{ id = 'test.one'; status = 'partial' },
+            [pscustomobject]@{ id = 'test.two'; status = 'failed' }
+        )
+        Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object ([pscustomobject]@{ results = $results })
+        (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one'
+    }
+
+    It 'says a <Type> tweak needs elevation to check instead of reading it' -TestCases @(
+        @{ Type = 'appx'; Set = @{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' } }
+        @{ Type = 'capability'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' } }
+        @{ Type = 'feature'; Set = @{ name = 'WorkFolders-Client'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = New-TestTweak -Id 'apps.news' -Type $Type -Scope 'machine' -Set ([pscustomobject]$Set)
+        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($tweak) | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup Test-TuneupState { throw 'must not read' }
+        $status = @(Get-TuneupStatus -StateRoot $Root)
+        $status.Count | Should -Be 1
+        $status[0].status | Should -Be 'needs-admin'
+        Should -Invoke Test-TuneupState -ModuleName Tuneup -Times 0 -Exactly
     }
 }

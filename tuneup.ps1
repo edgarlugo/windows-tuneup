@@ -5,6 +5,12 @@
     .\tuneup.ps1 -Profile base,privacy -WhatIf
 .EXAMPLE
     .\tuneup.ps1 -Undo last
+.PARAMETER ActionsPath
+    Development and testing only: loads action scripts from another folder. They run as the
+    current user, with administrator rights when elevated, so use only a folder you trust.
+.PARAMETER StateRoot
+    Development and testing only: keeps runs and measurements in another folder. That folder
+    is not hardened like the machine state folder.
 #>
 param(
     [Alias('Profile')][string[]]$ProfileName = @(),
@@ -20,7 +26,13 @@ param(
     [switch]$Force,
     [string]$StateRoot,
     [string]$CatalogPath,
-    [string]$ProfilesPath
+    [string]$ProfilesPath,
+    [string]$ActionsPath,
+    [switch]$Health,
+    [switch]$Repair,
+    [switch]$Measure,
+    [string]$Compare,
+    [int]$IdleSeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,18 +56,10 @@ Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
 
 $script:Warnings = New-Object System.Collections.Generic.List[string]
 
-# powershell.exe writes warnings to standard output, where they would break the JSON document,
-# so with -Json they are collected and reported inside it instead.
+# With -Json the warnings are reported inside the document; otherwise each is shown once.
 function Invoke-TuneupStep {
     param([Parameter(Mandatory)][scriptblock]$Step)
-    if (-not $Json) { return (& $Step) }
-    & $Step 3>&1 | ForEach-Object {
-        if ($_ -is [System.Management.Automation.WarningRecord]) {
-            if (-not $script:Warnings.Contains($_.Message)) { $script:Warnings.Add($_.Message) }
-        } else {
-            $_
-        }
-    }
+    Invoke-TuneupStepCollectingWarning -Step $Step -Warnings $script:Warnings -Json:$Json
 }
 
 function Stop-Tuneup {
@@ -68,19 +72,28 @@ $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
 $Include = @(Get-TuneupCleanList ($Include -split ','))
 $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
 
-$conflict = $null
-if ($Tweak -and -not $Undo) { $conflict = '-Tweak (-Undo)' }
-elseif ($Status -and $Undo) { $conflict = '-Status -Undo' }
-elseif ($Status -or $Undo) {
-    $extra = @()
-    if ($ProfileName.Count) { $extra += '-Profile' }
-    if ($Include.Count) { $extra += '-Include' }
-    if ($Exclude.Count) { $extra += '-Exclude' }
-    if ($WhatIf) { $extra += '-WhatIf' }
-    if ($Yes) { $extra += '-Yes' }
-    if ($extra.Count) { $conflict = (@($(if ($Status) { '-Status' } else { '-Undo' })) + $extra) -join ' ' }
-}
+# A parameter counts as given when it was bound and carries a value (a switch only when it is on).
+$present = @()
+if ($PSBoundParameters.ContainsKey('ProfileName') -and $ProfileName.Count) { $present += 'Profile' }
+if ($PSBoundParameters.ContainsKey('Include') -and $Include.Count) { $present += 'Include' }
+if ($PSBoundParameters.ContainsKey('Exclude') -and $Exclude.Count) { $present += 'Exclude' }
+if ($PSBoundParameters.ContainsKey('WhatIf') -and $WhatIf) { $present += 'WhatIf' }
+if ($PSBoundParameters.ContainsKey('Yes') -and $Yes) { $present += 'Yes' }
+if ($PSBoundParameters.ContainsKey('Status') -and $Status) { $present += 'Status' }
+if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
+if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
+if ($PSBoundParameters.ContainsKey('Health') -and $Health) { $present += 'Health' }
+if ($PSBoundParameters.ContainsKey('Repair') -and $Repair) { $present += 'Repair' }
+if ($PSBoundParameters.ContainsKey('Measure') -and $Measure) { $present += 'Measure' }
+if ($PSBoundParameters.ContainsKey('Compare') -and $Compare) { $present += 'Compare' }
+if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
+$conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
+# Checked here and not with ValidateRange, so that -Json gets its error as a JSON document.
+$maxIdleSeconds = 3600
+if ($PSBoundParameters.ContainsKey('IdleSeconds') -and ($IdleSeconds -lt 0 -or $IdleSeconds -gt $maxIdleSeconds)) {
+    Stop-Tuneup -Message (Get-TuneupText -Key 'err.idleSecondsRange' -Format 0, $maxIdleSeconds)
+}
 
 try {
     # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
@@ -88,6 +101,19 @@ try {
     if ($StateRoot) { $StateRoot = $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) }
     $CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $PSScriptRoot 'catalog' })
     $ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $PSScriptRoot 'profiles' })
+    if ($ActionsPath) {
+        # Tests and development only, like -StateRoot: action scripts from another folder.
+        $ActionsPath = $pathApi.GetUnresolvedProviderPathFromPSPath($ActionsPath)
+        if (-not (Test-Path -LiteralPath $ActionsPath -PathType Container)) {
+            $key = $(if (Test-Path -LiteralPath $ActionsPath -PathType Leaf) { 'err.actionsPathNotFolder' } else { 'err.actionsPathMissing' })
+            Stop-Tuneup -Message (Get-TuneupText -Key $key -Format $ActionsPath)
+        }
+        Invoke-TuneupStep { Write-TuneupActionsPathWarning }
+        Invoke-TuneupStep { Import-TuneupActionLibrary -Path $ActionsPath }
+    }
+    # Scripts of the repository folder or of -ActionsPath that could not be loaded: a warning here,
+    # and an error in the catalog check only for the tweaks that use them.
+    Invoke-TuneupStep { Write-TuneupActionLoadWarning }
 
     $environment = Invoke-TuneupStep { Get-TuneupEnvironment }
 
@@ -115,6 +141,32 @@ try {
         exit (Get-TuneupUndoExitCode -Results $undoResults)
     }
 
+    if ($Health) {
+        if (-not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.healthNeedsAdmin') }
+        if (-not $Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+        # One line per phase for people; with -Json nothing but the document goes to the output.
+        $phaseArguments = @{}
+        if (-not $Json) { $phaseArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+        $healthReport = Invoke-TuneupStep { Invoke-TuneupHealth -Repair:$Repair @phaseArguments }
+        Write-TuneupHealthReport -Report $healthReport -Warnings $script:Warnings.ToArray() -Json:$Json
+        exit (Get-TuneupHealthExitCode -Report $healthReport)
+    }
+    if ($Measure) {
+        # Resolved before measuring, so 'last' is never the new measurement.
+        $against = $null
+        if ($Compare) {
+            $against = Invoke-TuneupStep { Resolve-TuneupMeasurement -StateRoot $StateRoot -Id $Compare }
+            if (-not $against) {
+                $missing = $(if ($Compare -eq 'last') { Get-TuneupText -Key 'err.noMeasurements' } else { Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare })
+                Stop-Tuneup -Message $missing
+            }
+        }
+        if ($IdleSeconds -gt 0 -and -not $Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
+        $measurement = Invoke-TuneupStep { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
+        $saved = Invoke-TuneupStep { Save-TuneupMeasurement -Measurement $measurement -StateRoot $StateRoot -Machine:$environment.IsAdmin }
+        Write-TuneupMeasureReport -Report (New-TuneupMeasureReport -Saved $saved -Against $against) -Warnings $script:Warnings.ToArray() -Json:$Json
+        exit 0
+    }
     if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
     if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {
         Stop-Tuneup -Message (Get-TuneupText -Key 'err.unsupported')

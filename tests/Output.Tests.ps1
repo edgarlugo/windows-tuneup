@@ -51,6 +51,16 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.skipped | Should -Be 1
         $report.environment.PSObject.Properties.Name | Should -Contain 'isAdmin'
     }
+
+    It 'counts partial tweaks and lets them ask for a restart' {
+        $partial = New-TestResult -Status 'partial'
+        $partial.rebootRequired = $true
+        $report = New-TestReport @((New-TestResult -Status 'applied'), $partial)
+        $report.summary.partial | Should -Be 1
+        $report.summary.applied | Should -Be 1
+        $report.rebootRequired | Should -BeTrue
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,journalErrors'
+    }
 }
 
 Describe 'Get-TuneupApplyExitCode' {
@@ -63,6 +73,8 @@ Describe 'Get-TuneupApplyExitCode' {
         @{ Name = 'a journal error after a failure'; Statuses = @('failed', 'journal-error'); NotSaved = $false; Expected = 2 }
         @{ Name = 'an unsaved result'; Statuses = @('applied'); NotSaved = $true; Expected = 2 }
         @{ Name = 'an unsaved result with nothing applied'; Statuses = @('journal-error'); NotSaved = $true; Expected = 1 }
+        @{ Name = 'a partial tweak'; Statuses = @('applied', 'partial'); NotSaved = $false; Expected = 2 }
+        @{ Name = 'a journal error after a partial change'; Statuses = @('partial', 'journal-error'); NotSaved = $false; Expected = 2 }
     ) {
         param($Statuses, $NotSaved, $Expected)
         $results = @(foreach ($status in $Statuses) {
@@ -130,6 +142,14 @@ Describe 'Write-TuneupApplyReport' {
         @($json.warnings) -join ',' | Should -Be 'careful'
         $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
+
+    It 'shows a partial tweak with its explanation' {
+        $partial = [pscustomobject]@{ id = 'test.partial'; title = 'Title partial'; status = 'partial'; reason = $null; error = $null; detail = 'Stopping it failed'; rebootRequired = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($partial)) 6>&1 | Out-String)
+        $text | Should -Match '\[partial\] Title partial'
+        $text | Should -Match 'Stopping it failed'
+        $text | Should -Match 'Applied: 0 \| Partial: 1 \| No effect: 0 \| Failed: 0 \| Skipped: 0'
+    }
 }
 
 Describe 'Write-TuneupPlanReport' {
@@ -152,13 +172,214 @@ Describe 'Write-TuneupPlanReport' {
         (Write-TuneupPlanReport -Plan $plan -Environment $user 6>&1 | Out-String) | Should -Match 'To apply the system changes'
         (Write-TuneupPlanReport -Plan $plan -Environment (New-TestEnvironment) 6>&1 | Out-String) | Should -Not -Match 'To apply the system changes'
     }
+
+    It 'explains a change that could not be checked without elevation' {
+        $item = New-TestPlanItem 'machine' 'apply'
+        $item.Reason = 'unverified-needs-admin'
+        (Write-TuneupPlanReport -Plan @($item) -Environment (New-TestEnvironment) 6>&1 | Out-String) | Should -Match 'checked when applied'
+    }
 }
 
 Describe 'Write-TuneupUndoReport' {
+    It 'shows the restore note and asks for a restart' {
+        $restored = [pscustomobject]@{ id = 'apps.news'; title = 'News'; status = 'restored'; reason = 'reinstalled'; error = $null; detail = 'Reinstalled for the current user'; rebootRequired = $true }
+        $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) 6>&1 | Out-String)
+        $text | Should -Match 'News: reinstalled from the Microsoft Store'
+        $text | Should -Match 'Reinstalled for the current user'
+        $text | Should -Match 'Restart the computer'
+        (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) -Json | ConvertFrom-Json).rebootRequired | Should -BeTrue
+    }
+
     It 'shows skipped tweaks with their reason and counts them' {
         $results = @((New-TestResult -Status 'restored'), (New-TestResult -Status 'skipped' -Reason 'other-user'))
         $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results $results 6>&1 | Out-String)
         $text | Should -Match 'Title skipped: belongs to another user'
         $text | Should -Match 'Restored: 1 . Failed: 0 . Skipped: 1'
+    }
+}
+
+Describe 'Write-TuneupHealthReport' {
+    BeforeAll {
+        $fixtures = Join-Path $PSScriptRoot 'fixtures\cbs'
+        $lines = @(Get-Content -LiteralPath (Join-Path $fixtures 'sfc-repaired.log') -Encoding UTF8) +
+            @(Get-Content -LiteralPath (Join-Path $fixtures 'scanhealth-corrupt.log') -Encoding UTF8)
+        $ok = [pscustomobject]@{ ExitCode = 0; Output = '' }
+        $script:Scan = New-TuneupHealthScan -Lines $lines -SfcRun $ok -DismRun $ok
+        $script:HealthReport = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = '2026-09-30T10:00:00'; finishedAt = '2026-09-30T10:20:00'
+            repairRequested = $false; repairRan = $false; before = $Scan; after = $null
+            recommendation = 'run-repair'; rebootRecommended = $true
+        }
+    }
+
+    It 'explains the scan to people' {
+        $text = (Write-TuneupHealthReport -Report $HealthReport 6>&1 | Out-String)
+        $text | Should -Match 'SFC: found damaged files and repaired them'
+        $text | Should -Match 'repaired: C:\\WINDOWS\\System32\\drivers\\BthA2dp.sys'
+        $text | Should -Match 'Component store: 6 corruptions found, repairable with -Health -Repair'
+        $text | Should -Match 'microsoft-windows-b\.\.ore-bootmanager-efi: 3 files'
+        $text | Should -Match 'run \.\\tuneup\.ps1 -Health -Repair'
+        $text | Should -Match 'Restart the computer'
+    }
+
+    It 'does not promise a later repair when the repair is part of this run' {
+        $report = $HealthReport | Select-Object -Property *
+        $report.repairRequested = $true
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'Component store: 6 corruptions found; a repair will be attempted'
+        $text | Should -Not -Match 'repairable with -Health -Repair'
+    }
+
+    It 'shows what the repair left and asks for a manual repair of the component store' {
+        $ok = [pscustomobject]@{ ExitCode = -2146498529; Output = 'Error: 0x800f081f' }
+        $partial = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\cbs\restorehealth-partial.log') -Encoding UTF8)
+        $after = New-TuneupHealthScan -Lines $partial -SfcRun $ok -DismRun $ok
+        $report = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = 'a'; finishedAt = 'b'; repairRequested = $true; repairRan = $true
+            before = $Scan; after = $after; recommendation = 'manual-repair'; rebootRecommended = $false
+        }
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'After the repair:'
+        $text | Should -Match 'DISM could not complete the repair \(result 0x800f081f\)'
+        $text | Should -Not -Match 'repaired 5 of 6'
+        $text | Should -Match 'microsoft-windows-codeintegrity: 1 file\b'
+        $text | Should -Match 'DISM ended with exit code -2146498529 \(0x800f081f\)'
+        $text | Should -Match 'DISM could not repair everything'
+    }
+
+    It 'asks to review SFC when the component store is fine and SFC could not repair a file' {
+        $lines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\cbs\sfc-modern-unrepaired.log') -Encoding UTF8)
+        $ok = [pscustomobject]@{ ExitCode = 0; Output = '' }
+        $after = New-TuneupHealthScan -Lines $lines -SfcRun $ok -DismRun $ok
+        $report = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = 'a'; finishedAt = 'b'; repairRequested = $true; repairRan = $true
+            before = $Scan; after = $after; recommendation = 'manual-repair'; rebootRecommended = $false
+        }
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'not repaired: pbrpwbt.exe'
+        $text | Should -Match 'SFC still cannot repair some files'
+        $text | Should -Not -Match 'DISM could not repair everything'
+    }
+
+    It 'keeps the DISM result and the hexadecimal exit codes in the JSON' {
+        $json = Write-TuneupHealthReport -Report $HealthReport -Json | ConvertFrom-Json
+        $json.before.componentStore.operationResult | Should -Be '0x0'
+        $json.before.componentStore.exitCodeHex | Should -Be '0x0'
+    }
+    It 'writes one JSON document with the warnings' {
+        $json = Write-TuneupHealthReport -Report $HealthReport -Warnings @('careful') -Json | ConvertFrom-Json
+        $json.command | Should -Be 'health'
+        $json.before.componentStore.detected | Should -Be 6
+        @($json.warnings) -join ',' | Should -Be 'careful'
+    }
+}
+
+Describe 'Format-TuneupMetric' {
+    BeforeAll {
+        # The separators follow the culture of the process; the tests pin one.
+        $script:SavedCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+    }
+
+    AfterAll {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $script:SavedCulture
+    }
+
+    It 'shows a plus sign on a positive difference only' -TestCases @(
+        @{ Value = 0.75; Expected = '+0.75' }
+        @{ Value = 9; Expected = '+9' }
+        @{ Value = -600; Expected = '-600' }
+        @{ Value = 0; Expected = '0' }
+        @{ Value = $null; Expected = 'n/a' }
+    ) {
+        param($Value, $Expected)
+        Format-TuneupMetric -Value $Value -Signed | Should -Be $Expected
+    }
+
+    It 'shows a plain value without a sign' {
+        Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
+    }
+
+    It 'follows the language of the output, not the culture of the process' {
+        $root = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        $thread = [System.Threading.Thread]::CurrentThread
+        try {
+            Initialize-TuneupI18n -Root $root -Lang 'es'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+            Format-TuneupMetric -Value 101.25 | Should -Be '101,25'
+            Format-TuneupMetric -Value 0.75 -Signed | Should -Be '+0,75'
+            Format-TuneupMetric -Value -600 -Signed | Should -Be '-600'
+            Format-TuneupMetric -Value $null | Should -Be 's/d'
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('es-ES')
+            Format-TuneupMetric -Value 101.25 | Should -Be '101.25'
+            Format-TuneupMetric -Value 0.75 -Signed | Should -Be '+0.75'
+        } finally {
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+            $thread.CurrentCulture = [System.Globalization.CultureInfo]::InvariantCulture
+        }
+    }
+}
+
+Describe 'Write-TuneupMeasureReport' {
+    BeforeAll {
+        $before = [pscustomobject]@{
+            metrics = [pscustomobject]@{ ramInUseMB = 6000; processCount = 160; runningServices = 120; enabledTasks = 150; systemDriveFreeGB = 100.5; bootDurationMs = $null; uptimeMinutes = 3 }
+            notes   = [pscustomobject]@{ bootDurationMs = 'no-event' }
+        }
+        $measurement = [pscustomobject]@{
+            schemaVersion = 1; takenAt = '2026-09-30T12:00:00'; idleSeconds = 120; environment = $null; id = '20260930-120000'
+            metrics = [pscustomobject]@{ ramInUseMB = 5400; processCount = 140; runningServices = 110; enabledTasks = 130; systemDriveFreeGB = 101.25; bootDurationMs = $null; uptimeMinutes = 2 }
+            notes = [pscustomobject]@{ bootDurationMs = 'needs-admin' }
+        }
+        $saved = [pscustomobject]@{ Id = '20260930-120000'; Path = 'C:\state\measurements\20260930-120000.json'; Root = 'custom'; Measurement = $measurement }
+        $against = [pscustomobject]@{ Id = '20260929-090000'; Measurement = $before }
+        $script:MeasureReport = New-TuneupMeasureReport -Saved $saved -Against $against
+    }
+
+    It 'builds the report with the comparison' {
+        $MeasureReport.command | Should -Be 'measure'
+        $MeasureReport.id | Should -Be '20260930-120000'
+        $MeasureReport.comparison.againstId | Should -Be '20260929-090000'
+        @($MeasureReport.comparison.items).Count | Should -Be 7
+    }
+
+    It 'shows the metrics, the reason for a missing one and the differences' {
+        $text = (Write-TuneupMeasureReport -Report $MeasureReport 6>&1 | Out-String)
+        $text | Should -Match 'RAM in use \(MB\): 5400'
+        $text | Should -Match 'Last boot duration \(ms\): needs administrator'
+        $text | Should -Match 'Difference from measurement 20260929-090000'
+        $text | Should -Match 'RAM in use \(MB\): 6000 -> 5400 \(-600\)'
+        $text | Should -Match 'Last boot duration \(ms\): Windows did not record it -> needs administrator \(n/a\)'
+    }
+
+    It 'keeps the reason of a missing value in the comparison, and n/a when there is none' {
+        $item = @($MeasureReport.comparison.items | Where-Object { $_.metric -eq 'bootDurationMs' })[0]
+        $item.beforeNote | Should -Be 'no-event'
+        $item.afterNote | Should -Be 'needs-admin'
+        @($MeasureReport.comparison.items | Where-Object { $_.metric -eq 'ramInUseMB' })[0].beforeNote | Should -BeNullOrEmpty
+        $plain = New-TuneupMeasureReport -Saved ([pscustomobject]@{ Id = 'b'; Path = 'p'; Measurement = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = $null }; notes = [pscustomobject]@{} } }) `
+            -Against ([pscustomobject]@{ Id = 'a'; Measurement = [pscustomobject]@{ metrics = [pscustomobject]@{ ramInUseMB = 1 } } })
+        @($plain.comparison.items | Where-Object { $_.metric -eq 'ramInUseMB' })[0].afterNote | Should -BeNullOrEmpty
+    }
+
+    It 'writes the numbers of the report the way the chosen language does' {
+        $root = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        try {
+            Initialize-TuneupI18n -Root $root -Lang 'es'
+            $text = (Write-TuneupMeasureReport -Report $MeasureReport 6>&1 | Out-String)
+            $text | Should -Match 'Espacio libre en el disco del sistema \(GB\): 101,25'
+            $text | Should -Match 'Espacio libre en el disco del sistema \(GB\): 100,5 -> 101,25 \(\+0,75\)'
+            $text | Should -Match 'Duraci.n del .ltimo arranque \(ms\): Windows no lo registr. -> requiere administrador \(s/d\)'
+        } finally {
+            Initialize-TuneupI18n -Root $root -Lang 'en'
+        }
+    }
+
+    It 'writes one JSON document with the warnings' {
+        $json = Write-TuneupMeasureReport -Report $MeasureReport -Warnings @('careful') -Json | ConvertFrom-Json
+        $json.command | Should -Be 'measure'
+        $json.measurement.metrics.ramInUseMB | Should -Be 5400
+        @($json.warnings) -join ',' | Should -Be 'careful'
     }
 }

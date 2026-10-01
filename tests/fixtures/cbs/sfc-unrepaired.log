@@ -1,0 +1,9 @@
+2026-09-30 11:16:19, Info                  CSI    00000216 [SR] Verifying 100 components
+2026-09-30 11:16:19, Info                  CSI    00000217 [SR] Beginning Verify and Repair transaction
+2026-09-30 11:16:19, Info                  CSI    00000218 [SR] Cannot repair member file [l:7]"ci.dll" of Microsoft-Windows-CodeIntegrity, version 10.0.26100.1591, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch
+2026-09-30 11:16:19, Info                  CSI    00000219 [SR] Verify complete
+2026-09-30 11:16:19, Info                  CSI    0000021c [SR] Repairing 1 components
+2026-09-30 11:16:19, Info                  CSI    0000021d [SR] Beginning Verify and Repair transaction
+2026-09-30 11:16:19, Info                  CSI    0000021e [SR] Cannot repair member file [l:7]"ci.dll" of Microsoft-Windows-CodeIntegrity, version 10.0.26100.1591, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch
+2026-09-30 11:16:19, Info                  CSI    0000021f [SR] Repair complete
+2026-09-30 11:16:19, Info                  DEPLOY [Pnp] Corrupt file: C:\WINDOWS\System32\drivers\bthmodem.sys

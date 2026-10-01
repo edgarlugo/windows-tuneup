@@ -134,7 +134,8 @@ windows-tuneup/
 │                           services, tasks, power, gaming, dev
 ├── profiles/*.json         Perfiles: ids incluidos + keep + preguntas
 ├── actions/*.ps1           Casos especiales con el contrato Test/Get/Set/Restore
-├── engine/
+├── engine/                 (en la implementación: un solo `Tuneup.psm1` que carga un `.ps1` por
+│                            responsabilidad y `handlers/<Tipo>.ps1`; ver Plan 1)
 │   ├── Environment.psm1    Edición, build, dominio/Intune, batería, RAM, SSD/HDD,
 │   │                       reinicio pendiente, restauración del sistema activa
 │   ├── Catalog.psm1        Carga y valida contra esquema
@@ -165,21 +166,26 @@ Cada manejador implementa el mismo contrato:
 | `Set-<Tipo>TweakDesired` | Aplica |
 | `Restore-<Tipo>TweakState` | Devuelve el valor guardado en el snapshot |
 
-`<Tipo>` es el nombre del manejador (`Registry`, `Service`, `Task`); `engine/Dispatch.ps1` elige
-la función según el `type` del ajuste.
+`<Tipo>` es el nombre del manejador (`Registry`, `Service`, `Task`, `Appx`, `Capability`,
+`Feature`, `Powercfg`, `Action`); `engine/Dispatch.ps1` elige la función según el `type` del ajuste.
+Cada manejador también tiene `Test-<Tipo>TweakDefinition`, que valida el bloque `set` en el
+catálogo. `Set` y `Restore` pueden devolver un resultado de manejador (`partial`, `detail`,
+`rebootRequired`, `reason`; ver sección 10). Todos los tipos salvo `registry` exigen
+`scope: machine`.
 
 | Tipo | Estado que guarda | Reversa |
 |---|---|---|
 | `registry` | Existía o no, tipo y valor | Exacta: restaura el valor o borra la entrada si no existía |
 | `service` | Tipo de arranque y estado | Exacta |
 | `task` | Habilitada o deshabilitada | Exacta |
-| `appx` | Paquete instalado para el usuario y provisionado | Reinstala desde la Store con el `storeId` del catálogo; la versión puede cambiar |
-| `capability` | Instalada o no | Reinstala (requiere red o fuente) |
-| `feature` | Habilitada o no | Exacta (puede requerir reinicio) |
-| `powercfg` | Plan activo y valores | Exacta |
-| `action` | Lo que devuelva su `Get-Current` | Lo que implemente su `Restore-Previous` |
+| `appx` | Usuarios que la tenían instalada y provisionamiento | No es exacta: reinstala con `winget` desde la Store (`storeId` del catálogo) solo para el usuario que deshace; no reprovisiona ni repone a otros usuarios; la versión puede cambiar |
+| `capability` | Instalada o no | La vuelve a agregar (requiere Windows Update o un origen de características a petición) |
+| `feature` | Habilitada o no | Exacta para características hoja (puede requerir reinicio) |
+| `powercfg` | Plan activo, o valor de un ajuste de un plan (CA y CC) | Mismo valor efectivo: un valor que venía del predeterminado queda escrito como propio del plan |
+| `action` | Lo que devuelva su `Get-<Pascal>ActionState` | Lo que implemente su `Restore-<Pascal>ActionState` |
 
 `scope` de un ajuste: `machine` (HKLM y sistema) o `user` (HKCU del usuario que ejecuta).
+Solo los ajustes `registry` con ruta `HKCU:` pueden ser `user`.
 
 ### Formato de un ajuste
 
@@ -260,7 +266,7 @@ administradores y las pruebas lo usan): usa esa carpeta sin ACL ni ninguna revis
 confianza, así que **no debe usarse en un equipo real**. En un proceso elevado lo recuerda con
 una advertencia. Con `-Json` las advertencias no se escriben sueltas, porque `powershell.exe` las
 escribe en la salida estándar y romperían el JSON: van dentro del documento, en el arreglo
-`warnings` que llevan todas las salidas JSON (plan, aplicar, estado, deshacer y error).
+`warnings` que llevan todas las salidas JSON (plan, aplicar, estado, deshacer, salud, medición y error).
 
 **Por qué dos carpetas y una ACL propia.** Deshacer escribe lo que dice el diario (clave de
 registro, servicio o tarea), así que el diario decide qué se toca con permisos de
@@ -336,16 +342,19 @@ herramienta, y esperar a que un administrador corra `-Undo last`. Por eso:
 | `-Yes` | Sin confirmaciones (los `ask` se omiten salvo en `-Include`) |
 | `-Status` | Aplicado, no aplicado y deriva |
 | `-Undo <runId\|last> [-Tweak <id>]` | Deshacer una corrida o un ajuste |
-| `-Health` | SFC + DISM `/ScanHealth` y, si hay daño, ofrece `/RestoreHealth` |
-| `-Measure [-Compare <runId>]` | Métricas y comparación |
+| `-Health [-Repair]` | SFC + DISM `/ScanHealth` con resumen leído de CBS.log; con `-Repair`, DISM `/RestoreHealth` y SFC otra vez si hace falta. Requiere administrador |
+| `-Measure [-Compare <id\|last>] [-IdleSeconds <n>]` | Métricas guardadas en `measurements\` y diferencia con una medición anterior |
 | `-Json` | Salida estructurada (para la skill) |
 | `-Lang es\|en` | Idioma de los mensajes |
 | `-Force` | Permite builds no soportados; nunca salta la lista negra |
 
-Combinaciones que no tienen sentido se rechazan antes de leer nada (código `1`): `-Tweak` sin
-`-Undo`, `-Status` con `-Undo`, y `-Status` o `-Undo` junto a `-Profile`, `-Include`,
-`-Exclude`, `-WhatIf` o `-Yes`. Las rutas relativas de `-StateRoot`, `-CatalogPath` y
-`-ProfilesPath` se resuelven contra la ubicación actual de PowerShell.
+Combinaciones que no tienen sentido se rechazan antes de leer nada (código `1`): `-Status`,
+`-Undo`, `-Health` y `-Measure` se excluyen entre sí y ninguno va junto a `-Profile`,
+`-Include`, `-Exclude`, `-WhatIf` o `-Yes`; `-Tweak` exige `-Undo`, `-Repair` exige `-Health`, y
+`-Compare` e `-IdleSeconds` exigen `-Measure`. Las rutas relativas de `-StateRoot`, `-CatalogPath`,
+`-ProfilesPath` y `-ActionsPath` se resuelven contra la ubicación actual de PowerShell.
+`-ActionsPath <carpeta>`, como `-StateRoot`, es solo para pruebas y desarrollo: carga acciones de
+otra carpeta.
 
 Con `-Json` la salida estándar es un solo documento JSON en ASCII (todo carácter no ASCII va
 como `\uXXXX`, así que la página de códigos de la consola no lo altera), con las claves en
@@ -364,10 +373,15 @@ Tomada después de un reinicio y 2 minutos en reposo:
 - Servicios en ejecución
 - Tareas programadas habilitadas
 - Espacio libre en `C:`
-- Duración del último arranque (evento 100 de Diagnostics-Performance, si existe; si no,
-  tiempo desde el arranque hasta el inicio de sesión)
+- Duración del último arranque (evento 100 de Diagnostics-Performance; si no se puede leer
+  queda vacía con su motivo, sin respaldo)
+- Minutos desde el arranque
 
-`-Compare` muestra la diferencia contra una medición anterior.
+`-IdleSeconds <n>` espera antes de medir. Cada medición se guarda en `measurements\<id>.json`
+dentro de la carpeta de estado, con las mismas reglas que las corridas. `-Compare <id|last>`
+muestra la diferencia contra una medición anterior. Si la duración del arranque no se puede leer
+(sin administrador, sin evento o evento de un arranque anterior), queda vacía con el motivo.
+Solo tiene sentido comparar mediciones tomadas con el mismo nivel de elevación.
 
 ### Distribución
 
@@ -401,7 +415,7 @@ reporte de medición adjunto.
 - Windows Server o build no soportado (salvo `-Force`).
 - La carpeta de estado de máquina no es confiable (ver "Estado en disco"): pide borrarla como
   administrador. Si la que no es confiable es la carpeta que la contiene, no se crea nada.
-- `-Undo` de una corrida de la carpeta de máquina sin ser administrador.
+- `-Undo` de una corrida de la carpeta de máquina sin ser administrador, o `-Health` sin serlo.
 - No se puede escribir el diario: sin datos para deshacer no se aplica nada.
 
 ### Avisa y pide confirmación
@@ -422,12 +436,15 @@ reporte de medición adjunto.
 ### Después
 
 - Códigos de salida: `0` todo hecho; `2` no todo se completó, puede haberse cambiado algo: hay que
-  leer el resumen (algún ajuste falló, no tuvo efecto o no se pudo guardar su diario, o no se pudo
-  guardar `result.json`); `1` abortado antes de cambiar nada. Un ajuste que no se aplicó porque no
+  leer el resumen (algún ajuste quedó `partial`, falló, no tuvo efecto o no se pudo guardar su
+  diario, o no se pudo guardar `result.json`); `1` abortado antes de cambiar nada. Un ajuste que no se aplicó porque no
   se pudo escribir su diario cuenta como no hecho: si no se cambió nada es `1`, si algo sí, `2`.
   Si se intentó aplicar y todo falló (o no tuvo efecto), también es `2`, aunque no haya cambiado
   nada. En `-Undo`: `0` todo restaurado (lo ya deshecho no cuenta), `2` parcial (quedan fallos o
   ajustes de otro usuario), `1` nada restaurado.
+  En `-Health`: `0` sin problemas, `2` quedan problemas o no se pudo confirmar el resultado, `1`
+  no se pudo empezar (sin administrador). `-Measure`: `0`, o `1` si no pudo medir o guardar. Un
+  ajuste `partial` cuenta como no completado (`2`).
 - `-Status` detecta deriva (una actualización grande devolvió valores) y ofrece reaplicar
   (Plan 4: hoy solo informa la deriva).
 - `-Undo` sigue ante errores y lista lo que no pudo restaurar (Plan 4: la instrucción manual
@@ -496,3 +513,22 @@ entiende y usa por defecto la última release.
 | Ajustes sin efecto real (placebo) | Fuente obligatoria; revisión de cada ajuste contra la documentación; medición |
 | Windows Sandbox no trae apps de la Store | Capa 6 en VM por release |
 | Mantener dos idiomas | Prueba de paridad de claves de idioma en la capa 1 |
+
+## 10. Adenda del Plan 2 (2026-09-30)
+
+Decisiones tomadas al planificar los manejadores restantes, `-Health` y `-Measure`. Las secciones 5 y 7
+recogen sus resultados (tipos, parámetros, medición y códigos de salida); si algo difiere, manda
+esta adenda.
+
+1. **Resultado de `Set` y estado `partial`.** `Set-<Tipo>TweakDesired` puede emitir un resultado de manejador creado con `New-TuneupOutcome` (un `[pscustomobject]` con tipo `Tuneup.Outcome` y los campos `partial`, `detail`, `rebootRequired` y `reason`); cualquier otra salida del manejador se ignora. Si informa `partial` (cambió algo pero no pudo terminar; por ejemplo, el servicio quedó deshabilitado pero no se pudo detener), el ajuste queda `partial` con la explicación en `detail`, diga lo que diga `Test`. Si no, `Test` decide `applied` o `not-applied`, como antes. `rebootRequired` del resultado es el del catálogo **o** el que pida Windows (`RestartNeeded` de DISM). El resumen y el JSON cuentan `partial`; un `partial` da código de salida `2`; `-Status` lo trata como ajuste tocado. `Restore-<Tipo>TweakState` usa el mismo objeto: su `reason` (por ejemplo `reinstalled`), `detail` y `rebootRequired` llegan al resultado de `-Undo`, que sigue contando como `restored`.
+2. **Registro único de manejadores.** `engine/Dispatch.ps1` tiene una tabla `tipo → manejador` que también dice si leer el estado exige administrador. La usan el despachador y la validación del catálogo; la validación del bloque `set` de cada tipo vive en su manejador (`Test-<Tipo>TweakDefinition`). Agregar un tipo es una línea en la tabla más `engine/handlers/<Tipo>.ps1`. Una prueba exige que cada tipo de la tabla tenga sus cinco funciones. Los tipos se comparan en minúsculas exactas, y la validación del catálogo distingue mayúsculas en todos los manejadores: `scope`, el tipo de valor de registro (`DWord`, no `dword`), el tipo de arranque de un servicio (`Disabled`), el estado de una tarea, capacidad o característica y los prefijos de ruta (`HKCU:`) deben escribirse exactamente como los define el catálogo; el catálogo que se distribuye y los datos de prueba ya cumplen esa regla.
+3. **appx.** `scope: machine`. `set: { name, storeId, action: "remove" }`: `name` es el nombre del paquete Appx (`Microsoft.BingNews`, sin comodines) y `storeId` el id de producto de la Microsoft Store (`^[0-9A-Z]{12}$`, por ejemplo `9WZDNCRFHVFW`). Estado: `{ installedUsers, currentUserHad, currentUserSid, otherUsers, provisioned, version }`. Un usuario tiene la app solo si `Get-AppxPackage -AllUsers` lo lista con `InstallState = Installed` (un paquete `Staged` no cuenta). El SID de cada usuario es el campo `Sid` de la estructura `AppxUserSecurityId` que devuelve Windows (su texto es solo el nombre del tipo). `currentUserHad` es si el SID del usuario que corre la herramienta está entre ellos, `currentUserSid` es ese SID cuando la tenía (si no, nulo) y `otherUsers` cuántos SID distintos más hay. `provisioned` viene de `Get-AppxProvisionedPackage -Online` por `DisplayName`. Las listas se piden una vez por proceso y se vuelven a pedir después de cualquier cambio. Una app que no está ni instalada ni provisionada cuenta como **aplicada** (no hay nada que quitar); nunca es `not-present`. Aplicar lee las dos listas antes de quitar nada, quita el paquete solo si algún usuario lo tiene instalado, para todos los usuarios, y lo desprovisiona; si una parte falla (incluida la lectura de la lista provisionada) después de que otra funcionó, el resultado es `partial`; si nada funcionó, `failed`. Deshacer: si el `currentUserSid` guardado no es el del usuario que deshace, la entrada no se restaura (otra cuenta no le devuelve la app a quien la perdió): el resultado es `skipped` con motivo `other-user`, igual que las entradas `HKCU` de otro usuario; queda pendiente para su dueño (la corrida no se marca deshecha, y `last` no la elige para otra cuenta; el diario lo decide al leerse, así el manejador nunca instala para la cuenta equivocada). Si el estado no trae `currentUserSid` (nadie la tenía para sí, o es anterior al campo), no hay otro dueño y se sigue. Si `currentUserHad` y el usuario actual no la tiene ya, `winget install --id <storeId> --source msstore --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity` (códigos de salida de winget aceptados como éxito: 0, `-1978335135` y `-1978335189`), con resultado `restored` y motivo `reinstalled` ("reinstalada para el usuario actual"); lo que la Store no puede devolver se informa en `detail` (`not provisioned again for new users`, `N other users not restored`) según lo que el sistema tiene **ahora**, no solo según lo guardado: se vuelven a leer el aprovisionamiento y las instalaciones de otros usuarios, y el aprovisionamiento que sigue ahí o los otros usuarios que todavía tienen la app (`otherUsers` guardado menos los que la tienen ahora, sin contar al usuario actual) no se mencionan, de modo que si no se quitó nada no hay notas ni motivo; lo que no se puede leer ahora se toma del estado guardado. Si el usuario actual no la tenía, no se llama a winget: `restored` con motivo `installed-for-other-users` (lo tenían otros usuarios: cada uno debe reinstalarla desde la Store) o, si solo estaba provisionada, `not-reprovisioned`, siempre con la línea de winget para instalarla a mano. Si el usuario actual conservó la app y solo se perdió el provisionamiento, `restored` sin motivo y con `not provisioned again for new users` en `detail`. Un estado guardado sin `currentUserHad`/`otherUsers` se trata como una app que tenía el usuario actual. Sin winget, o si winget falla, el deshacer falla con el código de salida y la corrida queda pendiente para reintentar. winget reinstala para la cuenta que corre el deshacer: con elevación "sobre el hombro" (otra cuenta de administrador) la app queda en esa cuenta, no en la del usuario que la perdió, y el mensaje de error pide correr el deshacer desde el símbolo del sistema elevado del usuario que inició sesión. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
+4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
+5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
+6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura, por separado para CA y CC y con el primero que exista: el valor propio del plan en `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`); luego el predeterminado aprovisionado (`ProvAcSettingIndex`/`ProvDcSettingIndex`) de `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`, que Windows prefiere al simple; y por último `ACSettingIndex`/`DCSettingIndex` de esa misma clave. Si la definición `PowerSettings\<subgrupo>\<valor>` no existe, o el plan indicado por GUID no aparece en `powercfg /list`, es `not-present`. Un dato que no es DWORD da un error que nombra el valor. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`, y los 28 ajustes visibles de `powercfg /q SCHEME_CURRENT` coinciden con la lectura (5 tienen `Prov*` y difieren del valor simple: por ejemplo, apagar el disco con CA da 1200 simple y 30 efectivo). `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás (DC o volver a activar el plan) falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer". Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan; el estado leído es el del plan, no el que la directiva fuerza. Una clave de esas fuentes que existe pero no se puede leer (acceso denegado, una colmena dañada) es un error, no una fuente vacía: no se pasa en silencio a la siguiente.
+7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyos nombres son los cuatro del contrato o ayudantes `<Verbo>-<Pascal>ActionHelper<Nombre>` (el `<Nombre>` no puede volver a contener `Action`, así ningún nombre de una acción puede igualar un nombre de contrato de otra: `foo` no puede definir `Set-FooActionXActionDesired`, que es de `foo-action-x`). Además se rechaza, sin distinguir mayúsculas, un nombre reservado (`tuneup...`, también `tune-up`), una función que otra acción ya define (`a-b` y `ab` dan los mismos nombres), una que ya sea un comando (el motor, un cmdlet, otro módulo) y un bloque `dynamicparam`. Solo se leen archivos con extensión exactamente `.ps1` (no `.ps1xml`); una acción no se puede volver a cargar desde otro archivo con el mismo nombre, y las funciones de las acciones no se exportan del módulo (la lista exportada es la de las funciones del propio módulo, tomada antes de cargar las acciones, así una función de la sesión con el mismo nombre que una del motor no la recorta). Modelo de confianza: `windows-tuneup` debe correrse desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`); la revisión del AST es defensa en profundidad, no sustituye ese permiso de carpeta, porque quien pueda escribir en `actions/` ejecuta código con los permisos de quien aplique el ajuste. Las acciones de `actions/` (la carpeta aún no existe en el repo) se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. Los dos casos siguen la misma regla: **un script que no se puede cargar nunca detiene el módulo ni los demás scripts**. El cargador lee cada archivo por separado, guarda el motivo del que falla (`Get-TuneupActionLoadError`: nombre, archivo y mensaje) y pasa al siguiente; el mismo script cargado después correctamente borra su error. El error sale como advertencia en cada comando (con `-Json`, dentro del arreglo `warnings`). El catálogo valida que la acción esté cargada: un ajuste cuyo script falló no pasa la validación y el mensaje dice por qué (`<id> action script '<nombre>' could not be loaded: <motivo>`), de modo que aplicar o planificar se detienen con `err.catalog` solo si el catálogo trae ese ajuste. `-Status`, `-Undo`, `-Health` y `-Measure` no validan el catálogo y siguen funcionando; en `-Status`, un ajuste registrado con un script que no cargó sale como `unknown`. `-ActionsPath` sigue exigiendo que la carpeta exista; sus scripts fallidos se tratan igual que los del repo. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
+8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
+9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
+10. **-Health.** Exige administrador. Corre `sfc /scannow` y `DISM /Online /Cleanup-Image /ScanHealth /English` (desde `Sysnative` si PowerShell es de 32 bits en un Windows de 64), guardando el código de salida (en decimal y en hexadecimal) y los bytes crudos de la salida, que se decodifican después según la herramienta (sfc escribe siempre UTF-16 al redirigirse y DISM usa la página OEM; solo para una herramienta desconocida se adivina por los bytes en cero); se guardan en memoria, no en un archivo temporal. El resultado se lee de `%windir%\Logs\CBS\CBS.log` y de los `CbsPersist_*.log` modificados desde el inicio (Windows rota CBS.log en medio de una revisión larga; los `CbsPersist_*.cab` comprimidos no se leen; si un registro rota entre listarlo y abrirlo se vuelve a listar una vez), solo con líneas desde la hora de inicio. **SFC:** cuenta solo la última ejecución de sfc **terminada** de la ventana: desde el primer `[SR] Verifying N components` posterior al `[SR] Repair complete` anterior hasta el último `[SR] Repair complete`, más las líneas `[Pnp]` que le siguen (hasta la próxima línea `[SR]`). Una ejecución revisa los componentes en muchos bloques `Verifying` y termina con `Repair complete`; las líneas `[SR]` anteriores a su primer `Verifying` y las posteriores a su `Repair complete` (una ejecución interrumpida o trabajo de fondo como `Verifying 1 components` sin `Repair complete`) son ruido y se ignoran. Sin ninguna ejecución terminada en la ventana, SFC queda `unknown`. Dentro de la ejecución se leen `[SR] Repairing N components`, `[SR] Cannot repair member file [l:N]'archivo' of <componente>, version ..., arch <arq>` (comillas simples o dobles; se informa como `archivo (componente, arq)`, así las copias de otra arquitectura no se confunden por el nombre), `[SR] Could not reproject corrupted file <ruta completa>` (la ruta completa gana sobre el nombre), `[SR] Repairing corrupted file` (entre comillas o como ruta `\??\...`) y `[Pnp] Corrupt file`/`[Pnp] Repaired file`. **Almacén de componentes:** el bloque `Summary` que sigue a `Checking System Update Readiness` (`Operation`, `Operation result`, `Total Detected Corruption`, `Total Repaired Corruption`) y las líneas `(p) CSI Payload Corrupt` que no dicen `(Fixed)`, agrupadas por componente; un resultado distinto de `0x0` en una reparación es `unrepairable` y en una revisión que no contó daños es `unknown`. Resumen: SFC `clean|repaired|unrepaired|unknown`, almacén de componentes `healthy|repairable|repaired|unrepairable|unknown` (con su `operationResult`), grupos dañados y recomendación `none|run-repair|manual-repair|check-logs`; un daño conocido (almacén reparable o SFC sin reparar) gana sobre un resultado ilegible de la otra herramienta. El código de salida de SFC no está documentado: se muestra, pero no decide. `-Repair` corre `DISM /RestoreHealth` y SFC otra vez solo si el almacén es reparable o no reparable o SFC no pudo reparar (no si el resultado es desconocido), e informa antes y después; un `manual-repair` se explica distinto si DISM no pudo reparar o si solo SFC sigue sin poder. Sin `-Json`, una línea por fase (SFC, DISM revisa, DISM repara, SFC otra vez). Código de salida: `0` sin problemas, `2` quedan problemas o no se pudo confirmar, `1` no se pudo empezar (sin administrador). No hay pregunta interactiva para reparar: el menú es del Plan 4.
+11. **-Measure / -Compare.** Métricas: RAM en uso (MB), procesos, servicios en ejecución, tareas programadas habilitadas, espacio libre del disco del sistema (GB), duración del último arranque (`BootTime` del evento 100 de `Microsoft-Windows-Diagnostics-Performance/Operational`) y minutos desde el arranque, más fecha y entorno. Si la duración no se puede leer queda `null` con el motivo en `notes` (`needs-admin`, `no-event`, `not-recorded-yet` si el evento es de un arranque anterior, `unreadable`, `unavailable`); no hay respaldo con el tiempo hasta el inicio de sesión. Sin elevar, Windows responde "no hay eventos" en vez de "acceso denegado" (verificado), por eso ese caso se informa como `needs-admin`. En la salida para personas los números siguen el idioma de `-Lang` (coma decimal en `es`, punto en `en`) y no la configuración regional del equipo; en la comparación, un valor que falta muestra su motivo (`requiere administrador`) en vez de `s/d`, y por eso cada elemento de `comparison.items` del JSON trae además `beforeNote` y `afterNote` (nulos si el valor existe o no hay motivo). `-IdleSeconds <n>` (0 a 3600) espera antes de medir; el README recomienda reiniciar y usar 120. Se guarda en `<carpeta de estado>\measurements\<id>.json` con las mismas reglas de confianza que las corridas (máquina si es administrador, usuario si no, `-StateRoot` para pruebas). `-Compare <id|last>` compara contra una medición guardada (no contra una corrida); se resuelve antes de medir, así `last` nunca es la medición nueva. Solo tiene sentido comparar mediciones con el mismo nivel de elevación (la duración del arranque, y a veces servicios y tareas, dependen de ello). Código de salida: `0`, o `1` si no pudo medir o guardar o si `-Compare` no encuentra la medición.
+12. **CLI.** `-Status`, `-Undo`, `-Health` y `-Measure` se excluyen entre sí y ninguno se combina con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` ni `-Yes`. Opciones que dependen de un comando: `-Tweak` (de `-Undo`), `-Repair` (de `-Health`), `-Compare` e `-IdleSeconds` (de `-Measure`). La regla vive en una función pura (`Get-TuneupArgumentConflict`). El JSON suma los comandos `health` y `measure`, con `schemaVersion` y `warnings` como los demás.

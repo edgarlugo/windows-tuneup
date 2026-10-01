@@ -72,6 +72,14 @@ function Test-TuneupRunMarker {
     $false
 }
 
+function Test-TuneupAppxEntryOfOtherUser {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][AllowEmptyString()][string]$CurrentSid)
+    if ([string]$Entry.tweak.type -cne 'appx' -or $null -eq $Entry.state) { return $false }
+    # No SID saved means that nobody had the app for themselves (or the state is older than the field).
+    $sid = $Entry.state.PSObject.Properties['currentUserSid']
+    $null -ne $sid -and [bool]$sid.Value -and [string]$sid.Value -ne $CurrentSid
+}
+
 function Get-TuneupRunJournal {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Run)
@@ -82,8 +90,15 @@ function Get-TuneupRunJournal {
     foreach ($entry in @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Root $Run.Root)) {
         # A user-scope entry holds HKCU values of whoever made the run; restoring it would write them
         # into the current user's hive instead.
+        $kind = $null
         if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
-            Write-Warning "Ignoring user-scope entry '$($entry.id)' of run $($Run.Id): it belongs to another user"
+            $kind = 'user-scope entry'
+        } elseif (Test-TuneupAppxEntryOfOtherUser -Entry $entry -CurrentSid $currentSid) {
+            # The copy of a Store app belongs to the account that had it: only that account can get it back.
+            $kind = 'appx entry'
+        }
+        if ($null -ne $kind) {
+            Write-Warning "Ignoring $kind '$($entry.id)' of run $($Run.Id): it belongs to another user"
             $skipped.Add([string]$entry.id)
             $skippedEntries.Add($entry)
             continue

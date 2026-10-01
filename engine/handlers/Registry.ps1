@@ -1,3 +1,33 @@
+$script:RegistryKinds = @('DWord', 'QWord', 'String', 'ExpandString')
+
+function Test-TuneupRegistryValue {
+    param([string]$Kind, $Value)
+    if ($Value -is [array]) { return $false }
+    switch ($Kind) {
+        'DWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -2147483648 -Max 4294967295) }
+        'QWord' { return (Test-TuneupIntegerInRange -Value $Value -Min -9223372036854775808 -Max 9223372036854775807) }
+        default { return ($Value -is [string]) }
+    }
+}
+
+function Test-RegistryTweakDefinition {
+    param([Parameter(Mandatory)]$Tweak)
+    $set = $Tweak.set
+    if ([string]$set.path -cnotmatch '^(HKLM|HKCU):\\.+') {
+        'has an invalid registry path'
+    } elseif (([string]$set.path -cmatch '^HKCU:') -ne ($Tweak.scope -ceq 'user')) {
+        'scope does not match its registry hive'
+    }
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    if ($null -ne $set.value) {
+        if ($script:RegistryKinds -cnotcontains $set.kind) {
+            "has an invalid registry kind '$($set.kind)'"
+        } elseif (-not (Test-TuneupRegistryValue -Kind $set.kind -Value $set.value)) {
+            "has a value that does not match kind $($set.kind)"
+        }
+    }
+}
+
 function ConvertTo-TuneupDWord {
     param([Parameter(Mandatory)]$Value)
     $number = [int64]$Value

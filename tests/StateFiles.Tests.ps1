@@ -75,6 +75,15 @@ Describe 'Journal' {
     }
 }
 
+Describe 'Create-new state files' {
+    It 'refuses to replace a file that exists and leaves it as it was' {
+        $path = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.json')
+        Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 1 }) -Root 'custom' -CreateNew
+        { Save-TuneupJson -Path $path -Object ([pscustomobject]@{ n = 2 }) -Root 'custom' -CreateNew } | Should -Throw
+        (Get-Content -LiteralPath $path -Raw | ConvertFrom-Json).n | Should -Be 1
+    }
+}
+
 Describe 'State roots' {
     It 'uses the user folder unless the machine folder is asked for' {
         Get-TuneupStateRoot | Should -Be (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'windows-tuneup')
@@ -101,6 +110,11 @@ Describe 'User journals' {
         @{ Name = 'machine-scope tweak'; Scope = 'machine'; Type = 'registry'; Set = @{ path = 'HKLM:\Software\x'; name = 'A'; kind = 'DWord'; value = 1 } }
         @{ Name = 'user tweak on an HKLM path'; Scope = 'user'; Type = 'registry'; Set = @{ path = 'HKLM:\Software\x'; name = 'A'; kind = 'DWord'; value = 1 } }
         @{ Name = 'user service tweak'; Scope = 'user'; Type = 'service'; Set = @{ name = 'Spooler'; startType = 'Disabled'; stop = $true } }
+        @{ Name = 'user appx tweak'; Scope = 'user'; Type = 'appx'; Set = @{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' } }
+        @{ Name = 'user capability tweak'; Scope = 'user'; Type = 'capability'; Set = @{ name = 'App.StepsRecorder~~~~0.0.1.0'; state = 'NotPresent' } }
+        @{ Name = 'user feature tweak'; Scope = 'user'; Type = 'feature'; Set = @{ name = 'TelnetClient'; state = 'Disabled' } }
+        @{ Name = 'user powercfg tweak'; Scope = 'user'; Type = 'powercfg'; Set = @{ kind = 'scheme'; scheme = '381b4222-f694-41f0-9685-ff5bb260df2e' } }
+        @{ Name = 'user action tweak with an HKCU path'; Scope = 'user'; Type = 'action'; Set = @{ script = 'fixture-toggle'; path = 'HKCU:\Software\x' } }
     ) {
         $Tweak = New-TestTweak -Id 'test.refused' -Scope $Scope -Type $Type -Set ([pscustomobject]$Set)
         { Add-TuneupJournalEntry -Path $Journal -Tweak $Tweak -State $null -Root 'user' } |

@@ -211,12 +211,12 @@ function Open-TuneupTrustedStream {
 }
 
 function Initialize-TuneupStateRoot {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [string[]]$Children = @('runs'))
     $base = Split-Path -Parent $Path
     if (-not (Test-TuneupBaseFolder -Path $base)) {
         throw "Folder $base is not trusted to hold the machine state folder"
     }
-    foreach ($folder in @($Path, (Join-Path $Path 'runs'))) {
+    foreach ($folder in @($Path) + @($Children | ForEach-Object { Join-Path $Path $_ })) {
         $existed = Test-Path -LiteralPath $folder
         if (-not $existed) {
             try {

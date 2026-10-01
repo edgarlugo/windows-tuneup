@@ -159,3 +159,34 @@ Describe 'New-TuneupPlan' {
         Get-Action $plan 'svc.policy-path' | Should -Be 'apply'
     }
 }
+
+Describe 'New-TuneupPlan with state that needs elevation to read' {
+    BeforeAll {
+        $appSet = [pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' }
+        $script:AppCatalog = @(
+            (New-TestTweak -Id 'apps.news' -Type 'appx' -Scope 'machine' -Set $appSet),
+            (New-TestTweak -Id 'apps.risky' -Type 'appx' -Scope 'machine' -Risk 'high' -Set $appSet)
+        )
+        $script:AppProfiles = @(New-TestProfile -Id 'base' -Include @('apps.news', 'apps.risky'))
+        $script:UserEnvironment = New-TestEnvironment
+        $script:UserEnvironment.IsAdmin = $false
+    }
+
+    It 'plans it as unverified without reading it when not elevated' {
+        $plan = @(New-TuneupPlan -Catalog $AppCatalog -Profiles $AppProfiles -Environment $UserEnvironment -TestState { throw 'must not read' })
+        $plan[0].Action | Should -Be 'apply'
+        $plan[0].Reason | Should -Be 'unverified-needs-admin'
+    }
+
+    It 'still leaves out an unverified high-risk tweak that was not requested' {
+        $plan = @(New-TuneupPlan -Catalog $AppCatalog -Profiles $AppProfiles -Environment $UserEnvironment -TestState { throw 'must not read' })
+        $plan[1].Action | Should -Be 'skip'
+        $plan[1].Reason | Should -Be 'high-risk-not-requested'
+    }
+
+    It 'reads it when elevated' {
+        $plan = @(New-TuneupPlan -Catalog $AppCatalog -Profiles $AppProfiles -Environment (New-TestEnvironment) -TestState { 'applied' })
+        $plan[0].Action | Should -Be 'skip'
+        $plan[0].Reason | Should -Be 'already-applied'
+    }
+}

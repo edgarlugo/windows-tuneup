@@ -10,9 +10,9 @@ BeforeAll {
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:SubKey = 'HKCU:\Software\windows-tuneup-test\Sub'
     $script:PowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en', [string]$Catalog = (Join-Path $Fixtures 'catalog')) {
+    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en', [string]$Catalog = (Join-Path $Fixtures 'catalog'), [string]$Actions = (Join-Path $Fixtures 'actions')) {
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
-            -CatalogPath $Catalog -ProfilesPath (Join-Path $Fixtures 'profiles') `
+            -CatalogPath $Catalog -ProfilesPath (Join-Path $Fixtures 'profiles') -ActionsPath $Actions `
             -StateRoot $script:Root -Force -Lang $Lang @Arguments
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
@@ -53,6 +53,102 @@ Describe 'tuneup.ps1' {
 
     AfterAll {
         Remove-TestKey
+    }
+
+    It 'plans an action tweak loaded from -ActionsPath' {
+        $result = Invoke-Tuneup @('-Include', 'test.action', '-WhatIf', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        ($json.items | Where-Object { $_.id -eq 'test.action' }).action | Should -Be 'apply'
+        $json.requiresAdmin | Should -BeTrue
+    }
+
+    It 'reports an actions folder script that runs code as a warning and keeps -Status working' {
+        $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $actions | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $actions 'bad-one.ps1'), 'Write-Output hello')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        # The fixture catalog has an action tweak whose script is not in this folder.
+        @($json.warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+        $result = Invoke-Tuneup @('-Status', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 0
+        @((ConvertFrom-PureJson $result.Output).warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+    }
+
+    It 'fails the catalog check only for the tweaks whose action script could not be loaded' {
+        $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $actions | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $actions 'fixture-toggle.ps1'), 'Write-Output hello')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        @($json.details) -join ' ' | Should -Match "test.action action script 'fixture-toggle' could not be loaded: .*may only define functions"
+    }
+
+    It 'keeps -Status, -Undo, -Health and -Measure working when a script of the repository actions folder is broken' {
+        $copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $copy | Out-Null
+        foreach ($item in 'tuneup.ps1', 'engine', 'i18n') { Copy-Item -LiteralPath (Join-Path $Repo $item) -Destination (Join-Path $copy $item) -Recurse }
+        New-Item -ItemType Directory -Path (Join-Path $copy 'actions') | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path (Join-Path $copy 'actions') 'bad-one.ps1'), 'Write-Output hi')
+        $run = {
+            param([string[]]$Arguments)
+            $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $copy 'tuneup.ps1') -StateRoot $script:Root -Lang en -Json @Arguments
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
+        }
+        $status = & $run @('-Status')
+        $status.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $status.Output
+        $json.command | Should -Be 'status'
+        @($json.warnings) -join ' ' | Should -Match 'bad-one.ps1.*may only define functions'
+        $undo = & $run @('-Undo', 'last')
+        $undo.ExitCode | Should -Be 1
+        $undoJson = ConvertFrom-PureJson $undo.Output
+        $undoJson.message | Should -Match 'no runs to undo'
+        @($undoJson.warnings) -join ' ' | Should -Match 'bad-one.ps1'
+        $measure = & $run @('-Measure')
+        $measure.ExitCode | Should -Be 0
+        $measureJson = ConvertFrom-PureJson $measure.Output
+        $measureJson.command | Should -Be 'measure'
+        @($measureJson.warnings) -join ' ' | Should -Match 'bad-one.ps1'
+    }
+
+    It 'says when the actions folder does not exist' {
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions (Join-Path $TestDrive 'no-such-actions')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'actions folder'
+    }
+
+    It 'says when -ActionsPath is a file and not a folder' {
+        $file = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.ps1')
+        [System.IO.File]::WriteAllText($file, 'function Get-Nothing { }')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $file
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'is not a folder'
+    }
+
+    It 'resolves a relative -ActionsPath against the current folder' {
+        Copy-Item -LiteralPath (Join-Path $Fixtures 'actions') -Destination (Join-Path $TestDrive 'relative-actions') -Recurse
+        Push-Location -LiteralPath $TestDrive
+        try {
+            $result = Invoke-Tuneup @('-Include', 'test.action', '-WhatIf', '-Json') -Actions 'relative-actions'
+        } finally {
+            Pop-Location
+        }
+        $result.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $result.Output).items.id | Should -Contain 'test.action'
+    }
+
+    It 'does not warn about -ActionsPath when not elevated' -Skip:$Elevated {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-WhatIf', '-Json')).Output
+        @($json.warnings).Count | Should -Be 0
+    }
+
+    It 'carries the -ActionsPath warning inside the JSON document when elevated' -Skip:(-not $Elevated) {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-WhatIf', '-Json')).Output
+        @($json.warnings) | Should -Contain '-ActionsPath loads functions that run with administrator rights; use only for development and testing'
     }
 
     It 'shows the plan as JSON without changing anything' {
@@ -245,12 +341,70 @@ Describe 'tuneup.ps1' {
         @{ Arguments = @('-Undo', 'last', '-Profile', 'extra') }
         @{ Arguments = @('-Undo', 'last', '-Yes') }
         @{ Arguments = @('-Undo', 'last', '-Exclude', 'test.one') }
+        @{ Arguments = @('-Repair') }
+        @{ Arguments = @('-Health', '-Status') }
+        @{ Arguments = @('-Health', '-Profile', 'extra') }
+        @{ Arguments = @('-Health', '-Undo', 'last') }
+        @{ Arguments = @('-Compare', 'last') }
+        @{ Arguments = @('-IdleSeconds', '5') }
+        @{ Arguments = @('-Measure', '-Status') }
+        @{ Arguments = @('-Measure', '-Yes') }
     ) {
         param($Arguments)
         $result = Invoke-Tuneup (@($Arguments) + '-Json')
         $result.ExitCode | Should -Be 1
         (ConvertFrom-PureJson $result.Output).message | Should -Match 'Invalid parameter combination'
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'refuses -Health without elevation' -Skip:$Elevated {
+        $result = Invoke-Tuneup @('-Health', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-Health needs PowerShell as administrator.'
+    }
+
+    It 'measures, saves and compares against the last measurement' {
+        $first = Invoke-Tuneup @('-Measure', '-Json')
+        $first.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $first.Output
+        $json.command | Should -Be 'measure'
+        $json.comparison | Should -BeNullOrEmpty
+        $json.measurement.metrics.processCount | Should -BeGreaterThan 0
+        $json.PSObject.Properties.Name | Should -Contain 'warnings'
+        Test-Path -LiteralPath $json.path | Should -BeTrue
+        $second = ConvertFrom-PureJson (Invoke-Tuneup @('-Measure', '-Compare', 'last', '-Json')).Output
+        $second.comparison.againstId | Should -Be $json.id
+        @($second.comparison.items).Count | Should -Be 7
+    }
+
+    It 'says when the measurement to compare does not exist' {
+        $result = Invoke-Tuneup @('-Measure', '-Compare', '19990101-000000', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'Measurement 19990101-000000 does not exist.'
+    }
+
+    It 'says there is nothing to compare against when no measurement was saved' {
+        $result = Invoke-Tuneup @('-Measure', '-Compare', 'last', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'There are no saved measurements to compare against.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
+    }
+
+    It 'rejects -IdleSeconds <Seconds> as out of range, in the JSON document' -TestCases @(
+        @{ Seconds = '-1' }
+        @{ Seconds = '3601' }
+    ) {
+        param($Seconds)
+        $result = Invoke-Tuneup @('-Measure', '-IdleSeconds', $Seconds, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-IdleSeconds must be between 0 and 3600.'
+        Test-Path -LiteralPath (Join-Path $Root 'measurements') | Should -BeFalse
+    }
+
+    It 'prints a measurement for people in the chosen language' {
+        $result = Invoke-Tuneup @('-Measure') -Lang 'es'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Procesos: \d+'
     }
 
     It 'refuses to apply with -Json but without -Yes' {
