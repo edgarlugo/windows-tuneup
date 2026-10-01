@@ -124,28 +124,51 @@ function Get-TuneupPowerSettingState {
     [pscustomobject]@{ kind = 'setting'; scheme = $scheme; present = $index.present; ac = $index.ac; dc = $index.dc }
 }
 
+# The values a setting tweak asks for: ac and dc are each optional (absent or null leaves that power
+# source as it is), but at least one is given (the catalog check makes sure).
+function Get-TuneupPowerSettingTarget {
+    param([Parameter(Mandatory)]$Set)
+    $target = @{ ac = $null; dc = $null }
+    foreach ($field in 'ac', 'dc') {
+        $property = $Set.PSObject.Properties[$field]
+        if ($null -ne $property -and $null -ne $property.Value) { $target[$field] = [long]$property.Value }
+    }
+    [pscustomobject]$target
+}
+
 function Set-TuneupPowerSettingIndex {
     param(
         [Parameter(Mandatory)][string]$Scheme,
         [Parameter(Mandatory)][string]$Subgroup,
         [Parameter(Mandatory)][string]$Setting,
-        [Parameter(Mandatory)][long]$Ac,
-        [Parameter(Mandatory)][long]$Dc,
+        [AllowNull()]$Ac,
+        [AllowNull()]$Dc,
         [switch]$ReportPartial
     )
-    Invoke-TuneupPowercfg -Arguments @('/setacvalueindex', $Scheme, $Subgroup, $Setting, [string]$Ac) | Out-Null
-    try {
-        Invoke-TuneupPowercfg -Arguments @('/setdcvalueindex', $Scheme, $Subgroup, $Setting, [string]$Dc) | Out-Null
-    } catch {
-        $message = "The value on AC power was changed, but not the rest: $($_.Exception.Message)"
-        if ($ReportPartial) { return (New-TuneupOutcome -Partial -Detail $message) }
-        throw $message
+    # Only the power sources that are given are written; the other one keeps its value.
+    $written = @()
+    if ($null -ne $Ac) {
+        Invoke-TuneupPowercfg -Arguments @('/setacvalueindex', $Scheme, $Subgroup, $Setting, [string][long]$Ac) | Out-Null
+        $written += 'AC'
+    }
+    if ($null -ne $Dc) {
+        try {
+            Invoke-TuneupPowercfg -Arguments @('/setdcvalueindex', $Scheme, $Subgroup, $Setting, [string][long]$Dc) | Out-Null
+        } catch {
+            # Nothing was written yet when DC is the only value: a plain failure.
+            if (-not $written.Count) { throw }
+            $message = "The value on AC power was changed, but not the rest: $($_.Exception.Message)"
+            if ($ReportPartial) { return (New-TuneupOutcome -Partial -Detail $message) }
+            throw $message
+        }
+        $written += 'DC'
     }
     # A change to the active scheme takes effect once it is activated again.
     try {
         if ($Scheme -eq (Get-TuneupActivePowerScheme)) { Invoke-TuneupPowercfg -Arguments @('/setactive', $Scheme) | Out-Null }
     } catch {
-        $message = "The values on AC and DC power were changed, but activating the scheme again failed: $($_.Exception.Message)"
+        $changed = $(if ($written.Count -eq 2) { 'The values on AC and DC power were changed' } else { "The value on $($written[0]) power was changed" })
+        $message = "$changed, but activating the scheme again failed: $($_.Exception.Message)"
         if ($ReportPartial) { return (New-TuneupOutcome -Partial -Detail $message) }
         throw $message
     }
@@ -164,7 +187,10 @@ function Test-PowercfgTweakDefinition {
             foreach ($field in 'subgroup', 'setting') {
                 if ([string]$set.$field -notmatch $script:GuidPattern) { "set.$field must be a GUID" }
             }
-            foreach ($field in 'ac', 'dc') {
+            # ac and dc are each optional (left as they are when absent or null), but one is needed.
+            $given = @('ac', 'dc' | Where-Object { $null -ne $set.PSObject.Properties[$_] -and $null -ne $set.$_ })
+            if (-not $given.Count) { 'needs set.ac, set.dc or both' }
+            foreach ($field in $given) {
                 if (-not (Test-TuneupIntegerInRange -Value $set.$field -Min 0 -Max 4294967295)) { "set.$field must be an integer from 0 to 4294967295" }
             }
         }
@@ -183,8 +209,11 @@ function Test-PowercfgTweakState {
     if ($Tweak.set.kind -eq 'scheme') { return (Test-TuneupPowerSchemeState -Tweak $Tweak) }
     $state = Get-TuneupPowerSettingState -Tweak $Tweak
     if (-not $state.present) { return 'not-present' }
-    if ([long]$state.ac -eq [long]$Tweak.set.ac -and [long]$state.dc -eq [long]$Tweak.set.dc) { return 'applied' }
-    'not-applied'
+    # A power source the tweak leaves alone does not count.
+    $target = Get-TuneupPowerSettingTarget -Set $Tweak.set
+    if ($null -ne $target.ac -and [long]$state.ac -ne $target.ac) { return 'not-applied' }
+    if ($null -ne $target.dc -and [long]$state.dc -ne $target.dc) { return 'not-applied' }
+    'applied'
 }
 
 function Set-PowercfgTweakDesired {
@@ -195,8 +224,9 @@ function Set-PowercfgTweakDesired {
         return
     }
     $scheme = Resolve-TuneupPowerScheme -Scheme ([string]$set.scheme)
+    $target = Get-TuneupPowerSettingTarget -Set $set
     Set-TuneupPowerSettingIndex -Scheme $scheme -Subgroup ([string]$set.subgroup).ToLowerInvariant() `
-        -Setting ([string]$set.setting).ToLowerInvariant() -Ac ([long]$set.ac) -Dc ([long]$set.dc) -ReportPartial
+        -Setting ([string]$set.setting).ToLowerInvariant() -Ac $target.ac -Dc $target.dc -ReportPartial
 }
 
 function Restore-PowercfgTweakState {
@@ -206,6 +236,11 @@ function Restore-PowercfgTweakState {
         return
     }
     if (-not $State.present) { return }
+    # Only the power sources that the tweak changed are given back; the other one may have been
+    # changed since by someone else.
+    $target = Get-TuneupPowerSettingTarget -Set $Tweak.set
+    $ac = $(if ($null -ne $target.ac) { [long]$State.ac } else { $null })
+    $dc = $(if ($null -ne $target.dc) { [long]$State.dc } else { $null })
     Set-TuneupPowerSettingIndex -Scheme ([string]$State.scheme) -Subgroup ([string]$Tweak.set.subgroup).ToLowerInvariant() `
-        -Setting ([string]$Tweak.set.setting).ToLowerInvariant() -Ac ([long]$State.ac) -Dc ([long]$State.dc)
+        -Setting ([string]$Tweak.set.setting).ToLowerInvariant() -Ac $ac -Dc $dc
 }
