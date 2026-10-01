@@ -5318,8 +5318,8 @@ function Measure-TuneupSystem {
         metrics       = [pscustomobject]@{
             ramInUseMB        = [long][math]::Round(([double]$os.TotalVisibleMemorySize - [double]$os.FreePhysicalMemory) / 1024)
             processCount      = @(Get-Process).Count
-            runningServices   = @(Get-Service -ErrorAction SilentlyContinue | Where-Object { [string]$_.Status -eq 'Running' }).Count
-            enabledTasks      = @(Get-ScheduledTask -ErrorAction Stop | Where-Object { [string]$_.State -ne 'Disabled' }).Count
+            runningServices   = @(Get-Service | Where-Object { [string]$_.Status -eq 'Running' }).Count
+            enabledTasks      = @(Get-ScheduledTask | Where-Object { [string]$_.State -ne 'Disabled' }).Count
             systemDriveFreeGB = [math]::Round([double]$drive.FreeSpace / 1GB, 2)
             bootDurationMs    = $boot.milliseconds
             uptimeMinutes     = [long][math]::Floor(($now - $os.LastBootUpTime).TotalMinutes)
@@ -5410,6 +5410,18 @@ Describe 'Measurement files' {
         $list.Count | Should -Be 1
         @($warned | Where-Object { "$_" -like 'Ignoring unreadable state file *' }).Count | Should -Be 1
     }
+
+    It 'warns about a measurement file with the wrong shape instead of comparing against it' -TestCases @(
+        @{ Name = 'no metrics'; Json = '{}' }
+        @{ Name = 'a text metric'; Json = '{"metrics":{"ramInUseMB":"lots"}}' }
+        @{ Name = 'metrics that are not an object'; Json = '{"metrics":5}' }
+    ) {
+        param($Name, $Json)
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\20250101-000000.json'), $Json)
+        @(Get-TuneupMeasurementList -StateRoot $Root -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0 -Because $Name
+        @($warned | Where-Object { "$_" -like 'Ignoring unreadable state file *' }).Count | Should -Be 1 -Because $Name
+    }
 }
 
 Describe 'Machine measurements' {
@@ -5462,6 +5474,19 @@ Describe 'Machine measurements' {
         Grant-EveryoneWrite $dir
         @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0
         "$($warned[0])" | Should -Be "Ignoring untrusted state folder $dir"
+    }
+
+    It 'ignores a machine measurement file that others can write' {
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot
+        Grant-EveryoneWrite $saved.Path
+        @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0
+        @($warned | Where-Object { "$_" -like 'Ignoring untrusted state file *' }).Count | Should -Be 1
+    }
+
+    It 'keeps the runs folder when the measurements folder is added to an existing machine folder' {
+        New-TuneupRun -Machine -MachineRoot $MachineRoot | Out-Null
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot | Out-Null
+        foreach ($child in 'runs', 'measurements') { Test-Path -LiteralPath (Join-Path $MachineRoot $child) -PathType Container | Should -BeTrue -Because $child }
     }
 }
 ```
@@ -5546,6 +5571,17 @@ function Save-TuneupMeasurement {
     [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
 }
 
+# A file that parses can still be anything; comparing needs an object of numbers (or nulls).
+function Test-TuneupMeasurementShape {
+    param([AllowNull()]$Data)
+    if ($null -eq $Data -or $Data -isnot [pscustomobject] -or $Data.metrics -isnot [pscustomobject]) { return $false }
+    foreach ($property in $Data.metrics.PSObject.Properties) {
+        $value = $property.Value
+        if ($null -eq $value) { continue }
+        if ($value -isnot [int] -and $value -isnot [long] -and $value -isnot [double] -and $value -isnot [decimal]) { return $false }
+    }
+    $true
+}
 function Get-TuneupMeasurementList {
     [CmdletBinding()]
     param([string]$StateRoot, [string]$MachineRoot, [string]$UserRoot)
@@ -5580,6 +5616,10 @@ function Get-TuneupMeasurementList {
             if ($file.BaseName -cnotmatch $script:MeasurementIdPattern) { continue }
             $data = Read-TuneupTrustedJson -Path $file.FullName -Root $root.Kind
             if ($null -eq $data) { continue }
+            if (-not (Test-TuneupMeasurementShape -Data $data)) {
+                Write-Warning "Ignoring unreadable state file $($file.FullName)"
+                continue
+            }
             # A space sorts before '-', so '20250101-000000' stays ahead of '20250101-000000-02'.
             $key = $file.BaseName + ' ' + $root.Kind
             $byKey[$key] = [pscustomobject]@{ Id = $file.BaseName; Path = $file.FullName; Root = $root.Kind; Measurement = $data }
