@@ -18,3 +18,14 @@ Describe 'Blacklist' {
         }
     }
 }
+
+Describe 'Measuring guide' {
+    It 'gives the commands of the method and the LTSC edition in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'measuring.md'
+            foreach ($term in '-Measure -IdleSeconds 120', '-Compare last', '-Profile lite -Yes', 'LTSC 2024', 'reagentc /info', '-Undo last') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+}

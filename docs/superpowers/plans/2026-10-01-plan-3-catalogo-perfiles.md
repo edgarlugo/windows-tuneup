@@ -7087,7 +7087,7 @@ En cada máquina, en este orden y con PowerShell **como administrador** (así ta
 
 En la máquina A, además:
 
-4. Aplica Liviano sin preguntar. Las preguntas (`ask`) se omiten con `-Yes`; para medir el perfil completo inclúyelas por nombre:
+4. Aplica Liviano sin preguntar. Los ajustes que preguntan (`ask`) se omiten con `-Yes`; para medir el perfil completo agrégalos por nombre con `-Include <id>,<id>` (la lista está en [catalog.md](catalog.md#ajustes-que-preguntan)). Sin ellos:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\windows-tuneup\tuneup.ps1" -Profile lite -Yes
@@ -7159,7 +7159,7 @@ On each machine, in this order and with PowerShell **as administrator** (so the 
 
 On machine A, also:
 
-4. Apply Lite without questions. The questions (`ask`) are skipped with `-Yes`; to measure the whole profile, include them by name:
+4. Apply Lite without questions. The tweaks that ask (`ask`) are skipped with `-Yes`; to measure the whole profile, add them by name with `-Include <id>,<id>` (the list is in [catalog.md](catalog.md#tweaks-that-ask-first)). Without them:
 
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Program Files\windows-tuneup\tuneup.ps1" -Profile lite -Yes
