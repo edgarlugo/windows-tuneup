@@ -71,3 +71,111 @@ function Compare-TuneupMeasurement {
         [pscustomobject]@{ metric = $metric; before = $old; after = $new; delta = $delta }
     }
 }
+
+$script:MeasurementIdPattern = '^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$'
+
+function Save-TuneupMeasurement {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Measurement, [string]$StateRoot, [switch]$Machine, [string]$MachineRoot, [string]$UserRoot)
+    # Same folders and trust rules as the runs.
+    if ($StateRoot) {
+        Write-TuneupStateRootWarning
+        $kind = 'custom'
+        $root = $StateRoot
+    }
+    elseif ($Machine) {
+        if (-not (Test-TuneupAdmin)) { throw 'The machine state folder can only be written by an elevated process' }
+        $kind = 'machine'
+        $root = $(if ($MachineRoot) { $MachineRoot } else { Get-TuneupStateRoot -Machine })
+        Initialize-TuneupStateRoot -Path $root -Children @('measurements')
+    }
+    else {
+        $kind = 'user'
+        $root = $(if ($UserRoot) { $UserRoot } else { Get-TuneupStateRoot })
+    }
+    $dir = Join-Path $root 'measurements'
+    if ($kind -ne 'machine') { New-Item -ItemType Directory -Path $dir -Force -ErrorAction Stop | Out-Null }
+    $baseId = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $id = $baseId
+    $counter = 1
+    while (Test-Path -LiteralPath (Join-Path $dir "$id.json")) {
+        $counter++
+        $id = '{0}-{1:D2}' -f $baseId, $counter
+    }
+    $saved = $Measurement | Select-Object -Property *
+    $saved | Add-Member -NotePropertyName id -NotePropertyValue $id -Force
+    $path = Join-Path $dir "$id.json"
+    Save-TuneupJson -Path $path -Object $saved -Root $kind
+    [pscustomobject]@{ Id = $id; Path = $path; Root = $kind; Measurement = $saved }
+}
+
+# A file that parses can still be anything; comparing needs an object of numbers (or nulls).
+function Test-TuneupMeasurementShape {
+    param([AllowNull()]$Data)
+    if ($null -eq $Data -or $Data -isnot [pscustomobject] -or $Data.metrics -isnot [pscustomobject]) { return $false }
+    foreach ($property in $Data.metrics.PSObject.Properties) {
+        $value = $property.Value
+        if ($null -eq $value) { continue }
+        if ($value -isnot [int] -and $value -isnot [long] -and $value -isnot [double] -and $value -isnot [decimal]) { return $false }
+    }
+    $true
+}
+
+function Get-TuneupMeasurementList {
+    [CmdletBinding()]
+    param([string]$StateRoot, [string]$MachineRoot, [string]$UserRoot)
+    if ($StateRoot) {
+        Write-TuneupStateRootWarning
+        $roots = @([pscustomobject]@{ Kind = 'custom'; Path = $StateRoot })
+    }
+    else {
+        if (-not $MachineRoot) { $MachineRoot = Get-TuneupStateRoot -Machine }
+        if (-not $UserRoot) { $UserRoot = Get-TuneupStateRoot }
+        $roots = @(
+            [pscustomobject]@{ Kind = 'machine'; Path = $MachineRoot },
+            [pscustomobject]@{ Kind = 'user'; Path = $UserRoot }
+        )
+    }
+    $byKey = @{}
+    $keys = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($root in $roots) {
+        $dir = Join-Path $root.Path 'measurements'
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        if ($root.Kind -eq 'machine') {
+            $base = Split-Path -Parent $root.Path
+            $untrusted = $null
+            if (-not (Test-TuneupBaseFolder -Path $base)) { $untrusted = $base }
+            else { $untrusted = @($root.Path, $dir) | Where-Object { -not (Test-TuneupTrustedItem -Path $_) } | Select-Object -First 1 }
+            if ($untrusted) {
+                Write-Warning "Ignoring untrusted state folder $untrusted"
+                continue
+            }
+        }
+        foreach ($file in Get-ChildItem -LiteralPath $dir -Filter '*.json' -File) {
+            if ($file.BaseName -cnotmatch $script:MeasurementIdPattern) { continue }
+            $data = Read-TuneupTrustedJson -Path $file.FullName -Root $root.Kind
+            if ($null -eq $data) { continue }
+            if (-not (Test-TuneupMeasurementShape -Data $data)) {
+                Write-Warning "Ignoring unreadable state file $($file.FullName)"
+                continue
+            }
+            # A space sorts before '-', so '20250101-000000' stays ahead of '20250101-000000-02'.
+            $key = $file.BaseName + ' ' + $root.Kind
+            $byKey[$key] = [pscustomobject]@{ Id = $file.BaseName; Path = $file.FullName; Root = $root.Kind; Measurement = $data }
+            $keys.Add($key)
+        }
+    }
+    $keys.Sort([System.StringComparer]::Ordinal)
+    foreach ($key in $keys) { $byKey[$key] }
+}
+
+function Resolve-TuneupMeasurement {
+    [CmdletBinding()]
+    param([string]$StateRoot, [string]$MachineRoot, [string]$UserRoot, [Parameter(Mandatory)][string]$Id)
+    $all = @(Get-TuneupMeasurementList -StateRoot $StateRoot -MachineRoot $MachineRoot -UserRoot $UserRoot)
+    if ($Id -eq 'last') {
+        if ($all.Count) { return $all[-1] }
+        return
+    }
+    $all | Where-Object { $_.Id -eq $Id } | Select-Object -First 1
+}

@@ -107,3 +107,128 @@ Describe 'Compare-TuneupMeasurement' {
         $items[5].delta | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Measurement files' {
+    BeforeAll {
+        function New-TestMeasurement([double]$Ram) {
+            [pscustomobject]@{
+                schemaVersion = 1; takenAt = '2026-09-30T12:00:00'; idleSeconds = 0; environment = $null
+                metrics       = [pscustomobject]@{ ramInUseMB = $Ram; processCount = 100; runningServices = 100; enabledTasks = 100; systemDriveFreeGB = 50; bootDurationMs = $null; uptimeMinutes = 5 }
+                notes         = [pscustomobject]@{ bootDurationMs = 'no-event' }
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Stamp = '20260930-120000'
+    }
+
+    It 'saves a measurement with its id and finds it again' {
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root
+        $saved.Root | Should -Be 'custom'
+        $saved.Path | Should -Be (Join-Path $Root "measurements\$($saved.Id).json")
+        (Get-Content -LiteralPath $saved.Path -Raw | ConvertFrom-Json).id | Should -Be $saved.Id
+        (Resolve-TuneupMeasurement -StateRoot $Root -Id 'last').Measurement.metrics.ramInUseMB | Should -Be 5000
+        (Resolve-TuneupMeasurement -StateRoot $Root -Id $saved.Id).Path | Should -Be $saved.Path
+        Resolve-TuneupMeasurement -StateRoot $Root -Id '19990101-000000' | Should -BeNullOrEmpty
+    }
+
+    It 'gives distinct ids within the same second and resolves last to the newest' {
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+        $first = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root
+        $second = Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -StateRoot $Root
+        $first.Id | Should -Be '20260930-120000'
+        $second.Id | Should -Be '20260930-120000-02'
+        $last = Resolve-TuneupMeasurement -StateRoot $Root -Id 'last'
+        $last.Id | Should -Be '20260930-120000-02'
+        $last.Measurement.metrics.ramInUseMB | Should -Be 4000
+    }
+
+    It 'ignores files that are not measurements and warns about unreadable ones' {
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -StateRoot $Root | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\notes.json'), '{}')
+        [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\20250101-000000.json'), '{ broken')
+        $list = @(Get-TuneupMeasurementList -StateRoot $Root -WarningVariable warned -WarningAction SilentlyContinue)
+        $list.Count | Should -Be 1
+        @($warned | Where-Object { "$_" -like 'Ignoring unreadable state file *' }).Count | Should -Be 1
+    }
+
+    It 'warns about a measurement file with the wrong shape instead of comparing against it' -TestCases @(
+        @{ Name = 'no metrics'; Json = '{}' }
+        @{ Name = 'a text metric'; Json = '{"metrics":{"ramInUseMB":"lots"}}' }
+        @{ Name = 'metrics that are not an object'; Json = '{"metrics":5}' }
+    ) {
+        param($Name, $Json)
+        New-Item -ItemType Directory -Path (Join-Path $Root 'measurements') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root 'measurements\20250101-000000.json'), $Json)
+        @(Get-TuneupMeasurementList -StateRoot $Root -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0 -Because $Name
+        @($warned | Where-Object { "$_" -like 'Ignoring unreadable state file *' }).Count | Should -Be 1 -Because $Name
+    }
+}
+
+Describe 'Machine measurements' {
+    BeforeAll {
+        function New-TestMeasurement([double]$Ram) {
+            [pscustomobject]@{ schemaVersion = 1; metrics = [pscustomobject]@{ ramInUseMB = $Ram }; notes = [pscustomobject]@{} }
+        }
+    }
+
+    BeforeEach {
+        Use-CurrentUserAsTrusted
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        $script:MachineRoot = New-TestMachineRoot
+        $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Stamp = '20260930-120000'
+        Mock -ModuleName Tuneup Get-Date { $script:Stamp } -ParameterFilter { $Format -eq 'yyyyMMdd-HHmmss' }
+    }
+
+    AfterEach {
+        Reset-TestTrust
+    }
+
+    It 'saves to the protected machine folder when elevated' {
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot
+        $saved.Root | Should -Be 'machine'
+        foreach ($path in (Join-Path $MachineRoot 'measurements'), $saved.Path) {
+            (Get-Acl -LiteralPath $path).AreAccessRulesProtected | Should -BeTrue -Because $path
+        }
+        $last = Resolve-TuneupMeasurement -MachineRoot $MachineRoot -UserRoot $UserRoot -Id 'last'
+        "$($last.Id)/$($last.Root)" | Should -Be '20260930-120000/machine'
+    }
+
+    It 'needs an elevated process for the machine folder' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        { Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot } | Should -Throw '*elevated*'
+        Test-Path -LiteralPath $MachineRoot | Should -BeFalse
+    }
+
+    It 'lists the machine and user folders in id order' {
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot | Out-Null
+        $script:Stamp = '20260930-120005'
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 4000) -UserRoot $UserRoot | Out-Null
+        $list = @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot)
+        ($list | ForEach-Object { "$($_.Id)/$($_.Root)" }) -join ',' | Should -Be '20260930-120000/machine,20260930-120005/user'
+    }
+
+    It 'ignores a machine measurements folder that others can write' {
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot | Out-Null
+        $dir = Join-Path $MachineRoot 'measurements'
+        Grant-EveryoneWrite $dir
+        @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0
+        "$($warned[0])" | Should -Be "Ignoring untrusted state folder $dir"
+    }
+
+    It 'ignores a machine measurement file that others can write' {
+        $saved = Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot
+        Grant-EveryoneWrite $saved.Path
+        @(Get-TuneupMeasurementList -MachineRoot $MachineRoot -UserRoot $UserRoot -WarningVariable warned -WarningAction SilentlyContinue).Count | Should -Be 0
+        @($warned | Where-Object { "$_" -like 'Ignoring untrusted state file *' }).Count | Should -Be 1
+    }
+
+    It 'keeps the runs folder when the measurements folder is added to an existing machine folder' {
+        New-TuneupRun -Machine -MachineRoot $MachineRoot | Out-Null
+        Save-TuneupMeasurement -Measurement (New-TestMeasurement 5000) -Machine -MachineRoot $MachineRoot | Out-Null
+        foreach ($child in 'runs', 'measurements') { Test-Path -LiteralPath (Join-Path $MachineRoot $child) -PathType Container | Should -BeTrue -Because $child }
+    }
+}
