@@ -112,3 +112,80 @@ Describe 'Corrupt component groups' {
         ($groups | ForEach-Object { "$($_.name):$($_.files)" }) -join ',' | Should -Be 'microsoft-windows-codeintegrity:1'
     }
 }
+
+Describe 'CBS log files' {
+    BeforeEach {
+        $script:Folder = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        $script:Since = [datetime]'2026-09-30 10:00:00'
+        $script:Current = Join-Path $Folder 'CBS.log'
+    }
+
+    It 'reads the logs rotated since the start and then CBS.log' {
+        $old = Join-Path $Folder 'CbsPersist_20260929000000.log'
+        [System.IO.File]::WriteAllText($old, "2026-09-30 10:00:30, Info CBS old`r`n")
+        (Get-Item -LiteralPath $old).LastWriteTime = $Since.AddDays(-1)
+        $rotated = Join-Path $Folder 'CbsPersist_20260930100500.log'
+        [System.IO.File]::WriteAllText($rotated, "2026-09-30 09:59:00, Info CBS before`r`n2026-09-30 10:01:00, Info CBS rotated`r`n")
+        (Get-Item -LiteralPath $rotated).LastWriteTime = $Since.AddMinutes(5)
+        [System.IO.File]::WriteAllText($Current, "2026-09-30 10:06:00, Info CBS current`r`n")
+        @(Read-TuneupCbsLog -Since $Since -Folder $Folder) -join '|' |
+            Should -Be '2026-09-30 10:01:00, Info CBS rotated|2026-09-30 10:06:00, Info CBS current'
+    }
+
+    It 'reads CBS.log while another process keeps it open for writing' {
+        [System.IO.File]::WriteAllText($Current, "2026-09-30 10:06:00, Info CBS current`r`n")
+        $writer = [System.IO.FileStream]::new($Current, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::ReadWrite)
+        try {
+            @(Read-TuneupCbsLog -Since $Since -Folder $Folder).Count | Should -Be 1
+        } finally {
+            $writer.Dispose()
+        }
+    }
+
+    It 'returns nothing when there are no logs' {
+        @(Read-TuneupCbsLog -Since $Since -Folder $Folder).Count | Should -Be 0
+    }
+}
+
+Describe 'Tool output' {
+    It 'decodes UTF-16 output' {
+        $bytes = [System.Text.Encoding]::Unicode.GetBytes("Beginning system scan.`r`nVerification 100% complete.`r`n")
+        ConvertFrom-TuneupToolOutput -Bytes $bytes | Should -Be ("Beginning system scan." + [Environment]::NewLine + "Verification 100% complete.")
+    }
+
+    It 'decodes output in the OEM code page' {
+        $oem = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage)
+        ConvertFrom-TuneupToolOutput -Bytes $oem.GetBytes("Error: 87`r`n`r`nThe parameter is incorrect.`r`n") |
+            Should -Be ("Error: 87" + [Environment]::NewLine + "The parameter is incorrect.")
+    }
+
+    It 'keeps only the last 15 lines' {
+        $text = (1..20 | ForEach-Object { "line $_" }) -join "`r`n"
+        $lines = (ConvertFrom-TuneupToolOutput -Bytes ([System.Text.Encoding]::ASCII.GetBytes($text))) -split [Environment]::NewLine
+        $lines.Count | Should -Be 15
+        $lines[0] | Should -Be 'line 6'
+    }
+
+    It 'returns an empty text for no output' {
+        ConvertFrom-TuneupToolOutput -Bytes ([byte[]]@()) | Should -Be ''
+    }
+
+    It 'runs a tool and returns its exit code and output' {
+        $result = Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\cmd.exe') -Arguments @('/c', 'echo', 'hola&', 'exit', '3')
+        $result.ExitCode | Should -Be 3
+        $result.Output | Should -Be 'hola'
+    }
+
+    It 'runs sfc /scannow and DISM with English output' {
+        Mock -ModuleName Tuneup Invoke-TuneupHealthTool { [pscustomobject]@{ ExitCode = 0; Output = '' } }
+        Invoke-TuneupSfc | Out-Null
+        Invoke-TuneupDism -Operation 'RestoreHealth' | Out-Null
+        Should -Invoke Invoke-TuneupHealthTool -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $FilePath -like '*\System32\sfc.exe' -and ($Arguments -join ' ') -eq '/scannow'
+        }
+        Should -Invoke Invoke-TuneupHealthTool -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $FilePath -like '*\System32\Dism.exe' -and ($Arguments -join ' ') -eq '/Online /Cleanup-Image /RestoreHealth /English'
+        }
+    }
+}

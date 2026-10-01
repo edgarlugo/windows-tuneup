@@ -111,3 +111,71 @@ function Get-TuneupCorruptComponentGroup {
         Sort-Object -Property @{ Expression = { $_.Value }; Descending = $true }, @{ Expression = { $_.Key }; Descending = $false } |
         ForEach-Object { [pscustomobject]@{ name = $_.Key; files = $_.Value } }
 }
+
+function Get-TuneupCbsLogFile {
+    param([Parameter(Mandatory)][datetime]$Since, [string]$Folder = (Join-Path $env:SystemRoot 'Logs\CBS'))
+    # Windows moves CBS.log to CbsPersist_<time>.log when it grows, so a long scan can span both.
+    Get-ChildItem -LiteralPath $Folder -Filter 'CbsPersist_*.log' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | ForEach-Object { $_.FullName }
+    $current = Join-Path $Folder 'CBS.log'
+    if (Test-Path -LiteralPath $current -PathType Leaf) { $current }
+}
+
+function Read-TuneupCbsLog {
+    param(
+        [Parameter(Mandatory)][datetime]$Since,
+        [datetime]$Until = [datetime]::MaxValue,
+        [string]$Folder = (Join-Path $env:SystemRoot 'Logs\CBS')
+    )
+    foreach ($path in @(Get-TuneupCbsLogFile -Since $Since -Folder $Folder)) {
+        # TrustedInstaller keeps CBS.log open for writing, so it is read sharing read and write.
+        $stream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]'ReadWrite, Delete')
+        $reader = New-Object System.IO.StreamReader -ArgumentList $stream, ([System.Text.Encoding]::UTF8), $true
+        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        Select-TuneupCbsWindow -Lines @($text -split "`r?`n" | Where-Object { $_ }) -Since $Since -Until $Until
+    }
+}
+
+function ConvertFrom-TuneupToolOutput {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    if (-not $Bytes.Length) { return '' }
+    # sfc writes UTF-16 when its output is redirected; DISM writes in the OEM code page.
+    $zeros = @($Bytes | Where-Object { $_ -eq 0 }).Count
+    if ($zeros * 4 -ge $Bytes.Length) {
+        $text = [System.Text.Encoding]::Unicode.GetString($Bytes)
+    } else {
+        $text = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetString($Bytes)
+    }
+    $lines = @($text.TrimStart([char]0xFEFF) -split '[\r\n]+' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    ($lines | Select-Object -Last 15) -join [Environment]::NewLine
+}
+
+function Invoke-TuneupHealthTool {
+    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string[]]$Arguments)
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $FilePath
+    $info.Arguments = $Arguments -join ' '
+    $info.UseShellExecute = $false
+    $info.RedirectStandardOutput = $true
+    $info.CreateNoWindow = $true
+    # The raw bytes are kept and decoded afterwards: the tool picks the encoding, not the console.
+    $buffer = New-Object System.IO.MemoryStream
+    $process = [System.Diagnostics.Process]::Start($info)
+    try {
+        $process.StandardOutput.BaseStream.CopyTo($buffer)
+        $process.WaitForExit()
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Output = (ConvertFrom-TuneupToolOutput -Bytes $buffer.ToArray()) }
+    } finally {
+        $process.Dispose()
+        $buffer.Dispose()
+    }
+}
+
+function Invoke-TuneupSfc {
+    Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\sfc.exe') -Arguments @('/scannow')
+}
+
+function Invoke-TuneupDism {
+    param([Parameter(Mandatory)][ValidateSet('ScanHealth', 'RestoreHealth')][string]$Operation)
+    Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -Arguments @('/Online', '/Cleanup-Image', "/$Operation", '/English')
+}
