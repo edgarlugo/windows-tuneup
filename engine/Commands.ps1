@@ -240,12 +240,67 @@ function Invoke-TuneupPlannedApply {
     Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupJson -Path (Join-Path $run.Dir 'plan.json') -Root $run.Root -Object @(ConvertTo-TuneupPlanView -Plan $Plan) }
     $restorePoint = 'not-needed'
     if ($machineChanges) { $restorePoint = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
-    $results = @(Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupPlan -Plan $Plan -RunDir $run.Dir })
-    $report = New-TuneupApplyReport -Run $run -Results $results -RestorePoint $restorePoint -Environment $environment
+    # Ctrl+C stops the run between two tweaks (Interrupt.ps1). If it stops PowerShell itself, the
+    # finally block saves what was done; the results and the tweak in progress are kept outside the
+    # pipeline for that.
+    $results = New-Object System.Collections.Generic.List[object]
+    $progress = @{ Current = $null }
+    $trap = Enable-TuneupInterruptTrap
+    $applyArguments = @{
+        Plan          = $Plan
+        RunDir        = $run.Dir
+        Results       = $results
+        Progress      = $progress
+        StopRequested = { Test-TuneupInterruptRequested -Trap $trap }
+    }
+    $finished = $false
+    try {
+        Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupPlan @applyArguments } | Out-Null
+        $finished = $true
+    } finally {
+        Disable-TuneupInterruptTrap -Trap $trap
+        if (-not $finished) {
+            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Results $results -Progress $progress -RestorePoint $restorePoint
+        }
+    }
+    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
     $Context.Result = $report
     Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+}
+
+# Ctrl+C reached PowerShell itself while a native program ran (Interrupt.ps1), or the apply failed
+# outside any one tweak. What was done is saved as the result of the run: the tweak in progress is
+# reported as failed (its journal entry lets -Undo restore it) and the rest as interrupted. The output
+# is closed by then (a stopped pipeline), so only the host and the files can be written.
+function Save-TuneupStoppedApply {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Run,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
+        [Parameter(Mandatory)][hashtable]$Progress,
+        [Parameter(Mandatory)][string]$RestorePoint
+    )
+    $done = @($Results.ToArray())
+    $doneIds = @($done | ForEach-Object { $_.id })
+    $rest = @(foreach ($item in $Plan) {
+        if ($doneIds -contains $item.Id) { continue }
+        if ($item.Action -ne 'apply') { New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason }
+        elseif ($item.Id -eq $Progress.Current) { New-TuneupResult -Item $item -Status 'failed' -ErrorText 'stopped while it was being applied; -Undo can restore it' }
+        else { New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted' }
+    })
+    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment
+    $saved = $true
+    try {
+        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $report
+    } catch {
+        $saved = $false
+    }
+    $Context.Result = $report
+    $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
 }
 
 # The command line: checks the parameters, resolves the folders, loads the actions of -ActionsPath and

@@ -70,7 +70,7 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.partial | Should -Be 1
         $report.summary.applied | Should -Be 1
         $report.rebootRequired | Should -BeTrue
-        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors'
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors,interrupted'
     }
 
     It 'counts the tweaks that refused to change anything apart from the skipped ones' {
@@ -111,6 +111,24 @@ Describe 'Get-TuneupApplyExitCode' {
             }
         })
         Get-TuneupApplyExitCode -Report (New-TestReport $results) -ResultNotSaved:$NotSaved | Should -Be $Expected
+    }
+}
+
+Describe 'Reports of a run stopped with Ctrl+C' {
+    It 'counts the tweaks left out apart and exits with 2 when something was applied' {
+        $report = New-TestReport @((New-TestResult -Status 'applied'), (New-TestResult -Status 'skipped' -Reason 'interrupted'), $PlanSkip)
+        $report.interrupted | Should -BeTrue
+        $report.summary.interrupted | Should -Be 1
+        $report.summary.skipped | Should -Be 1
+        Get-TuneupApplyExitCode -Report $report | Should -Be 2
+        $text = (Write-TuneupApplyReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'Stopped with Ctrl\+C: 1 tweaks were not applied'
+    }
+
+    It 'exits with 1 when it stopped before the first tweak' {
+        $report = New-TestReport @((New-TestResult -Status 'skipped' -Reason 'interrupted'), $PlanSkip)
+        Get-TuneupApplyExitCode -Report $report | Should -Be 1
+        (New-TestReport @((New-TestResult -Status 'applied'))).interrupted | Should -BeFalse
     }
 }
 

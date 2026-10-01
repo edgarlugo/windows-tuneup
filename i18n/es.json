@@ -129,5 +129,8 @@
   "metric.bootDurationMs": "Duración del último arranque (ms)",
   "metric.uptimeMinutes": "Minutos desde el arranque",
   "undo.manual": "Para restaurarlo a mano, ejecuta esto en PowerShell como administrador (un ajuste del usuario no lo necesita):",
-  "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'."
+  "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'.",
+  "reason.interrupted": "no se aplicó: la corrida se detuvo con Ctrl+C",
+  "interrupted.summary": "Detenido con Ctrl+C: {0} ajustes no se aplicaron. Lo aplicado se puede deshacer con -Undo.",
+  "interrupted.saved": "Detenido con Ctrl+C. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}"
 }

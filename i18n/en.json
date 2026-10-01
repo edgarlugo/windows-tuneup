@@ -129,5 +129,8 @@
   "metric.bootDurationMs": "Last boot duration (ms)",
   "metric.uptimeMinutes": "Minutes since boot",
   "undo.manual": "To restore it by hand, run this in PowerShell as administrator (a user tweak does not need it):",
-  "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes."
+  "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes.",
+  "reason.interrupted": "not applied: the run was stopped with Ctrl+C",
+  "interrupted.summary": "Stopped with Ctrl+C: {0} tweaks were not applied. What was applied can be undone with -Undo.",
+  "interrupted.saved": "Stopped with Ctrl+C. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}"
 }

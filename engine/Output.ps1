@@ -89,9 +89,11 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment
     )
-    # A tweak left out because its backup could not be written was not done: it is counted apart.
-    # A tweak that refused to change anything is counted apart from the skips of the plan.
-    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' -and $_.refused -ne $true }).Count }
+    # A tweak left out because its backup could not be written was not done: it is counted apart, and
+    # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to
+    # change anything is counted apart from the skips of the plan.
+    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' -and $_.reason -ne 'interrupted' -and $_.refused -ne $true }).Count }
+    $interrupted = @($Results | Where-Object { $_.reason -eq 'interrupted' }).Count
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
@@ -102,6 +104,7 @@ function New-TuneupApplyReport {
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
         signOutRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.signOutRequired }).Count -gt 0)
+        interrupted    = ($interrupted -gt 0)
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
             partial       = & $count 'partial'
@@ -110,6 +113,7 @@ function New-TuneupApplyReport {
             skipped       = & $count 'skipped'
             refused       = @($Results | Where-Object { $_.status -eq 'skipped' -and $_.refused -eq $true }).Count
             journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
+            interrupted   = $interrupted
         }
         results        = $Results
     }
@@ -131,13 +135,15 @@ function Save-TuneupApplyReport {
 # backup that could not be written after some change, or an unsaved result; read the summary).
 # A tweak that refused to change anything (summary.refused) is an omission, like any skip: if
 # everything else was done, the code stays 0 and the summary and the line of that tweak say why.
-# 1: nothing was changed because the backups could not be written.
+# 1: nothing was changed because the backups could not be written, or because Ctrl+C stopped the
+# run before its first tweak. Tweaks left out by Ctrl+C after others were touched count as not done (2).
 function Get-TuneupApplyExitCode {
     param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
     $summary = $Report.summary
+    $interrupted = $(if ($summary.PSObject.Properties['interrupted']) { [int]$summary.interrupted } else { 0 })
     $touched = $summary.applied + $summary.partial + $summary.notApplied + $summary.failed
-    if ($summary.journalErrors -and -not $touched) { return 1 }
-    if ($summary.partial -or $summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
+    if (($summary.journalErrors -or $interrupted) -and -not $touched) { return 1 }
+    if ($summary.partial -or $summary.notApplied -or $summary.failed -or $summary.journalErrors -or $interrupted -or $ResultNotSaved) { return 2 }
     0
 }
 
@@ -165,8 +171,8 @@ function Write-TuneupApplyReport {
             if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
             continue
         }
-        # Skips of the plan were already shown; a tweak that refused to change anything when it was
-        # applied is shown with its reason.
+        # Skips of the plan were already shown, and the tweaks left out by Ctrl+C are counted below; a
+        # tweak that refused to change anything when it was applied is shown with its reason.
         if ($result.status -eq 'skipped' -and $result.refused -ne $true) { continue }
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.status -eq 'skipped' -and $result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
@@ -177,6 +183,9 @@ function Write-TuneupApplyReport {
     $summary = $Report.summary
     Write-Host ''
     Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped, $summary.refused)
+    if ($summary.PSObject.Properties['interrupted'] -and $summary.interrupted) {
+        Write-Host (Get-TuneupText -Key 'interrupted.summary' -Format $summary.interrupted) -ForegroundColor Yellow
+    }
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
     Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }

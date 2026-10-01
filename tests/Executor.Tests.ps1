@@ -291,3 +291,39 @@ Describe 'Results that were skipped or refused' {
         $results[1].rebootRequired | Should -BeFalse
     }
 }
+
+Describe 'Invoke-TuneupPlan stopped with Ctrl+C' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'finishes the tweak in progress and leaves the rest out, without journaling them' {
+        $asked = New-Object System.Collections.Generic.List[int]
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -StopRequested { $asked.Add(1); $asked.Count -gt 1 })
+        ($results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/interrupted'
+        $asked.Count | Should -Be 2
+        @(Read-TuneupJournal -Path (Join-Path $Run.Dir 'snapshot.jsonl') | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one'
+        (Get-Item -LiteralPath $Key).GetValueNames() | Should -Not -Contain 'Two'
+    }
+
+    It 'changes nothing when it is asked to stop before the first tweak' {
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -StopRequested { $true })
+        ($results | ForEach-Object { $_.reason }) -join ',' | Should -Be 'interrupted,interrupted'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'adds every result to -Results and clears -Progress after each tweak' {
+        $list = New-Object System.Collections.Generic.List[object]
+        $progress = @{ Current = 'stale' }
+        # The failure tells which tweak -Progress named while it was being applied.
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw "current=$($progress.Current)" } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -Results $list -Progress $progress | Out-Null
+        ($list | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one,test.two'
+        $list[0].error | Should -Be 'current=test.one'
+        $progress.Current | Should -BeNullOrEmpty
+    }
+}
