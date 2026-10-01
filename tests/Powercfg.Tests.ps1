@@ -13,9 +13,9 @@ BeforeAll {
 
 Describe 'powercfg output' {
     It 'reads the GUIDs in lowercase whatever the language' {
-        @(Get-TuneupGuidList -Text $ActiveBalanced) -join ',' | Should -Be $Balanced
-        @(Get-TuneupGuidList -Text $BothSchemes) -join ',' | Should -Be "$Balanced,$High"
-        @(Get-TuneupGuidList -Text 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE') -join '' | Should -Be 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        @(Get-TuneupGuidList -Text $ActiveBalanced) -join ',' | Should -BeExactly $Balanced
+        @(Get-TuneupGuidList -Text $BothSchemes) -join ',' | Should -BeExactly "$Balanced,$High"
+        @(Get-TuneupGuidList -Text 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE') -join '' | Should -BeExactly 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         @(Get-TuneupGuidList -Text '').Count | Should -Be 0
     }
 
@@ -84,6 +84,8 @@ Describe 'Power setting' {
         $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
         $script:FailDc = $false
         $script:ActiveText = $ActiveBalanced
+        $script:ListText = $BothSchemes
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ListText } -ParameterFilter { $Arguments[0] -eq '/list' }
         Mock -ModuleName Tuneup Test-Path { $script:Keys.ContainsKey([string]$LiteralPath) } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Get-ItemProperty { $script:Keys[[string]$LiteralPath] } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ActiveText } -ParameterFilter { $Arguments[0] -eq '/getactivescheme' }
@@ -101,6 +103,48 @@ Describe 'Power setting' {
         $state.ac | Should -Be 0
         $state.dc | Should -Be 900
         Test-PowercfgTweakState -Tweak $SettingTweak | Should -Be 'applied'
+    }
+
+    It 'prefers the provisioned default over the plain one, and the value of the scheme over both' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ACSettingIndex = 1800; DCSettingIndex = 900; ProvAcSettingIndex = 30; ProvDcSettingIndex = 15 }
+        $script:Keys.Remove($UserValues)
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 30
+        $state.dc | Should -Be 15
+        $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 0
+        $state.dc | Should -Be 15
+    }
+
+    It 'chooses the source of AC and DC independently' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ACSettingIndex = 1800; DCSettingIndex = 900; ProvAcSettingIndex = 30 }
+        $script:Keys[$UserValues] = [pscustomobject]@{ DCSettingIndex = 5 }
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 30
+        $state.dc | Should -Be 5
+    }
+
+    It 'is not-present, without throwing, when a scheme that is not listed is named' {
+        $tweak = New-TestTweak -Id 'power.gone-sleep' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = '11111111-2222-3333-4444-555555555555'; subgroup = $Sleep; setting = $StandbyIdle; ac = 0; dc = 900 })
+        Test-PowercfgTweakState -Tweak $tweak | Should -Be 'not-present'
+        (Get-PowercfgTweakState -Tweak $tweak).present | Should -BeFalse
+    }
+
+    It 'says which value is not a DWORD instead of failing in a cast' -TestCases @(
+        @{ Keys = @{ ACSettingIndex = 'abc' }; Property = 'ACSettingIndex' }
+        @{ Keys = @{ ACSettingIndex = 0; DCSettingIndex = [byte[]]@(1, 2) }; Property = 'DCSettingIndex' }
+    ) {
+        param($Keys, $Property)
+        $script:Keys[$UserValues] = [pscustomobject]$Keys
+        { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw "*Cannot read $Property*not a DWORD*"
+    }
+
+    It 'says when the provisioned default is not a DWORD' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ProvAcSettingIndex = '30' }
+        $script:Keys.Remove($UserValues)
+        { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw '*ProvAcSettingIndex*not a DWORD*'
     }
 
     It 'is not applied when a value differs' {
@@ -130,6 +174,28 @@ Describe 'Power setting' {
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setacvalueindex $Balanced $Sleep $StandbyIdle 0" }
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setdcvalueindex $Balanced $Sleep $StandbyIdle 900" }
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
+    }
+
+    It 'writes AC, then DC, then activates the scheme again' {
+        $script:Calls = @()
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:Calls += $Arguments[0]; '' } -ParameterFilter { $Arguments[0] -like '/set*' }
+        Set-PowercfgTweakDesired -Tweak $SettingTweak
+        $script:Calls -join ',' | Should -Be '/setacvalueindex,/setdcvalueindex,/setactive'
+    }
+
+    It 'lowercases an explicit scheme before it is used' {
+        (Resolve-TuneupPowerScheme -Scheme '381B4222-F694-41F0-9685-FF5BB260DF2E') | Should -BeExactly $Balanced
+        (Resolve-TuneupPowerScheme -Scheme 'SCHEME_CURRENT') | Should -BeExactly $Balanced
+        $tweak = New-TestTweak -Id 'power.balanced-sleep' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = '381B4222-F694-41F0-9685-FF5BB260DF2E'; subgroup = $Sleep.ToUpperInvariant(); setting = $StandbyIdle.ToUpperInvariant(); ac = 0; dc = 900 })
+        Set-PowercfgTweakDesired -Tweak $tweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -ceq "/setacvalueindex $Balanced $Sleep $StandbyIdle 0" }
+    }
+
+    It 'activates the wanted scheme with its GUID in lowercase' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { '' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        Set-PowercfgTweakDesired -Tweak $SchemeTweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -ceq "/setactive $High" }
     }
 
     It 'does not activate a scheme that is not the active one' {
@@ -168,6 +234,12 @@ Describe 'Power setting' {
         { Restore-PowercfgTweakState -Tweak $SettingTweak -State $state } | Should -Throw '*AC power was changed*'
     }
 
+    It 'throws when a restore cannot activate the scheme again' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { throw 'powercfg /setactive failed with exit code 1: Invalid Parameters' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        $state = [pscustomobject]@{ kind = 'setting'; scheme = $Balanced; present = $true; ac = 1800; dc = 900 }
+        { Restore-PowercfgTweakState -Tweak $SettingTweak -State $state } | Should -Throw '*activating the scheme again failed*'
+    }
+
     It 'restores the scheme that was active' {
         Restore-PowercfgTweakState -Tweak $SchemeTweak -State ([pscustomobject]@{ kind = 'scheme'; active = $Balanced; exists = $true })
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
@@ -186,6 +258,8 @@ Describe 'Powercfg definition and registration' {
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'an unknown kind'; Set = @{ kind = 'plan'; scheme = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' }; Message = "invalid powercfg kind 'plan'" }
         @{ Problem = 'an alias as scheme to activate'; Set = @{ kind = 'scheme'; scheme = 'SCHEME_MIN' }; Message = 'GUID of the power scheme' }
+        @{ Problem = 'a scheme GUID with a trailing newline'; Set = @{ kind = 'scheme'; scheme = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c`n" }; Message = 'GUID of the power scheme' }
+        @{ Problem = 'a subgroup GUID with a trailing newline'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = "238c9fa8-0aad-41ed-83f4-97be242c8f20`n"; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 0 }; Message = 'set.subgroup must be a GUID' }
         @{ Problem = 'a subgroup alias'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = 'SUB_SLEEP'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 0 }; Message = 'set.subgroup must be a GUID' }
         @{ Problem = 'a value out of range'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 4294967296; dc = 0 }; Message = 'set.ac must be an integer' }
         @{ Problem = 'a value that is text'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = '900' }; Message = 'set.dc must be an integer' }

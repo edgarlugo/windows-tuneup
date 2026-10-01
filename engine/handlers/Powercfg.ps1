@@ -1,4 +1,4 @@
-$script:GuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+$script:GuidPattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z'
 $script:GuidSearch = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
 
 function Invoke-TuneupPowercfg {
@@ -52,7 +52,11 @@ function Test-TuneupPowerSchemeState {
 $script:PowerKeyRoot = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power'
 
 function ConvertTo-TuneupUInt32 {
-    param([Parameter(Mandatory)]$Value)
+    param([Parameter(Mandatory)]$Value, [Parameter(Mandatory)][string]$Description)
+    # Only a REG_DWORD is a power index; anything else is reported instead of failing in a cast.
+    if ($Value -isnot [int] -and $Value -isnot [uint32] -and $Value -isnot [long]) {
+        throw "Cannot read $($Description): the registry value is not a DWORD (it is $($Value.GetType().Name))"
+    }
     # Get-ItemProperty returns REG_DWORD values above 2147483647 as negative numbers.
     $number = [long]$Value
     if ($number -lt 0) { $number += 4294967296 }
@@ -74,15 +78,24 @@ function Get-TuneupPowerSettingIndex {
     )
     $definition = "$script:PowerKeyRoot\PowerSettings\$Subgroup\$Setting"
     if (-not (Test-Path -LiteralPath $definition)) { return [pscustomobject]@{ present = $false; ac = $null; dc = $null } }
-    # A value changed for this scheme lives under User\PowerSchemes; otherwise Windows uses the
-    # scheme default kept with the setting definition. powercfg /q hides settings marked hidden.
-    $sources = @("$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting", "$definition\DefaultPowerSchemeValues\$Scheme")
+    # For each power source, the first one that has a value wins: a value changed for this scheme
+    # under User\PowerSchemes, then the provisioned default (Prov*SettingIndex, which Windows
+    # prefers to the plain one), then the default kept with the setting definition.
+    # powercfg /q is not used: it hides the settings marked hidden.
+    $user = Get-ItemProperty -LiteralPath "$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting" -ErrorAction SilentlyContinue
+    $defaults = Get-ItemProperty -LiteralPath "$definition\DefaultPowerSchemeValues\$Scheme" -ErrorAction SilentlyContinue
+    $provisioned = @{ ACSettingIndex = 'ProvAcSettingIndex'; DCSettingIndex = 'ProvDcSettingIndex' }
     $values = @{}
     foreach ($name in 'ACSettingIndex', 'DCSettingIndex') {
-        foreach ($source in $sources) {
-            $properties = Get-ItemProperty -LiteralPath $source -ErrorAction SilentlyContinue
-            if ($null -ne $properties -and $null -ne $properties.$name) {
-                $values[$name] = ConvertTo-TuneupUInt32 -Value $properties.$name
+        $candidates = @(
+            @{ Properties = $user; Property = $name },
+            @{ Properties = $defaults; Property = $provisioned[$name] },
+            @{ Properties = $defaults; Property = $name }
+        )
+        foreach ($candidate in $candidates) {
+            if ($null -ne $candidate.Properties -and $null -ne $candidate.Properties.($candidate.Property)) {
+                $values[$name] = ConvertTo-TuneupUInt32 -Value $candidate.Properties.($candidate.Property) `
+                    -Description "$($candidate.Property) of power setting $Subgroup\$Setting in scheme $Scheme"
                 break
             }
         }
@@ -95,6 +108,10 @@ function Get-TuneupPowerSettingState {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
     $scheme = Resolve-TuneupPowerScheme -Scheme ([string]$set.scheme)
+    # A scheme that was deleted has no values to read; the active one is always listed.
+    if ([string]$set.scheme -cne 'SCHEME_CURRENT' -and @(Get-TuneupPowerSchemeList) -notcontains $scheme) {
+        return [pscustomobject]@{ kind = 'setting'; scheme = $scheme; present = $false; ac = $null; dc = $null }
+    }
     $index = Get-TuneupPowerSettingIndex -Scheme $scheme -Subgroup ([string]$set.subgroup).ToLowerInvariant() -Setting ([string]$set.setting).ToLowerInvariant()
     [pscustomobject]@{ kind = 'setting'; scheme = $scheme; present = $index.present; ac = $index.ac; dc = $index.dc }
 }

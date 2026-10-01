@@ -46,7 +46,7 @@ Este texto se copia en la Task 1 como sección 10 de la especificación.
 3. **appx.** `scope: machine`. `set: { name, storeId, action: "remove" }`: `name` es el nombre del paquete Appx (`Microsoft.BingNews`, sin comodines) y `storeId` el id de producto de la Microsoft Store (`^[0-9A-Z]{12}$`, por ejemplo `9WZDNCRFHVFW`). Estado: `{ installedUsers, currentUserHad, currentUserSid, otherUsers, provisioned, version }`. Un usuario tiene la app solo si `Get-AppxPackage -AllUsers` lo lista con `InstallState = Installed` (un paquete `Staged` no cuenta); El SID de cada usuario es el campo `Sid` de la estructura `AppxUserSecurityId` que devuelve Windows (su texto es solo el nombre del tipo). `currentUserHad` es si el SID del usuario que corre la herramienta está entre ellos, `currentUserSid` es ese SID cuando la tenía (si no, nulo) y `otherUsers` cuántos SID distintos más hay. `provisioned` viene de `Get-AppxProvisionedPackage -Online` por `DisplayName`. Las listas se piden una vez por proceso y se vuelven a pedir después de cualquier cambio. Una app que no está ni instalada ni provisionada cuenta como **aplicada** (no hay nada que quitar); nunca es `not-present`. Aplicar lee las dos listas antes de quitar nada, quita el paquete solo si algún usuario lo tiene instalado, para todos los usuarios, y lo desprovisiona; si una parte falla (incluida la lectura de la lista provisionada) después de que otra funcionó, el resultado es `partial`; si nada funcionó, `failed`. Deshacer: solo si `currentUserHad` y el `currentUserSid` guardado es el del usuario que deshace (otra cuenta no le devuelve la app a quien la perdió: cuenta como "otros usuarios"), y si el usuario actual no la tiene ya, `winget install --id <storeId> --source msstore --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity` (códigos de salida de winget aceptados como éxito: 0, `-1978335135` y `-1978335189`), con resultado `restored` y motivo `reinstalled` ("reinstalada para el usuario actual"); lo que la Store no puede devolver se informa en `detail` (`not provisioned again for new users`, `N other users not restored`). Si el usuario actual no la tenía, no se llama a winget: `restored` con motivo `installed-for-other-users` (lo tenían otros usuarios: cada uno debe reinstalarla desde la Store) o, si solo estaba provisionada, `not-reprovisioned`, siempre con la línea de winget para instalarla a mano. Si el usuario actual conservó la app y solo se perdió el provisionamiento, `restored` sin motivo y con `not provisioned again for new users` en `detail`. Un estado guardado sin `currentUserHad`/`otherUsers` se trata como una app que tenía el usuario actual. Sin winget, o si winget falla, el deshacer falla con el código de salida y la corrida queda pendiente para reintentar. winget reinstala para la cuenta que corre el deshacer: con elevación "sobre el hombro" (otra cuenta de administrador) la app queda en esa cuenta, no en la del usuario que la perdió, y el mensaje de error pide correr el deshacer desde el símbolo del sistema elevado del usuario que inició sesión. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
 4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
 5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
-6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura: `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`) y, para el que no esté, el predeterminado en `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`; si la definición `PowerSettings\<subgrupo>\<valor>` no existe, `not-present`. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`. `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer".
+6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura, por separado para CA y CC y con el primero que exista: el valor propio del plan en `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`); luego el predeterminado aprovisionado (`ProvAcSettingIndex`/`ProvDcSettingIndex`) de `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`, que Windows prefiere al simple; y por último `ACSettingIndex`/`DCSettingIndex` de esa misma clave. Si la definición `PowerSettings\<subgrupo>\<valor>` no existe, o el plan indicado por GUID no aparece en `powercfg /list`, es `not-present`. Un dato que no es DWORD da un error que nombra el valor. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`, y los 28 ajustes visibles de `powercfg /q SCHEME_CURRENT` coinciden con la lectura (5 tienen `Prov*` y difieren del valor simple: por ejemplo, apagar el disco con CA da 1200 simple y 30 efectivo). `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás (DC o volver a activar el plan) falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer". Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan; el estado leído es el del plan, no el que la directiva fuerza.
 7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
 9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
@@ -122,7 +122,7 @@ secciones anteriores, manda esta.
 3. **appx.** `scope: machine`. `set: { name, storeId, action: "remove" }`: `name` es el nombre del paquete Appx (`Microsoft.BingNews`, sin comodines) y `storeId` el id de producto de la Microsoft Store (`^[0-9A-Z]{12}$`, por ejemplo `9WZDNCRFHVFW`). Estado: `{ installedUsers, currentUserHad, currentUserSid, otherUsers, provisioned, version }`. Un usuario tiene la app solo si `Get-AppxPackage -AllUsers` lo lista con `InstallState = Installed` (un paquete `Staged` no cuenta); El SID de cada usuario es el campo `Sid` de la estructura `AppxUserSecurityId` que devuelve Windows (su texto es solo el nombre del tipo). `currentUserHad` es si el SID del usuario que corre la herramienta está entre ellos, `currentUserSid` es ese SID cuando la tenía (si no, nulo) y `otherUsers` cuántos SID distintos más hay. `provisioned` viene de `Get-AppxProvisionedPackage -Online` por `DisplayName`. Las listas se piden una vez por proceso y se vuelven a pedir después de cualquier cambio. Una app que no está ni instalada ni provisionada cuenta como **aplicada** (no hay nada que quitar); nunca es `not-present`. Aplicar lee las dos listas antes de quitar nada, quita el paquete solo si algún usuario lo tiene instalado, para todos los usuarios, y lo desprovisiona; si una parte falla (incluida la lectura de la lista provisionada) después de que otra funcionó, el resultado es `partial`; si nada funcionó, `failed`. Deshacer: solo si `currentUserHad` y el `currentUserSid` guardado es el del usuario que deshace (otra cuenta no le devuelve la app a quien la perdió: cuenta como "otros usuarios"), y si el usuario actual no la tiene ya, `winget install --id <storeId> --source msstore --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity` (códigos de salida de winget aceptados como éxito: 0, `-1978335135` y `-1978335189`), con resultado `restored` y motivo `reinstalled` ("reinstalada para el usuario actual"); lo que la Store no puede devolver se informa en `detail` (`not provisioned again for new users`, `N other users not restored`). Si el usuario actual no la tenía, no se llama a winget: `restored` con motivo `installed-for-other-users` (lo tenían otros usuarios: cada uno debe reinstalarla desde la Store) o, si solo estaba provisionada, `not-reprovisioned`, siempre con la línea de winget para instalarla a mano. Si el usuario actual conservó la app y solo se perdió el provisionamiento, `restored` sin motivo y con `not provisioned again for new users` en `detail`. Un estado guardado sin `currentUserHad`/`otherUsers` se trata como una app que tenía el usuario actual. Sin winget, o si winget falla, el deshacer falla con el código de salida y la corrida queda pendiente para reintentar. winget reinstala para la cuenta que corre el deshacer: con elevación "sobre el hombro" (otra cuenta de administrador) la app queda en esa cuenta, no en la del usuario que la perdió, y el mensaje de error pide correr el deshacer desde el símbolo del sistema elevado del usuario que inició sesión. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
 4. **capability.** `set: { name: "<Nombre~~~~Versión>", state: "Installed"|"NotPresent" }`. Los estados pendientes cuentan hacia donde van (`InstallPending` = instalada; `UninstallPending`, `Staged`, `Removed` = no presente). Cualquier otro estado (`PartiallyInstalled`, `Superseded`, `Resolved`, uno desconocido o vacío) no se interpreta como ninguno de los dos: se informa `not-present` y no se toca. La lista de capacidades se pide una vez por proceso y se vuelve a pedir después de cada cambio. Deshacer vuelve a agregarla, lo que necesita Windows Update o un origen de características a petición; si falla, el error lo dice. `RestartNeeded` → `rebootRequired`.
 5. **feature.** `set: { name, state: "Enabled"|"Disabled" }`. Se usa `-NoRestart` y nunca `-All` ni `-Remove` (reversa exacta). `DisabledWithPayloadRemoved` y `DisablePending` cuentan como deshabilitada; `EnablePending`, como habilitada. Cualquier otro estado (`PartiallyInstalled`, `Superseded`, uno desconocido o vacío) se informa `not-present` y no se toca. Misma caché que `capability`. `RestartNeeded` → `rebootRequired`. Sin `-All`, deshabilitar una característica deshabilita también las que dependen de ella y deshacer solo vuelve a habilitar esa: el catálogo no debe incluir características padre cuyo deshabilitar arrastre a otras; la reversa exacta solo vale para características hoja.
-6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura: `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`) y, para el que no esté, el predeterminado en `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`; si la definición `PowerSettings\<subgrupo>\<valor>` no existe, `not-present`. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`. `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer".
+6. **powercfg.** Dos clases según `set.kind`. `scheme`: `{ kind, scheme: <GUID> }`; el estado es el GUID del plan activo, leído con `powercfg /getactivescheme` tomando solo el GUID con una expresión regular (las palabras dependen del idioma de Windows); un plan que no aparece en `powercfg /list` es `not-present`. `setting`: `{ kind, scheme: "SCHEME_CURRENT"|<GUID>, subgroup: <GUID>, setting: <GUID>, ac, dc }`, con `ac`/`dc` enteros de 0 a 4294967295. Subgrupo y valor van como GUID: el valor actual se lee del registro y los alias de `powercfg` no sirven para eso. Lectura, por separado para CA y CC y con el primero que exista: el valor propio del plan en `HKLM\SYSTEM\CurrentControlSet\Control\Power\User\PowerSchemes\<plan>\<subgrupo>\<valor>` (`ACSettingIndex`/`DCSettingIndex`); luego el predeterminado aprovisionado (`ProvAcSettingIndex`/`ProvDcSettingIndex`) de `...\Control\Power\PowerSettings\<subgrupo>\<valor>\DefaultPowerSchemeValues\<plan>`, que Windows prefiere al simple; y por último `ACSettingIndex`/`DCSettingIndex` de esa misma clave. Si la definición `PowerSettings\<subgrupo>\<valor>` no existe, o el plan indicado por GUID no aparece en `powercfg /list`, es `not-present`. Un dato que no es DWORD da un error que nombra el valor. Verificado en este equipo: Equilibrado / Suspender tras da AC 0 (valor propio) y DC 1800 = `0x708`, igual que `powercfg /q`, y los 28 ajustes visibles de `powercfg /q SCHEME_CURRENT` coinciden con la lectura (5 tienen `Prov*` y difieren del valor simple: por ejemplo, apagar el disco con CA da 1200 simple y 30 efectivo). `powercfg /q` no se usa para leer porque omite los valores con atributo oculto (en este equipo `SUB_BUTTONS LIDACTION` sale vacío). `SCHEME_CURRENT` se resuelve al GUID en el momento de leer y el diario guarda ese GUID, así que deshacer vuelve al mismo plan aunque después se active otro. Se escribe con `powercfg /setacvalueindex` y `/setdcvalueindex`, más `/setactive` si es el plan activo; si AC se escribió y lo demás (DC o volver a activar el plan) falló, `partial`. La reversa devuelve el mismo valor efectivo (si antes regía el predeterminado, queda escrito como valor propio del plan). Un plan personalizado sin valor propio ni predeterminado da "no se pudo leer". Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan; el estado leído es el del plan, no el que la directiva fuerza.
 7. **action.** `set: { script: "<nombre-en-kebab>" }` → `actions/<nombre>.ps1` define `Get-<Pascal>ActionState`, `Test-<Pascal>ActionState`, `Set-<Pascal>ActionDesired` y `Restore-<Pascal>ActionState` (mismo contrato que los manejadores; `fixture-toggle` → `FixtureToggle`). El cargador **no ejecuta** el archivo: lo analiza y solo acepta definiciones de funciones con bloque `param()` cuyo nombre lleve `-<Pascal>Action`, así una acción no puede reemplazar funciones del motor ni correr código al cargarse. Las acciones de `actions/` se cargan al importar el módulo; `-ActionsPath <carpeta>` (solo pruebas y desarrollo, como `-StateRoot`) agrega otra carpeta. El catálogo valida que la acción esté cargada. El Plan 2 solo trae una acción de prueba en `tests/fixtures/actions`; las reales llegan en el Plan 3.
 8. **Carpeta de usuario.** Sigue aceptando solo ajustes de registro `HKCU` (`Test-TuneupUserScopedTweak` no cambia). Todos los tipos nuevos exigen `scope: machine`, así que se aplican y deshacen elevados y su diario va a la carpeta de máquina.
 9. **Estado que solo se lee elevado.** `appx`, `capability` y `feature` no se pueden leer sin administrador (verificado: `Get-AppxPackage -AllUsers` da "Acceso denegado" y los cmdlets de DISM "La operación solicitada requiere elevación"). Sin elevar, el plan los muestra como cambios por aplicar con la nota `unverified-needs-admin` (se comprueban al aplicar, que de todos modos exige administrador) y `-Status` los informa como `needs-admin`, en vez de "no se pudo leer". Por eso el `reason` de un elemento del plan en `-Json` puede no ser nulo aunque el elemento se aplique (por ejemplo `unverified-needs-admin`).
@@ -2718,9 +2718,9 @@ BeforeAll {
 
 Describe 'powercfg output' {
     It 'reads the GUIDs in lowercase whatever the language' {
-        @(Get-TuneupGuidList -Text $ActiveBalanced) -join ',' | Should -Be $Balanced
-        @(Get-TuneupGuidList -Text $BothSchemes) -join ',' | Should -Be "$Balanced,$High"
-        @(Get-TuneupGuidList -Text 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE') -join '' | Should -Be 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+        @(Get-TuneupGuidList -Text $ActiveBalanced) -join ',' | Should -BeExactly $Balanced
+        @(Get-TuneupGuidList -Text $BothSchemes) -join ',' | Should -BeExactly "$Balanced,$High"
+        @(Get-TuneupGuidList -Text 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE') -join '' | Should -BeExactly 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
         @(Get-TuneupGuidList -Text '').Count | Should -Be 0
     }
 
@@ -2877,6 +2877,8 @@ Describe 'Power setting' {
         $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
         $script:FailDc = $false
         $script:ActiveText = $ActiveBalanced
+        $script:ListText = $BothSchemes
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ListText } -ParameterFilter { $Arguments[0] -eq '/list' }
         Mock -ModuleName Tuneup Test-Path { $script:Keys.ContainsKey([string]$LiteralPath) } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Get-ItemProperty { $script:Keys[[string]$LiteralPath] } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ActiveText } -ParameterFilter { $Arguments[0] -eq '/getactivescheme' }
@@ -2894,6 +2896,48 @@ Describe 'Power setting' {
         $state.ac | Should -Be 0
         $state.dc | Should -Be 900
         Test-PowercfgTweakState -Tweak $SettingTweak | Should -Be 'applied'
+    }
+
+    It 'prefers the provisioned default over the plain one, and the value of the scheme over both' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ACSettingIndex = 1800; DCSettingIndex = 900; ProvAcSettingIndex = 30; ProvDcSettingIndex = 15 }
+        $script:Keys.Remove($UserValues)
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 30
+        $state.dc | Should -Be 15
+        $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 0
+        $state.dc | Should -Be 15
+    }
+
+    It 'chooses the source of AC and DC independently' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ACSettingIndex = 1800; DCSettingIndex = 900; ProvAcSettingIndex = 30 }
+        $script:Keys[$UserValues] = [pscustomobject]@{ DCSettingIndex = 5 }
+        $state = Get-PowercfgTweakState -Tweak $SettingTweak
+        $state.ac | Should -Be 30
+        $state.dc | Should -Be 5
+    }
+
+    It 'is not-present, without throwing, when a scheme that is not listed is named' {
+        $tweak = New-TestTweak -Id 'power.gone-sleep' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = '11111111-2222-3333-4444-555555555555'; subgroup = $Sleep; setting = $StandbyIdle; ac = 0; dc = 900 })
+        Test-PowercfgTweakState -Tweak $tweak | Should -Be 'not-present'
+        (Get-PowercfgTweakState -Tweak $tweak).present | Should -BeFalse
+    }
+
+    It 'says which value is not a DWORD instead of failing in a cast' -TestCases @(
+        @{ Keys = @{ ACSettingIndex = 'abc' }; Property = 'ACSettingIndex' }
+        @{ Keys = @{ ACSettingIndex = 0; DCSettingIndex = [byte[]]@(1, 2) }; Property = 'DCSettingIndex' }
+    ) {
+        param($Keys, $Property)
+        $script:Keys[$UserValues] = [pscustomobject]$Keys
+        { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw "*Cannot read $Property*not a DWORD*"
+    }
+
+    It 'says when the provisioned default is not a DWORD' {
+        $script:Keys[$Defaults] = [pscustomobject]@{ ProvAcSettingIndex = '30' }
+        $script:Keys.Remove($UserValues)
+        { Get-PowercfgTweakState -Tweak $SettingTweak } | Should -Throw '*ProvAcSettingIndex*not a DWORD*'
     }
 
     It 'is not applied when a value differs' {
@@ -2923,6 +2967,28 @@ Describe 'Power setting' {
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setacvalueindex $Balanced $Sleep $StandbyIdle 0" }
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setdcvalueindex $Balanced $Sleep $StandbyIdle 900" }
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
+    }
+
+    It 'writes AC, then DC, then activates the scheme again' {
+        $script:Calls = @()
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:Calls += $Arguments[0]; '' } -ParameterFilter { $Arguments[0] -like '/set*' }
+        Set-PowercfgTweakDesired -Tweak $SettingTweak
+        $script:Calls -join ',' | Should -Be '/setacvalueindex,/setdcvalueindex,/setactive'
+    }
+
+    It 'lowercases an explicit scheme before it is used' {
+        (Resolve-TuneupPowerScheme -Scheme '381B4222-F694-41F0-9685-FF5BB260DF2E') | Should -BeExactly $Balanced
+        (Resolve-TuneupPowerScheme -Scheme 'SCHEME_CURRENT') | Should -BeExactly $Balanced
+        $tweak = New-TestTweak -Id 'power.balanced-sleep' -Type 'powercfg' -Scope 'machine' `
+            -Set ([pscustomobject]@{ kind = 'setting'; scheme = '381B4222-F694-41F0-9685-FF5BB260DF2E'; subgroup = $Sleep.ToUpperInvariant(); setting = $StandbyIdle.ToUpperInvariant(); ac = 0; dc = 900 })
+        Set-PowercfgTweakDesired -Tweak $tweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -ceq "/setacvalueindex $Balanced $Sleep $StandbyIdle 0" }
+    }
+
+    It 'activates the wanted scheme with its GUID in lowercase' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { '' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        Set-PowercfgTweakDesired -Tweak $SchemeTweak
+        Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -ceq "/setactive $High" }
     }
 
     It 'does not activate a scheme that is not the active one' {
@@ -2961,6 +3027,12 @@ Describe 'Power setting' {
         { Restore-PowercfgTweakState -Tweak $SettingTweak -State $state } | Should -Throw '*AC power was changed*'
     }
 
+    It 'throws when a restore cannot activate the scheme again' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { throw 'powercfg /setactive failed with exit code 1: Invalid Parameters' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        $state = [pscustomobject]@{ kind = 'setting'; scheme = $Balanced; present = $true; ac = 1800; dc = 900 }
+        { Restore-PowercfgTweakState -Tweak $SettingTweak -State $state } | Should -Throw '*activating the scheme again failed*'
+    }
+
     It 'restores the scheme that was active' {
         Restore-PowercfgTweakState -Tweak $SchemeTweak -State ([pscustomobject]@{ kind = 'scheme'; active = $Balanced; exists = $true })
         Should -Invoke Invoke-TuneupPowercfg -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -eq "/setactive $Balanced" }
@@ -2979,6 +3051,8 @@ Describe 'Powercfg definition and registration' {
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'an unknown kind'; Set = @{ kind = 'plan'; scheme = '8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c' }; Message = "invalid powercfg kind 'plan'" }
         @{ Problem = 'an alias as scheme to activate'; Set = @{ kind = 'scheme'; scheme = 'SCHEME_MIN' }; Message = 'GUID of the power scheme' }
+        @{ Problem = 'a scheme GUID with a trailing newline'; Set = @{ kind = 'scheme'; scheme = "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c`n" }; Message = 'GUID of the power scheme' }
+        @{ Problem = 'a subgroup GUID with a trailing newline'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = "238c9fa8-0aad-41ed-83f4-97be242c8f20`n"; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 0 }; Message = 'set.subgroup must be a GUID' }
         @{ Problem = 'a subgroup alias'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = 'SUB_SLEEP'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = 0 }; Message = 'set.subgroup must be a GUID' }
         @{ Problem = 'a value out of range'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 4294967296; dc = 0 }; Message = 'set.ac must be an integer' }
         @{ Problem = 'a value that is text'; Set = @{ kind = 'setting'; scheme = 'SCHEME_CURRENT'; subgroup = '238c9fa8-0aad-41ed-83f4-97be242c8f20'; setting = '29f6c1db-86da-48c5-9fdb-f2b67b1f44da'; ac = 0; dc = '900' }; Message = 'set.dc must be an integer' }
@@ -3011,7 +3085,11 @@ Agregar al final de `engine/handlers/Powercfg.ps1`:
 $script:PowerKeyRoot = 'HKLM:\SYSTEM\CurrentControlSet\Control\Power'
 
 function ConvertTo-TuneupUInt32 {
-    param([Parameter(Mandatory)]$Value)
+    param([Parameter(Mandatory)]$Value, [Parameter(Mandatory)][string]$Description)
+    # Only a REG_DWORD is a power index; anything else is reported instead of failing in a cast.
+    if ($Value -isnot [int] -and $Value -isnot [uint32] -and $Value -isnot [long]) {
+        throw "Cannot read $($Description): the registry value is not a DWORD (it is $($Value.GetType().Name))"
+    }
     # Get-ItemProperty returns REG_DWORD values above 2147483647 as negative numbers.
     $number = [long]$Value
     if ($number -lt 0) { $number += 4294967296 }
@@ -3033,15 +3111,24 @@ function Get-TuneupPowerSettingIndex {
     )
     $definition = "$script:PowerKeyRoot\PowerSettings\$Subgroup\$Setting"
     if (-not (Test-Path -LiteralPath $definition)) { return [pscustomobject]@{ present = $false; ac = $null; dc = $null } }
-    # A value changed for this scheme lives under User\PowerSchemes; otherwise Windows uses the
-    # scheme default kept with the setting definition. powercfg /q hides settings marked hidden.
-    $sources = @("$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting", "$definition\DefaultPowerSchemeValues\$Scheme")
+    # For each power source, the first one that has a value wins: a value changed for this scheme
+    # under User\PowerSchemes, then the provisioned default (Prov*SettingIndex, which Windows
+    # prefers to the plain one), then the default kept with the setting definition.
+    # powercfg /q is not used: it hides the settings marked hidden.
+    $user = Get-ItemProperty -LiteralPath "$script:PowerKeyRoot\User\PowerSchemes\$Scheme\$Subgroup\$Setting" -ErrorAction SilentlyContinue
+    $defaults = Get-ItemProperty -LiteralPath "$definition\DefaultPowerSchemeValues\$Scheme" -ErrorAction SilentlyContinue
+    $provisioned = @{ ACSettingIndex = 'ProvAcSettingIndex'; DCSettingIndex = 'ProvDcSettingIndex' }
     $values = @{}
     foreach ($name in 'ACSettingIndex', 'DCSettingIndex') {
-        foreach ($source in $sources) {
-            $properties = Get-ItemProperty -LiteralPath $source -ErrorAction SilentlyContinue
-            if ($null -ne $properties -and $null -ne $properties.$name) {
-                $values[$name] = ConvertTo-TuneupUInt32 -Value $properties.$name
+        $candidates = @(
+            @{ Properties = $user; Property = $name },
+            @{ Properties = $defaults; Property = $provisioned[$name] },
+            @{ Properties = $defaults; Property = $name }
+        )
+        foreach ($candidate in $candidates) {
+            if ($null -ne $candidate.Properties -and $null -ne $candidate.Properties.($candidate.Property)) {
+                $values[$name] = ConvertTo-TuneupUInt32 -Value $candidate.Properties.($candidate.Property) `
+                    -Description "$($candidate.Property) of power setting $Subgroup\$Setting in scheme $Scheme"
                 break
             }
         }
@@ -3054,6 +3141,10 @@ function Get-TuneupPowerSettingState {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
     $scheme = Resolve-TuneupPowerScheme -Scheme ([string]$set.scheme)
+    # A scheme that was deleted has no values to read; the active one is always listed.
+    if ([string]$set.scheme -cne 'SCHEME_CURRENT' -and @(Get-TuneupPowerSchemeList) -notcontains $scheme) {
+        return [pscustomobject]@{ kind = 'setting'; scheme = $scheme; present = $false; ac = $null; dc = $null }
+    }
     $index = Get-TuneupPowerSettingIndex -Scheme $scheme -Subgroup ([string]$set.subgroup).ToLowerInvariant() -Setting ([string]$set.setting).ToLowerInvariant()
     [pscustomobject]@{ kind = 'setting'; scheme = $scheme; present = $index.present; ac = $index.ac; dc = $index.dc }
 }
@@ -5737,6 +5828,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleS
   `-Json` for automation: a single JSON document on standard output, camelCase keys, `warnings` (warnings are carried inside the document) and `requiresAdmin` in the plan. To apply without asking use `-Yes`.
 - Códigos de salida: 0 (todo hecho), 2 (no todo se completó: algún ajuste parcial, fallido o sin efecto; leer el resumen), 1 (abortado antes de cambiar nada; al deshacer, nada se restauró). En `-Health`: 0 sin problemas, 2 quedan problemas o no se pudo confirmar, 1 sin administrador.
   Exit codes: 0 (everything done), 2 (not everything was completed: some tweak was partial, failed or had no effect; read the summary), 1 (aborted before changing anything; for undo, nothing was restored). For `-Health`: 0 no problems, 2 problems remain or could not be confirmed, 1 not elevated.
+- Ajustes de energía (`powercfg`): el estado se lee del registro (valor del plan, luego el predeterminado aprovisionado `Prov*SettingIndex`, luego el simple), igual que `powercfg /q`. Limitación conocida: los valores impuestos por directiva de grupo (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) no se detectan.
+  Power settings (`powercfg`): the state is read from the registry (the scheme's own value, then the provisioned default `Prov*SettingIndex`, then the plain one), the same as `powercfg /q`. Known limitation: values enforced by group policy (`HKLM\SOFTWARE\Policies\Microsoft\Power\PowerSettings`) are not detected.
 - Idioma con `-Lang es|en`.
   Language with `-Lang es|en`.
 
