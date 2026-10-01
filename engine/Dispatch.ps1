@@ -3,10 +3,11 @@
 # Set-<Name>TweakDesired, Restore-<Name>TweakState and Test-<Name>TweakDefinition (the catalog
 # check of its set block). ReadNeedsAdmin: reading the state needs an elevated process.
 $script:TuneupHandlers = [ordered]@{
-    registry = [pscustomobject]@{ Name = 'Registry'; ReadNeedsAdmin = $false }
-    service  = [pscustomobject]@{ Name = 'Service'; ReadNeedsAdmin = $false }
-    task     = [pscustomobject]@{ Name = 'Task'; ReadNeedsAdmin = $false }
-    appx     = [pscustomobject]@{ Name = 'Appx'; ReadNeedsAdmin = $true }
+    registry   = [pscustomobject]@{ Name = 'Registry'; ReadNeedsAdmin = $false }
+    service    = [pscustomobject]@{ Name = 'Service'; ReadNeedsAdmin = $false }
+    task       = [pscustomobject]@{ Name = 'Task'; ReadNeedsAdmin = $false }
+    appx       = [pscustomobject]@{ Name = 'Appx'; ReadNeedsAdmin = $true }
+    capability = [pscustomobject]@{ Name = 'Capability'; ReadNeedsAdmin = $true }
 }
 
 function Get-TuneupHandlerType {
