@@ -41,3 +41,45 @@ Describe 'privacy catalog' {
         @($required.os.editions) -join ',' | Should -Be 'Pro,Enterprise,Education'
     }
 }
+
+Describe 'ads catalog' {
+    It 'ships the ads tweaks in this order' {
+        $expected = @(
+            'ads.start-suggestions',
+            'ads.start-system-pane',
+            'ads.start-recommendations',
+            'ads.start-account-notifications',
+            'ads.tips-and-tricks',
+            'ads.welcome-experience',
+            'ads.settings-suggestions-1',
+            'ads.settings-suggestions-2',
+            'ads.settings-suggestions-3',
+            'ads.finish-setup-prompts',
+            'ads.sync-provider-notifications',
+            'ads.silent-installed-apps',
+            'ads.suggested-notifications',
+            'ads.phone-link-suggestions',
+            'ads.backup-reminders',
+            'ads.start-phone-link',
+            'ads.lockscreen-tips',
+            'ads.lockscreen-overlay',
+            'ads.consumer-features',
+            'ads.settings-home-365',
+            'ads.start-hide-recommended-policy',
+            'ads.start-recent-files-off',
+            'ads.start-recent-apps-off',
+            'ads.start-most-used-off',
+            'ads.bing-search-off',
+            'ads.search-box-suggestions-off',
+            'ads.search-highlights-off',
+            'ads.search-history-off'
+        ) -join ','
+        Get-CategoryId 'ads' | Should -Be $expected
+    }
+
+    It 'declares the policies that only Enterprise and Education honor' {
+        foreach ($id in 'ads.consumer-features', 'ads.start-hide-recommended-policy') {
+            @((Get-CategoryTweak 'ads' | Where-Object { $_.id -eq $id }).os.editions) -join ',' | Should -Be 'Enterprise,Education' -Because $id
+        }
+    }
+}
