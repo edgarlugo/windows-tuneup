@@ -2270,7 +2270,7 @@ function Save-TuneupStoppedApply {
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) -ForegroundColor Yellow }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
 }
 ```
 
@@ -2722,7 +2722,7 @@ function Save-TuneupStoppedApply {
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) -ForegroundColor Yellow }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
 }
 ```
 
@@ -3075,16 +3075,16 @@ function Write-TuneupPreflight {
 function Request-TuneupSystemRestore {
     param([Parameter(Mandatory)]$Io)
     if (-not (Read-TuneupConfirmation -Io $Io -Prompt (Get-TuneupText -Key 'preflight.enableRestore' -Format (Get-TuneupSystemDrive)))) {
-        Write-Host (Get-TuneupText -Key 'preflight.restoreKeptOff')
+        Write-TuneupIoLine -Io $Io -Text (Get-TuneupText -Key 'preflight.restoreKeptOff')
         return $false
     }
     try {
         Enable-TuneupSystemRestore
     } catch {
-        Write-Host (Get-TuneupText -Key 'preflight.restoreEnableFailed' -Format $_.Exception.Message) -ForegroundColor Red
+        Write-TuneupIoLine -Io $Io -Text (Get-TuneupText -Key 'preflight.restoreEnableFailed' -Format $_.Exception.Message)
         return $false
     }
-    Write-Host (Get-TuneupText -Key 'preflight.restoreEnabled')
+    Write-TuneupIoLine -Io $Io -Text (Get-TuneupText -Key 'preflight.restoreEnabled')
     $true
 }
 ```
@@ -3358,7 +3358,7 @@ function Save-TuneupStoppedApply {
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) -ForegroundColor Yellow }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
 }
 ```
 
@@ -3536,7 +3536,7 @@ Describe 'Re-applying what drifted' {
         $human = New-TestContext
         $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 6>&1 | Out-String)
         $text | Should -Match 'Tweaks applied by windows-tuneup:'
-        $text | Should -Match 'Nothing to apply again: Windows reverted no tweak.'
+        $human.Io.Output -join "`n" | Should -Match 'Nothing to apply again: Windows reverted no tweak.'
         $human.ExitCode | Should -Be 0
     }
 
@@ -3797,7 +3797,7 @@ function Invoke-TuneupReapply {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$PlanOnly, [switch]$Yes)
     $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Sort-Object -Unique)
     if (-not $drifted.Count -and -not $Context.Json) {
-        Write-Host (Get-TuneupText -Key 'reapply.none')
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'reapply.none')
         $Context.ExitCode = 0
         return
     }
@@ -3978,7 +3978,7 @@ function Save-TuneupStoppedApply {
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
-    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) -ForegroundColor Yellow }
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
 }
 ```
 
