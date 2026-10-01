@@ -11,7 +11,7 @@
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\GameBar", "name": "AutoGameModeEnabled", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/en-us/previous-versions/windows/desktop/gamemode/game-mode-portal", "https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/customize-power-slider"]
+      "sources": ["https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-windows-11", "https://github.com/farag2/Sophia-Script-for-Windows/blob/main/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
     },
     {
       "id": "gaming.game-dvr-off",
@@ -50,7 +50,7 @@
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", "name": "HistoricalCaptureEnabled", "kind": "DWord", "value": 0 },
       "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-applicationmanagement"]
+      "sources": ["https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-windows-11", "https://github.com/farag2/Sophia-Script-for-Windows/blob/main/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
     },
     {
       "id": "gaming.gamebar-controller-off",

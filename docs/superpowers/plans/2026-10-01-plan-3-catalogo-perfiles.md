@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Reemplazar el catálogo de ejemplo por el catálogo real (169 ajustes en 12 archivos, cada uno con fuente y verificado en solo lectura), con tres acciones reales (`onedrive`, `gaming-hags`, `gaming-windowed-optimizations`), los ocho perfiles de la especificación, la lista negra, las guías por objetivo, el método de medición contra LTSC y un catálogo documentado que se genera solo; más los cinco cambios pequeños del motor que el catálogo necesita (`storeId` de 14 caracteres, `requires`, `ac`/`dc` opcionales en `powercfg`, `Set` que se niega sin cambiar nada y `signOutRequired`).
+**Goal:** Reemplazar el catálogo de ejemplo por el catálogo real (166 ajustes en 12 archivos, cada uno con fuente y verificado en solo lectura), con tres acciones reales (`onedrive`, `gaming-hags`, `gaming-windowed-optimizations`), los ocho perfiles de la especificación, la lista negra, las guías por objetivo, el método de medición contra LTSC y un catálogo documentado que se genera solo; más los cinco cambios pequeños del motor que el catálogo necesita (`storeId` de 14 caracteres, `requires`, `ac`/`dc` opcionales en `powercfg`, `Set` que se niega sin cambiar nada y `signOutRequired`).
 
 **Architecture:** El motor no cambia de forma: los cambios del motor (Tasks 2 a 6) son extensiones de los validadores (`Test-<Tipo>TweakDefinition` y `Test-TuneupTweak`), del planificador (un motivo nuevo), del manejador `powercfg`, de `New-TuneupOutcome` y del ejecutor. El catálogo vive en `catalog/<categoría>.json` (el prefijo del id es el nombre del archivo) y los perfiles en `profiles/<id>.json`. Las acciones son scripts de `actions/` que el cargador analiza sin ejecutar; cada una lee el sistema por ayudantes `<Verbo>-<Pascal>ActionHelper<Nombre>` que las pruebas simulan con `Mock -ModuleName Tuneup`. La calidad del catálogo se fija con pruebas propias (`tests/CatalogQuality.Tests.ps1`, `tests/CatalogContent.Tests.ps1`) y la documentación del catálogo se genera con `build/catalog-doc.ps1` (una prueba exige que esté al día).
 
@@ -53,7 +53,7 @@ Aprobadas antes de escribir el plan. La Task 1 las copia, resumidas, como secci�
 | # | Decisión | Dónde |
 |---|---|---|
 | 1 | `base` solo con ajustes `scope: user` (sin administrador); `services.retail-demo` pasa a `lite`; las directivas de Edge no van en `base` | Task 7 (base) y Task 22 (perfiles) |
-| 2 | Ediciones según Microsoft: `DisableWindowsConsumerFeatures` y `HideRecommendedSection` solo Enterprise/Education; `AllowTelemetry = 1` en `Policies\...\DataCollection` para Pro/Enterprise/Education; `privacy.diagnostic-data-off` (`0`) Enterprise/Education de riesgo alto; DiagTrack `medium` con `ask`; rutas no documentadas fuera | Tasks 8, 9 y 13 |
+| 2 | Ediciones según Microsoft: `DisableWindowsConsumerFeatures` y `DisableConsumerAccountStateContent` solo Enterprise/Education (`HideRecommendedSection`: el CSP de Start lo lista para Pro, Enterprise y Education); `AllowTelemetry = 1` en `Policies\...\DataCollection` para Pro/Enterprise/Education; `privacy.diagnostic-data-off` (`0`) Enterprise/Education de riesgo alto; DiagTrack `medium` con `ask`; rutas no documentadas fuera | Tasks 8, 9 y 13 |
 | 3 | Solo apps cuyo deshacer funciona; `storeId` acepta `XP` + 12; Teams nuevo incluido (nombre Appx y `storeId` verificados); `ask` para OneDrive, Teams, Outlook nuevo, Vínculo móvil, Copilot, Reproductor multimedia, Asistencia rápida, Obtener ayuda y Seguridad familiar | Tasks 2 y 21 |
 | 4a | `storeId` de 14 caracteres | Task 2 |
 | 4b | `requires` con `battery`/`no-battery` y motivo `not-applicable-hardware` | Task 3 |
@@ -72,10 +72,12 @@ Aprobadas antes de escribir el plan. La Task 1 las copia, resumidas, como secci�
 ### Decisiones tomadas al escribir el plan (además de la lista)
 
 - **Un dueño por valor de registro.** Los informes repetían algunos valores con dos ids (`DisableSearchBoxSuggestions` como `privacy.bing-search-off` y `ads.search-box-suggestions-off`; transparencia y animación de minimizar en `ui.*` y `performance.*`; inicio acelerado y segundo plano de Edge en `edge.*` y `performance.*`; la red en suspensión como `power.modern-standby-network-off-battery` y `power.standby-network-off-battery`; la app Copilot como `ai.copilot-app-remove` y `apps.copilot`; archivos ocultos y "Finalizar tarea" en `dev.*` y `ui.*`). Queda un solo id por valor (`ads.search-box-suggestions-off`, `ui.transparency-off`, `ui.window-animations-off`, `edge.startup-boost-off`, `edge.background-mode-off`, `power.standby-network-off-battery`, `apps.copilot`, `ui.show-hidden-files`, `ui.taskbar-end-task`) y una prueba impide que vuelva a pasar (salvo la pareja documentada de `AllowTelemetry`).
-- **Edge en su archivo.** Las tres directivas de Edge del informe de privacidad (`privacy.edge-*`) pasan a `edge.json` como `edge.personalization-reporting-off`, `edge.diagnostic-data-off` y `edge.feedback-off`; todas las de Edge declaran las cuatro ediciones (la documentación de Edge no las limita por edición). Inicio acelerado y segundo plano usan la clave `Edge\Recommended` (el usuario puede cambiarlas en `edge://settings`).
+- **Edge en su archivo.** Las tres directivas de Edge del informe de privacidad (`privacy.edge-*`) pasan a `edge.json` como `edge.personalization-reporting-off`, `edge.diagnostic-data-required` (`DiagnosticData = 1`, solo datos requeridos, riesgo bajo) y `edge.feedback-off`; todas las de Edge declaran las cuatro ediciones (la documentación de Edge no las limita por edición). Inicio acelerado y segundo plano usan la clave `Edge\Recommended` (el usuario puede cambiarlas en `edge://settings`).
 - **`requires` en energía:** `power.high-performance-plan` lleva `no-battery` y `power.standby-network-off-battery` lleva `battery` (y queda en Pro/Enterprise/Education, como documenta el CSP de Power). `power.usb-selective-suspend-ac-off` solo fija `ac: 0` gracias a la Task 4.
 - **`signOutRequired`** en lo que se nota al volver a iniciar sesión: animaciones y sombras del Explorador, Aero Peek, Widgets, el botón de Copilot, la aceleración del mouse (antes marcada como reinicio) y las plantillas de servicios por usuario (`CDPUserSvc`, `PimIndexMaintenanceSvc`, `UnistoreSvc`, `UserDataSvc`, antes marcadas como reinicio).
-- **`ask` adicional:** `ai.recall-snapshots-off` y `ai.recall-unavailable` (borran capturas de Recall: datos del usuario).
+- **Recall, riesgo alto:** `ai.recall-snapshots-off` y `ai.recall-unavailable` borran capturas de Recall que `deshacer` no puede devolver: `high` (solo con `-Include`, ningún perfil los incluye), con `ask: true` y el texto lo dice.
+- **Revisión del catálogo (Tasks 7 a 21):** `tasks.mare-backup` es `medium` con `ask` (también alimenta el evaluador de compatibilidad); `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.alarms-clock` y `apps.mail-calendar` preguntan; los servicios de Xbox (`XblGameSave`, `XblAuthManager`, `XboxNetApiSvc`) salen del catálogo (ya vienen en manual y deshabilitarlos rompe el inicio de sesión de Xbox); `performance.background-apps-off` pregunta y queda solo en Windows 10; `ads.settings-home-365` solo Enterprise/Education; `ui.news-interests-win10` sin Home; `ai.notepad-ai-off` incluye Home (la documentación del Bloc de notas no limita ediciones).
+- **Una directiva bajo HKCU exige administrador.** El ACL de `HKCU\Software\Policies` y de `...\CurrentVersion\Policies` solo deja leer a un usuario estándar. Un ajuste de registro cuya ruta contiene `\Policies\` bajo HKCU sigue con `scope: user` (son datos del usuario y el diario de usuario acepta HKCU), pero `Test-TuneupTweakNeedsAdmin` (motor, `Planner.ps1`) lo trata como de administrador: el plan marca `requiresAdmin`, aplicar sin elevar se niega y `base` no puede contenerlo. Con elevación por UAC en la misma cuenta se escribe el HKCU de esa cuenta; con otra cuenta de administrador, el de esa otra cuenta (el diario guarda el SID, y deshacer solo restaura entradas de usuario de la cuenta que las hizo).
 - **Apps:** las apps "seguras" (Clipchamp, Noticias, Tiempo, Finanzas, Mensajes, Portal de realidad mixta, Películas y TV) van en `lite` y `legacy`, no en `base` (decisión 1). `apps.dev-home` avisa en `why` que deshacer instala la app que hoy ocupa su lugar en la Store ("Configuración avanzada de Windows").
 - **Placebo fuera:** `TaskbarAnimations` (sin efecto demostrado en Windows 11) no entra aunque un informe lo proponía.
 - **Fuente de `services.retail-demo`:** la guía de servicios de Windows Server no lista RetailDemo; se cita la documentación de Microsoft del modo de demostración (`UnattendEnableRetailDemo`).
@@ -111,7 +113,7 @@ windows-tuneup/
 │   └── onedrive.ps1                           Desinstala OneDrive sin borrar archivos; se niega si hay datos en riesgo
 ├── catalog/
 │   ├── privacy.json, ads.json, ui.json, ai.json, edge.json, services.json, tasks.json,
-│   │   performance.json, power.json, gaming.json, dev.json, apps.json        169 ajustes
+│   │   performance.json, power.json, gaming.json, dev.json, apps.json        166 ajustes
 │   └── notes/excluded.json                    Lo que quedó fuera y por qué (no es catálogo: no se carga)
 ├── profiles/
 │   └── base, dev, gaming, privacy, laptop, legacy, work, lite .json
@@ -155,7 +157,7 @@ Agregar al final del archivo (después del punto 12 de la sección 10, con una l
 Decisiones tomadas al armar el catálogo real, los perfiles y la documentación. Donde contradicen secciones anteriores, manda esta.
 
 1. **Base sin administrador.** `base` solo incluye ajustes `scope: user` de registro `HKCU:` que no son directivas: anuncios y sugerencias, ID de publicidad, experiencias personalizadas, encuestas de opinión y extensiones de archivo. La salud, el punto de restauración, la telemetría mínima y las apps basura de la sección 3 pasan a otros perfiles (`-Health` es un comando aparte; la telemetría va en `privacy` y `lite`; las apps en `lite` y `legacy`). `services.retail-demo` pasa a `lite`. Las directivas de Edge no van en `base` porque Edge muestra "administrado por tu organización": van en `privacy`, `lite`, `laptop` y `legacy`. `work` también se aplica sin administrador.
-2. **Ediciones según Microsoft.** Una directiva que Microsoft documenta solo para Enterprise y Education se declara así (`DisableWindowsConsumerFeatures`, `HideRecommendedSection`) y el plan la omite en las demás. Datos de diagnóstico: `privacy.diagnostic-data-required` escribe `AllowTelemetry = 1` en `HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection` (Pro, Enterprise y Education; Home ignora esa directiva); `privacy.diagnostic-data-off` (`0`) es de riesgo alto, solo Enterprise y Education y solo con `-Include` (junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor). El servicio DiagTrack es `medium` con `ask: true`. Las rutas que Microsoft no documenta (`CurrentVersion\Policies\DataCollection`) quedan fuera.
+2. **Ediciones según Microsoft.** Una directiva que Microsoft documenta solo para Enterprise y Education se declara así (`DisableWindowsConsumerFeatures`, `DisableConsumerAccountStateContent`) y el plan la omite en las demás. Datos de diagnóstico: `privacy.diagnostic-data-required` escribe `AllowTelemetry = 1` en `HKLM\SOFTWARE\Policies\Microsoft\Windows\DataCollection` (Pro, Enterprise y Education; Home ignora esa directiva); `privacy.diagnostic-data-off` (`0`) es de riesgo alto, solo Enterprise y Education y solo con `-Include` (junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor). El servicio DiagTrack es `medium` con `ask: true`. Las rutas que Microsoft no documenta (`CurrentVersion\Policies\DataCollection`) quedan fuera.
 3. **Apps solo con deshacer.** Una app entra al catálogo solo si `winget --source msstore` encuentra su `storeId` y ese producto instala el mismo paquete Appx. Las que no (Solitaire, Tips, People, Mapas, las apps 3D, Wallet...) quedan fuera y se listan en `catalog/notes/excluded.json`. El `storeId` acepta además ids de 14 caracteres `XP` + 12 (Teams nuevo `XP8BT8DW290MPQ`). Preguntan antes (`ask: true`): OneDrive, Teams, Outlook nuevo, Vínculo móvil, Copilot, Reproductor multimedia, Asistencia rápida, Obtener ayuda y Seguridad familiar.
 4. **Cambios del motor.**
    a. `storeId` acepta `^(?:[0-9A-Z]{12}|XP[0-9A-Z]{12})$`.
@@ -165,10 +167,11 @@ Decisiones tomadas al armar el catálogo real, los perfiles y la documentación.
    e. Campo opcional `signOutRequired` (booleano) en un ajuste. Cada resultado de aplicar trae `signOutRequired` y el reporte también (si algún ajuste aplicado o parcial lo pide); sin reinicio pendiente, el resumen dice "Cierra sesión y vuelve a entrar para completar los cambios". El resultado de `-Undo` todavía no lo trae.
    f. Quedan como ideas, sin implementar: tipo de registro con varios valores, `Binary` en el catálogo, el valor predeterminado `(default)` de una clave, acciones con `scope: user` y precondiciones por ajuste (por ejemplo, omitir DiagTrack si existe Defender for Endpoint).
    g. `HasBattery` es verdadero si hay batería (`Win32_Battery`) **y** el chasis es portátil (`Win32_SystemEnclosure.ChassisTypes` con 8, 9, 10, 14, 30, 31 o 32) o no hay información de chasis. Limitación: un escritorio con UPS que se informa como batería y sin información de chasis cuenta como equipo con batería; con chasis de escritorio no.
+   h. Una directiva bajo HKCU exige administrador: el ACL de `HKCU\Software\Policies` y de `HKCU\Software\Microsoft\Windows\CurrentVersion\Policies` solo deja leer a un usuario estándar. Un ajuste `registry` cuya ruta contiene `\Policies\` (sin distinguir mayúsculas) bajo `HKCU:` conserva `scope: user` (son datos del usuario y el diario de usuario acepta HKCU), pero `Test-TuneupTweakNeedsAdmin` lo cuenta como de administrador: el plan indica `requiresAdmin`, aplicar sin elevar se niega con el mismo mensaje que para un ajuste de sistema, deshacer una ejecución con una entrada así también exige elevación, y `base` no puede contenerlo. Una ejecución elevada escribe el `HKCU` de la cuenta elevada (la misma cuenta con el aviso de UAC normal; otra cuenta de administrador si se escribe su contraseña en el aviso). El diario guarda el SID y deshacer solo restaura entradas de usuario de la cuenta que las hizo.
 5. **Acciones.** `actions/onedrive.ps1` (desinstala el cliente sin borrar archivos; se niega con Known Folder Move o archivos solo en la nube; deshacer reinstala `Microsoft.OneDrive` con winget, por máquina con `/allusers` si así estaba), `actions/gaming-hags.ps1` (`HwSchMode = 2` solo si `D3DKMTQueryAdapterInfo` con `KMTQAITYPE_WDDM_2_7_CAPS` dice que algún adaptador lo admite; si no, `not-present`; pide reinicio) y `actions/gaming-windowed-optimizations.ps1` (agrega o cambia solo `SwapEffectUpgradeEnable=1` dentro de `DirectXUserGlobalSettings`, conservando los demás pares y su orden; vive en `HKCU` y se acepta `scope: machine` porque corre elevado por el mismo usuario). Quedan fuera: el modo de energía "Mejor rendimiento" (solo se cambia con una función sin documentar) y el modo de rendimiento de Defender para Dev Drive (Microsoft lo activa por defecto en un Dev Drive de confianza y no se pudo verificar sin uno).
-6. **Perfiles.** Ocho: `base`, `dev` (`desarrollo`), `gaming` (`juegos`), `privacy` (`privacidad`), `laptop` (`portatil`, `portátil`), `legacy` (`equipo-antiguo`, `antiguo`), `work` (`trabajo`) y `lite` (`liviano`). `gaming` conserva las apps, servicios y tarea de Xbox; `work` conserva Teams, Outlook nuevo, OneDrive, Microsoft 365 y Power Automate; ningún ajuste toca WSL, Hyper-V, contenedores ni `SharedAccess`. Ningún perfil incluye ajustes `high`.
+6. **Perfiles.** Ocho: `base`, `dev` (`desarrollo`), `gaming` (`juegos`), `privacy` (`privacidad`), `laptop` (`portatil`, `portátil`), `legacy` (`equipo-antiguo`, `antiguo`), `work` (`trabajo`) y `lite` (`liviano`). `gaming` conserva las apps y la tarea de Xbox (los servicios de Xbox no están en el catálogo: ya vienen en manual y deshabilitarlos rompe el inicio de sesión); `work` conserva Teams, Outlook nuevo, OneDrive, Microsoft 365 y Power Automate; ningún ajuste toca WSL, Hyper-V, contenedores ni `SharedAccess`. Ningún perfil incluye ajustes `high`.
 7. **Documentación.** `docs/{es,en}/blacklist.md` (sección 4 más las exclusiones de la investigación), `docs/{es,en}/profiles.md` (qué hace cada perfil, qué conserva, qué pregunta y si necesita administrador), `docs/{es,en}/measuring.md` (método manual en VM contra LTSC 2024) y `docs/{es,en}/catalog.md`, generado por `build/catalog-doc.ps1` desde el catálogo, los perfiles y `catalog/notes/excluded.json` (con una sección "No incluido"); una prueba falla si no está al día.
-8. **Calidad del catálogo.** Pruebas en `tests/CatalogQuality.Tests.ps1`, `tests/CatalogContent.Tests.ps1`, `tests/CatalogDoc.Tests.ps1` y `tests/Docs.Tests.ps1`: fuentes, ids y títulos únicos, un solo ajuste por valor de registro (salvo la pareja de `AllowTelemetry`), archivos UTF-8 sin BOM, `requires` válidos, scripts de acciones presentes y cargados, `base` solo de usuario sin directivas, `work` solo de usuario sin directivas, nada en `include` y `keep` a la vez, la lista negra (servicios, valores de registro, tareas y apps protegidos) y la planificación de cada perfil en Home, Pro, Enterprise administrado y Windows 10, con y sin batería.
+8. **Calidad del catálogo.** Pruebas en `tests/CatalogQuality.Tests.ps1`, `tests/CatalogContent.Tests.ps1`, `tests/CatalogDoc.Tests.ps1` y `tests/Docs.Tests.ps1`: fuentes, ids y títulos únicos, un solo ajuste por valor de registro (salvo la pareja de `AllowTelemetry`), archivos UTF-8 sin BOM, `requires` válidos, scripts de acciones presentes y cargados, `base` solo de usuario sin directivas, `work` solo de usuario sin directivas, nada en `include` y `keep` a la vez, la lista negra (servicios, valores de registro, claves de configuración de los servicios protegidos, UAC y seguridad basada en virtualización, tareas y apps que se conservan; sin distinguir mayúsculas ni comodines, con pruebas que comprueban que cada regla detecta su caso) y la planificación de cada perfil en Home, Pro, Enterprise administrado y Windows 10, con y sin batería.
 9. **Liviano frente a LTSC.** La afirmación de la sección 1 queda pendiente de medir con el método de `docs/{es,en}/measuring.md`; el README lo dice.
 ````
 
@@ -1252,51 +1255,118 @@ Describe 'Shipped catalog quality' {
 }
 
 Describe 'Blacklist guard' {
-    It 'never touches a service that the blacklist or a profile protects' {
-        $protected = @('WinDefend', 'WdNisSvc', 'Sense', 'SecurityHealthService', 'wscsvc', 'mpssvc', 'BFE', 'wuauserv', 'UsoSvc',
-            'WaaSMedicSvc', 'BITS', 'TrustedInstaller', 'CryptSvc', 'SharedAccess', 'LanmanServer', 'LanmanWorkstation', 'WerSvc', 'DPS',
-            'RmSvc', 'WpnService', 'webthreatdefsvc', 'webthreatdefusersvc', 'SysMain', 'WSearch', 'vmcompute', 'vmms', 'hns', 'HvHost',
-            'LxssManager', 'WslService', 'EventLog', 'Schedule', 'Winmgmt', 'RpcSs', 'sppsvc', 'VSS', 'swprv', 'AppIDSvc', 'Spooler')
-        $touched = @($Catalog | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
-        @($touched | Where-Object { $protected -contains $_ }) -join ', ' | Should -BeNullOrEmpty
-    }
-
-    It 'never writes a registry value of the blacklist' {
-        $names = @('SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'SystemResponsiveness', 'TcpAckFrequency', 'TCPNoDelay',
-            'DisableAntiSpyware', 'DisableRealtimeMonitoring', 'EnableLUA', 'ConsentPromptBehaviorAdmin', 'EnableSmartScreen',
-            'SmartScreenEnabled', 'NoAutoUpdate', 'DisableWindowsUpdateAccess', 'FeatureSettingsOverride', 'FeatureSettingsOverrideMask',
-            'PagingFiles', 'EnableFirewall')
-        $paths = @('\Windows Defender', '\WindowsUpdate', '\WindowsFirewall', '\Services\SharedAccess', '\Session Manager\Memory Management')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'registry' }) {
-            $names | Should -Not -Contain ([string]$tweak.set.name) -Because $tweak.id
-            foreach ($fragment in $paths) { ([string]$tweak.set.path).Contains($fragment) | Should -BeFalse -Because "$($tweak.id) writes under $fragment" }
-        }
-    }
-
-    It 'never disables a scheduled task of Defender, updates, recovery or disk health' {
-        $folders = @('\Microsoft\Windows\Windows Defender\', '\Microsoft\Windows\WindowsUpdate\', '\Microsoft\Windows\UpdateOrchestrator\',
+    BeforeAll {
+        # Every comparison ignores case: Windows paths, service names and package names do.
+        $script:ProtectedServices = @('WinDefend', 'WdNisSvc', 'Sense', 'SecurityHealthService', 'wscsvc', 'mpssvc', 'BFE', 'wuauserv', 'UsoSvc',
+            'WaaSMedicSvc', 'BITS', 'DoSvc', 'InstallService', 'AppXSvc', 'ClipSVC', 'wlidsvc', 'TrustedInstaller', 'CryptSvc', 'SharedAccess',
+            'LanmanServer', 'LanmanWorkstation', 'WerSvc', 'DPS', 'RmSvc', 'WpnService', 'webthreatdefsvc', 'webthreatdefusersvc', 'SysMain',
+            'WSearch', 'vmcompute', 'vmms', 'hns', 'HvHost', 'LxssManager', 'WslService', 'EventLog', 'Schedule', 'Winmgmt', 'RpcSs', 'sppsvc',
+            'VSS', 'swprv', 'AppIDSvc', 'Spooler')
+        $script:BlockedValueNames = @('SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'SystemResponsiveness', 'TcpAckFrequency', 'TCPNoDelay',
+            'DisableAntiSpyware', 'DisableRealtimeMonitoring', 'EnableSmartScreen', 'SmartScreenEnabled', 'NoAutoUpdate', 'DisableWindowsUpdateAccess',
+            'FeatureSettingsOverride', 'FeatureSettingsOverrideMask', 'PagingFiles', 'EnableFirewall',
+            'EnableLUA', 'ConsentPromptBehaviorAdmin', 'ConsentPromptBehaviorUser', 'PromptOnSecureDesktop', 'EnableVirtualization',
+            'FilterAdministratorToken', 'LocalAccountTokenFilterPolicy',
+            'EnableVirtualizationBasedSecurity', 'RequirePlatformSecurityFeatures', 'HypervisorEnforcedCodeIntegrity', 'LsaCfgFlags')
+        $script:BlockedPathFragments = @('\Windows Defender', '\WindowsUpdate', '\WindowsFirewall', '\Session Manager\Memory Management', '\DeviceGuard')
+        # The one tweak that is meant to turn memory integrity off (high risk, only with -Include).
+        $script:VirtualizationSecurityException = 'gaming.memory-integrity-off'
+        $script:ProtectedTaskFolders = @('\Microsoft\Windows\Windows Defender\', '\Microsoft\Windows\WindowsUpdate\', '\Microsoft\Windows\UpdateOrchestrator\',
             '\Microsoft\Windows\WaaSMedic\', '\Microsoft\Windows\SystemRestore\', '\Microsoft\Windows\RecoveryEnvironment\',
             '\Microsoft\Windows\Chkdsk\', '\Microsoft\Windows\Defrag\', '\Microsoft\Windows\Servicing\', '\Microsoft\Windows\Registry\')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'task' }) {
-            $folders | Should -Not -Contain ([string]$tweak.set.path) -Because $tweak.id
-            [string]$tweak.set.name | Should -Not -Be 'Microsoft-Windows-DiskDiagnosticResolver' -Because $tweak.id
+        $script:ProtectedTaskNames = @('Microsoft-Windows-DiskDiagnosticResolver')
+        # The apps Windows needs or that people expect to keep, plus the frameworks and sign-in components.
+        $script:ProtectedApps = @('Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsTerminal',
+            'Microsoft.WindowsCalculator', 'Microsoft.Windows.Photos', 'Microsoft.WindowsNotepad', 'Microsoft.Paint', 'Microsoft.ScreenSketch',
+            'Microsoft.WindowsCamera', 'Microsoft.SecHealthUI', 'Microsoft.MicrosoftEdge*', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxIdentityProvider',
+            'Microsoft.XboxSpeechToTextOverlay', 'Microsoft.XboxGameCallableUI', 'MicrosoftWindows.Client.CoreAI', 'MicrosoftWindows.Client.CBS',
+            'Microsoft.NET.*', 'Microsoft.VCLibs.*', 'Microsoft.UI.Xaml.*', 'Microsoft.WindowsAppRuntime*', 'MicrosoftCorporationII.WinAppRuntime*')
+
+        function Get-BlacklistViolation($Tweak) {
+            $type = [string]$Tweak.type
+            $set = $Tweak.set
+            $id = [string]$Tweak.id
+            if ($type -eq 'service') {
+                if ($ProtectedServices -contains [string]$set.name) { "$id touches the protected service $($set.name)" }
+            }
+            if ($type -eq 'registry') {
+                $path = [string]$set.path
+                if ($BlockedValueNames -contains [string]$set.name -and $id -ne $VirtualizationSecurityException) { "$id writes the protected value $($set.name)" }
+                foreach ($fragment in $BlockedPathFragments) {
+                    if ($id -eq $VirtualizationSecurityException) { continue }
+                    if ($path.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -ge 0) { "$id writes under $fragment" }
+                }
+                foreach ($service in $ProtectedServices) {
+                    if ($path -match ('(?i)\\Services\\' + [regex]::Escape($service) + '(\\|$)')) { "$id writes the configuration of the protected service $service" }
+                }
+            }
+            if ($type -eq 'task') {
+                $folder = ([string]$set.path).TrimEnd('\') + '\'
+                foreach ($protectedFolder in $ProtectedTaskFolders) {
+                    # Also catches a subfolder and a path written without its final backslash.
+                    if ($folder.StartsWith($protectedFolder, [StringComparison]::OrdinalIgnoreCase)) { "$id disables a task under $protectedFolder" }
+                }
+                if ($ProtectedTaskNames -contains [string]$set.name) { "$id disables the task $($set.name)" }
+            }
+            if ($type -eq 'appx') {
+                foreach ($pattern in $ProtectedApps) {
+                    # A wildcard in the catalog name must not slip past the list either.
+                    if (([string]$set.name -like $pattern) -or ($pattern -like [string]$set.name)) { "$id removes the protected app $pattern" }
+                }
+            }
+            if ($type -eq 'feature' -or $type -eq 'capability') {
+                if ([string]$set.name -match '^(Microsoft-Hyper-V|VirtualMachinePlatform|HypervisorPlatform|Containers|Microsoft-Windows-Subsystem-Linux)') {
+                    "$id touches a virtualization feature that WSL, Hyper-V or containers need"
+                }
+            }
         }
     }
 
-    It 'never removes the Store, winget, Windows Security, Edge, frameworks or the Xbox sign-in components' {
-        $patterns = @('Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller', 'Microsoft.SecHealthUI',
-            'Microsoft.MicrosoftEdge*', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxIdentityProvider', 'Microsoft.XboxSpeechToTextOverlay',
-            'Microsoft.XboxGameCallableUI', 'MicrosoftWindows.Client.CoreAI', 'MicrosoftWindows.Client.CBS', 'Microsoft.NET.*',
-            'Microsoft.VCLibs.*', 'Microsoft.UI.Xaml.*', 'Microsoft.WindowsAppRuntime*', 'MicrosoftCorporationII.WinAppRuntime*')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'appx' }) {
-            foreach ($pattern in $patterns) { [string]$tweak.set.name | Should -Not -BeLike $pattern -Because $tweak.id }
+    It 'trips no rule of the blacklist' {
+        $violations = @($Catalog | ForEach-Object { Get-BlacklistViolation $_ })
+        $violations -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It 'keeps every protected service, task and app of the lists out of the catalog by name' {
+        $services = @($Catalog | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
+        @($services | Where-Object { $ProtectedServices -contains $_ }) -join ', ' | Should -BeNullOrEmpty
+        $apps = @($Catalog | Where-Object { $_.type -eq 'appx' } | ForEach-Object { [string]$_.set.name })
+        foreach ($keep in 'Microsoft.WindowsStore', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsTerminal', 'Microsoft.WindowsCalculator',
+            'Microsoft.Windows.Photos', 'Microsoft.WindowsNotepad', 'Microsoft.Paint', 'Microsoft.ScreenSketch', 'Microsoft.WindowsCamera', 'Microsoft.SecHealthUI') {
+            $apps | Should -Not -Contain $keep
         }
     }
 
-    It 'never touches the virtualization features that WSL, Hyper-V and containers need' {
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'feature' -or $_.type -eq 'capability' }) {
-            [string]$tweak.set.name | Should -Not -Match '^(Microsoft-Hyper-V|VirtualMachinePlatform|HypervisorPlatform|Containers|Microsoft-Windows-Subsystem-Linux)' -Because $tweak.id
-        }
+    It 'catches <Name>' -TestCases @(
+        # The four ways past the first version of these checks.
+        @{ Name = 'a registry path written in another case'; Type = 'registry'; Set = @{ path = 'HKLM:\software\policies\microsoft\WINDOWS DEFENDER'; name = 'Foo'; kind = 'DWord'; value = 1 } }
+        @{ Name = 'a value inside the key of a protected service'; Type = 'registry'; Set = @{ path = 'HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend'; name = 'Start'; kind = 'DWord'; value = 4 } }
+        @{ Name = 'a task in a subfolder of a protected folder, in another case'; Type = 'task'; Set = @{ path = '\microsoft\windows\windowsupdate\Sub'; name = 'Any'; state = 'Disabled' } }
+        @{ Name = 'a keep-list app'; Type = 'appx'; Set = @{ name = 'Microsoft.WindowsCalculator'; storeId = '9WZDNCRFHVN5'; action = 'remove' } }
+        # More of the same kind.
+        @{ Name = 'the Store written with a wildcard'; Type = 'appx'; Set = @{ name = 'Microsoft.Windows*'; storeId = '9WZDNCRFHVN5'; action = 'remove' } }
+        @{ Name = 'a protected service in another case'; Type = 'service'; Set = @{ name = 'wuauserv'.ToUpper(); startType = 'Disabled'; stop = $true } }
+        @{ Name = 'a UAC value'; Type = 'registry'; Set = @{ path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; name = 'PromptOnSecureDesktop'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a UAC value for standard users'; Type = 'registry'; Set = @{ path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; name = 'ConsentPromptBehaviorUser'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a virtualization-based security key'; Type = 'registry'; Set = @{ path = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'; name = 'EnableVirtualizationBasedSecurity'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a task of the update orchestrator'; Type = 'task'; Set = @{ path = '\Microsoft\Windows\UpdateOrchestrator'; name = 'Schedule Scan'; state = 'Disabled' } }
+        @{ Name = 'the disk diagnostic task'; Type = 'task'; Set = @{ path = '\Microsoft\Windows\DiskDiagnostic\'; name = 'Microsoft-Windows-DiskDiagnosticResolver'; state = 'Disabled' } }
+        @{ Name = 'a virtualization feature'; Type = 'feature'; Set = @{ name = 'Microsoft-Hyper-V-All'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = [pscustomobject]@{ id = 'test.bad'; type = $Type; set = [pscustomobject]$Set }
+        @(Get-BlacklistViolation $tweak).Count | Should -BeGreaterThan 0
+    }
+
+    It 'lets a harmless tweak and the explicit memory integrity tweak through' {
+        $harmless = [pscustomobject]@{ id = 'test.ok'; type = 'registry'; set = [pscustomobject]@{ path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; name = 'HideFileExt'; kind = 'DWord'; value = 0 } }
+        @(Get-BlacklistViolation $harmless).Count | Should -Be 0
+        $memory = $ById['gaming.memory-integrity-off']
+        $memory.risk | Should -Be 'high'
+        @(Get-BlacklistViolation $memory).Count | Should -Be 0
+        $copy = $memory | Select-Object -Property *
+        $copy.id = 'test.other'
+        @(Get-BlacklistViolation $copy).Count | Should -BeGreaterThan 0
     }
 }
 
@@ -1312,7 +1382,16 @@ Describe 'Shipped profiles' {
             $tweak = $ById[$tweakId]
             Test-TuneupUserScopedTweak -Tweak $tweak | Should -BeTrue -Because $tweakId
             Test-TuneupPolicyTweak -Tweak $tweak | Should -BeFalse -Because $tweakId
+            Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -BeFalse -Because $tweakId
         }
+    }
+
+    It 'treats the HKCU policies of the catalog as needing an administrator, so base cannot hold them' {
+        $policies = @($Catalog | Where-Object { $_.scope -eq 'user' -and (Test-TuneupPolicyTweak -Tweak $_) } | ForEach-Object { $_.id })
+        $policies | Should -Contain 'ads.start-hide-recommended-policy'
+        $policies | Should -Contain 'ai.copilot-policy-off'
+        foreach ($id in $policies) { Test-TuneupTweakNeedsAdmin -Tweak $ById[$id] | Should -BeTrue -Because $id }
+        foreach ($id in $policies) { @((Get-ProfileById 'base').include) | Should -Not -Contain $id }
     }
 
     It 'has no high-risk tweak in any profile' {
@@ -1463,7 +1542,7 @@ Contenido completo de `catalog/privacy.json` (18 ajustes):
     {
       "id": "privacy.diagnostic-data-required",
       "title": { "es": "Enviar solo los datos de diagnóstico requeridos", "en": "Send only required diagnostic data" },
-      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro." },
+      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Las compilaciones de Windows Insider necesitan los datos opcionales: no lo apliques en un equipo del programa Insider.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. Windows Insider builds need optional data: do not apply it on an Insider device." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
@@ -1723,8 +1802,8 @@ git commit -m "feat: catálogo de privacidad y telemetría"
 
 Archivo nuevo. Casi todo es `HKCU` sin directivas (los interruptores de Configuración: sugerencias de Inicio, consejos, contenido sugerido, pantalla de bloqueo): es lo que `base` puede aplicar sin administrador. Decisiones aplicadas:
 
-- `ads.consumer-features` (`DisableWindowsConsumerFeatures`) y `ads.start-hide-recommended-policy` (`HideRecommendedSection`) se declaran solo Enterprise/Education, como documenta Microsoft; en Pro y Home el mismo efecto sale de los interruptores de usuario (`ads.start-recommendations`, `ads.start-recent-*`, `ads.start-most-used-off`).
-- `ads.settings-home-365` (`DisableConsumerAccountStateContent`) queda Pro/Enterprise/Education, como lo aplica la fuente; es directiva de máquina, así que no va en `base`.
+- `ads.consumer-features` (`DisableWindowsConsumerFeatures`) y `ads.settings-home-365` (`DisableConsumerAccountStateContent`) se declaran solo Enterprise/Education, como documenta Microsoft; `ads.start-hide-recommended-policy` (`HideRecommendedSection`) incluye Pro porque el CSP de Start lo lista así. En Home el mismo efecto sale de los interruptores de usuario (`ads.start-recommendations`, `ads.start-recent-*`, `ads.start-most-used-off`).
+- `ads.start-hide-recommended-policy` y `ads.search-box-suggestions-off` son directivas bajo HKCU: exigen administrador (ver la Task 7) y no van en `base`.
 - Un ajuste por valor de registro: el catálogo no tiene tipo multi-valor (decisión 4f), por eso "contenido sugerido en Configuración" son tres ajustes (1/3, 2/3, 3/3).
 - `ads.search-box-suggestions-off` es el único dueño de `DisableSearchBoxSuggestions`.
 
@@ -1769,7 +1848,7 @@ Describe 'ads catalog' {
     }
 
     It 'declares the policies that only Enterprise and Education honor' {
-        foreach ($id in 'ads.consumer-features', 'ads.start-hide-recommended-policy') {
+        foreach ($id in 'ads.consumer-features', 'ads.settings-home-365') {
             @((Get-CategoryTweak 'ads' | Where-Object { $_.id -eq $id }).os.editions) -join ',' | Should -Be 'Enterprise,Education' -Because $id
         }
     }
@@ -2038,10 +2117,10 @@ Contenido completo de `catalog/ads.json` (28 ajustes):
     {
       "id": "ads.settings-home-365",
       "title": { "es": "Sin anuncios de Microsoft 365 en Configuración", "en": "No Microsoft 365 ads in Settings" },
-      "why": { "es": "Oculta las tarjetas de Microsoft 365 y Copilot de la página de inicio de Configuración.", "en": "Hides the Microsoft 365 and Copilot cards on the Settings home page." },
+      "why": { "es": "Oculta el contenido de cuenta en la nube (Microsoft 365 y similares) de la página de inicio de Configuración. Microsoft documenta la directiva solo para Enterprise y Education; en otras ediciones puede no tener efecto.", "en": "Hides the cloud account content (Microsoft 365 and similar) on the Settings home page. Microsoft documents the policy for Enterprise and Education only; on other editions it may have no effect." },
       "risk": "low",
       "ask": false,
-      "os": { "families": ["11"], "minBuild": 22000, "editions": ["Pro", "Enterprise", "Education"] },
+      "os": { "families": ["11"], "minBuild": 22000, "editions": ["Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
       "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\CloudContent", "name": "DisableConsumerAccountStateContent", "kind": "DWord", "value": 1 },
@@ -2051,10 +2130,10 @@ Contenido completo de `catalog/ads.json` (28 ajustes):
     {
       "id": "ads.start-hide-recommended-policy",
       "title": { "es": "Ocultar la sección Recomendado de Inicio (directiva)", "en": "Hide the Start Recommended section (policy)" },
-      "why": { "es": "Quita por directiva la sección de archivos y apps recomendados (solo Enterprise y Education).", "en": "Removes the recommended files and apps section by policy (Enterprise and Education only)." },
+      "why": { "es": "Quita por directiva la sección de archivos y apps recomendados (Pro, Enterprise y Education, según la documentación de Microsoft).", "en": "Removes the recommended files and apps section by policy (Pro, Enterprise and Education, according to Microsoft documentation)." },
       "risk": "low",
       "ask": false,
-      "os": { "families": ["11"], "minBuild": 22621, "editions": ["Enterprise", "Education"] },
+      "os": { "families": ["11"], "minBuild": 22621, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "user",
       "set": { "path": "HKCU:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Explorer", "name": "HideRecommendedSection", "kind": "DWord", "value": 1 },
@@ -2332,7 +2411,7 @@ Contenido completo de `catalog/ui.json` (12 ajustes):
       "why": { "es": "Quita el widget de noticias de la barra de tareas de Windows 10.", "en": "Removes the news widget from the Windows 10 taskbar." },
       "risk": "low",
       "ask": false,
-      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
       "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Feeds", "name": "EnableFeeds", "kind": "DWord", "value": 0 },
@@ -2470,7 +2549,7 @@ git commit -m "feat: catálogo de interfaz"
 
 Archivo nuevo. Decisiones aplicadas:
 
-- Recall en dos capas: la directiva de usuario (`DisableAIDataAnalysis`) y la de máquina (`AllowRecallEnablement = 0`, pide reinicio). Las dos borran capturas existentes: `medium` con `ask: true`.
+- Recall en dos capas: la directiva de usuario (`DisableAIDataAnalysis`) y la de máquina (`AllowRecallEnablement = 0`, pide reinicio). Las dos borran capturas existentes y `deshacer` no puede devolverlas: `high` con `ask: true`, solo con `-Include`.
 - Solo las funciones de IA **en la nube** de Paint y del Bloc de notas; las locales (quitar fondo, borrado generativo) no.
 - `ai.fabric-service-manual` deja `WSAIFabricSvc` en `Manual` (no `Disabled`): las funciones locales lo piden a demanda.
 - La app Copilot no está aquí: es `apps.copilot` (Task 21). Nunca se toca `MicrosoftWindows.Client.CoreAI` (`NonRemovable`).
@@ -2542,8 +2621,8 @@ Contenido completo de `catalog/ai.json` (10 ajustes):
     {
       "id": "ai.recall-snapshots-off",
       "title": { "es": "Recall: no guardar capturas (directiva de usuario)", "en": "Recall: do not save snapshots (user policy)" },
-      "why": { "es": "Impide que Recall guarde capturas de pantalla; borra las que existan.", "en": "Stops Recall from saving screenshots; deletes any that exist." },
-      "risk": "medium",
+      "why": { "es": "Impide que Recall guarde capturas de pantalla y borra las que ya existen; deshacer no puede devolverlas.", "en": "Stops Recall from saving screenshots and deletes the ones that exist; undo cannot bring them back." },
+      "risk": "high",
       "ask": true,
       "os": { "families": ["11"], "minBuild": 26100, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
@@ -2555,8 +2634,8 @@ Contenido completo de `catalog/ai.json` (10 ajustes):
     {
       "id": "ai.recall-unavailable",
       "title": { "es": "Recall: no disponible en el equipo", "en": "Recall: not available on the device" },
-      "why": { "es": "Quita Recall del equipo; hace falta reiniciar y se borran las capturas guardadas.", "en": "Removes Recall from the device; needs a restart and deletes saved snapshots." },
-      "risk": "medium",
+      "why": { "es": "Quita Recall del equipo (hace falta reiniciar) y borra las capturas guardadas; deshacer no puede devolverlas.", "en": "Removes Recall from the device (needs a restart) and deletes saved snapshots; undo cannot bring them back." },
+      "risk": "high",
       "ask": true,
       "os": { "families": ["11"], "minBuild": 26100, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
@@ -2584,7 +2663,7 @@ Contenido completo de `catalog/ai.json` (10 ajustes):
       "why": { "es": "Desactiva Reescribir, Resumir y otras funciones de IA del Bloc de notas.", "en": "Turns off Rewrite, Summarize and other AI features in Notepad." },
       "risk": "low",
       "ask": false,
-      "os": { "families": ["11"], "minBuild": 22621, "editions": ["Pro", "Enterprise", "Education"] },
+      "os": { "families": ["11"], "minBuild": 22621, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
       "set": { "path": "HKLM:\\SOFTWARE\\Policies\\WindowsNotepad", "name": "DisableAIFeatures", "kind": "DWord", "value": 1 },
@@ -2691,7 +2770,7 @@ git commit -m "feat: catálogo de Copilot, Recall e IA"
 Archivo nuevo, todo directivas de máquina en `HKLM:\SOFTWARE\Policies\Microsoft\Edge`. Decisiones aplicadas:
 
 - Ninguna entra en `base`: Edge muestra "Administrado por tu organización" con cualquier directiva. Van en `privacy`, `lite`, `laptop` y `legacy`.
-- Las tres de privacidad (antes `privacy.edge-*`) se llaman `edge.personalization-reporting-off`, `edge.diagnostic-data-off` y `edge.feedback-off`. Todas declaran las cuatro ediciones: la documentación de Edge no las limita por edición.
+- Las tres de privacidad (antes `privacy.edge-*`) se llaman `edge.personalization-reporting-off`, `edge.diagnostic-data-required` (`DiagnosticData = 1`: solo los datos requeridos; `0` sería "Apagado", que Microsoft no recomienda) y `edge.feedback-off`. `edge.sidebar-off` avisa que la directiva no rige en perfiles con cuenta Microsoft. Todas declaran las cuatro ediciones: la documentación de Edge no las limita por edición.
 - `edge.startup-boost-off` y `edge.background-mode-off` usan la clave `Edge\Recommended` (directiva recomendada: el usuario puede volver a activarlas en `edge://settings/system`).
 - Las directivas de Copilot de Edge que solo rigen en perfiles de Microsoft Entra ID, `DefaultBrowserSettingEnabled` (solo Windows 7) y las obsoletas (`MetricsReportingEnabled`, `SendSiteInfoToImproveServices`) no entran.
 
@@ -2704,7 +2783,7 @@ Describe 'edge catalog' {
     It 'ships the edge tweaks in this order' {
         $expected = @(
             'edge.personalization-reporting-off',
-            'edge.diagnostic-data-off',
+            'edge.diagnostic-data-required',
             'edge.feedback-off',
             'edge.new-tab-feed-off',
             'edge.shopping-off',
@@ -2759,15 +2838,15 @@ Contenido completo de `catalog/edge.json` (17 ajustes):
       "sources": ["https://learn.microsoft.com/deployedge/microsoft-edge-browser-policies/personalizationreportingenabled", "https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Disable_Telemetry.reg", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
     },
     {
-      "id": "edge.diagnostic-data-off",
-      "title": { "es": "Edge no envía datos de diagnóstico", "en": "Edge sends no diagnostic data" },
-      "why": { "es": "Edge deja de enviar a Microsoft datos de uso y de errores del navegador.", "en": "Edge stops sending browser usage and crash data to Microsoft." },
+      "id": "edge.diagnostic-data-required",
+      "title": { "es": "Edge envía solo los datos de diagnóstico requeridos", "en": "Edge sends only required diagnostic data" },
+      "why": { "es": "Edge deja de enviar a Microsoft los datos opcionales de uso, sitios visitados y errores; solo envía los requeridos para mantenerse seguro y al día.", "en": "Edge stops sending optional usage, visited-site and crash data to Microsoft; it only sends the data required to stay secure and up to date." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
-      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "DiagnosticData", "kind": "DWord", "value": 0 },
+      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "DiagnosticData", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
       "sources": ["https://learn.microsoft.com/deployedge/microsoft-edge-browser-policies/diagnosticdata", "https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Disable_Telemetry.reg", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
     },
@@ -2891,7 +2970,7 @@ Contenido completo de `catalog/edge.json` (17 ajustes):
     {
       "id": "edge.sidebar-off",
       "title": { "es": "Edge sin barra lateral", "en": "Edge without the sidebar" },
-      "why": { "es": "Oculta la barra lateral con Copilot, Descubrir y accesos de compras.", "en": "Hides the sidebar with Copilot, Discover and shopping shortcuts." },
+      "why": { "es": "Oculta la barra lateral de Edge (Copilot, Descubrir, accesos de compras). No rige en perfiles con cuenta Microsoft; el icono de Copilot de la barra de herramientas lo controla otra directiva (Microsoft365CopilotChatIconEnabled).", "en": "Hides the Edge sidebar (Copilot, Discover, shopping shortcuts). It does not apply to profiles signed in with a Microsoft account; the Copilot icon in the toolbar is controlled by another policy (Microsoft365CopilotChatIconEnabled)." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
@@ -2985,7 +3064,7 @@ Expected: una línea por ajuste y ninguna `ERROR`. En el equipo de verificación
 
 ```text
 edge.personalization-reporting-off            applied
-edge.diagnostic-data-off                      applied
+edge.diagnostic-data-required                 applied
 edge.feedback-off                             applied
 edge.new-tab-feed-off                         applied
 edge.shopping-off                             applied
@@ -3022,7 +3101,7 @@ Reemplaza el archivo de ejemplo y conserva `services.retail-demo` (con una fuent
 
 - `services.diagtrack` es `medium` con `ask: true`: es lo único que corta la subida de telemetría en Pro, pero Defender for Endpoint lo exige y lo usan Feedback Hub y Xbox.
 - Los servicios por usuario (`CDPUserSvc`, `PimIndexMaintenanceSvc`, `UnistoreSvc`, `UserDataSvc`) se deshabilitan en su plantilla con `stop: false` (la instancia viva sigue hasta cerrar sesión): `signOutRequired: true` y `rebootRequired: false`. Con `ask: true`, porque Vínculo móvil, compartir cercano, Contactos, Correo y Calendario dependen de ellos.
-- WIA y Mapas pasan a `Manual` (Windows los inicia por disparador cuando hacen falta); los de Xbox se deshabilitan y `gaming` los conserva.
+- WIA y Mapas pasan a `Manual` (Windows los inicia por disparador cuando hacen falta); los servicios de Xbox no entran (ya vienen en manual y deshabilitarlos rompe el inicio de sesión de Xbox); `gaming` conserva las apps de Xbox y su tarea.
 - Ninguno de la lista negra (`SharedAccess`, `WSearch`, `SysMain`, `WerSvc`, `DPS`, `Spooler`, virtualización...): lo comprueba "Blacklist guard".
 
 - [ ] **Step 1: Prueba que falla**
@@ -3042,10 +3121,7 @@ Describe 'services catalog' {
             'services.connected-devices-user',
             'services.contact-data',
             'services.user-data-storage',
-            'services.user-data-access',
-            'services.xbox-game-save',
-            'services.xbox-auth-manager',
-            'services.xbox-live-networking'
+            'services.user-data-access'
         ) -join ','
         Get-CategoryId 'services' | Should -Be $expected
     }
@@ -3064,7 +3140,7 @@ Expected: FAIL en `services catalog`: el archivo todavía no tiene esos ajustes.
 
 - [ ] **Step 3: Escribir `catalog/services.json`**
 
-Contenido completo de `catalog/services.json` (13 ajustes):
+Contenido completo de `catalog/services.json` (10 ajustes):
 
 ```json
 {
@@ -3202,45 +3278,6 @@ Contenido completo de `catalog/services.json` (13 ajustes):
       "rebootRequired": false,
       "signOutRequired": true,
       "sources": ["https://learn.microsoft.com/windows/application-management/per-user-services-in-windows", "https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server"]
-    },
-    {
-      "id": "services.xbox-game-save",
-      "title": { "es": "Desactivar el servicio de partidas guardadas de Xbox Live", "en": "Disable the Xbox Live Game Save service" },
-      "why": { "es": "Sincroniza partidas guardadas con Xbox Live y despierta una tarea periódica. El perfil Gaming lo conserva.", "en": "Syncs game saves with Xbox Live and wakes a periodic task. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XblGameSave", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server", "https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
-    },
-    {
-      "id": "services.xbox-auth-manager",
-      "title": { "es": "Desactivar el servicio de autenticación de Xbox Live", "en": "Disable the Xbox Live Auth Manager service" },
-      "why": { "es": "Solo lo usan los juegos y apps que inician sesión en Xbox Live. El perfil Gaming lo conserva.", "en": "Only used by games and apps that sign in to Xbox Live. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XblAuthManager", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server", "https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
-    },
-    {
-      "id": "services.xbox-live-networking",
-      "title": { "es": "Desactivar el servicio de red de Xbox Live", "en": "Disable the Xbox Live Networking service" },
-      "why": { "es": "Solo lo usan los juegos con multijugador de Xbox Live. El perfil Gaming lo conserva.", "en": "Only used by games with Xbox Live multiplayer. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XboxNetApiSvc", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
     }
   ]
 }
@@ -3270,9 +3307,6 @@ services.connected-devices-user               not-applied
 services.contact-data                         not-applied
 services.user-data-storage                    not-applied
 services.user-data-access                     not-applied
-services.xbox-game-save                       not-applied
-services.xbox-auth-manager                    not-applied
-services.xbox-live-networking                 not-applied
 ```
 
 - [ ] **Step 6: Commit**
@@ -3292,7 +3326,7 @@ git commit -m "feat: catálogo de servicios"
 
 Reemplaza el archivo de ejemplo y conserva `tasks.ceip-consolidator`. Decisiones aplicadas:
 
-- El evaluador de compatibilidad (`tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`) es `medium` con `ask: true`: sin su inventario Windows puede no ofrecer actualizaciones de función. En el build 26300 dos de ellas ya no existen; el plan las informa `not-present`.
+- El evaluador de compatibilidad (`tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`) es `medium` con `ask: true`: sin su inventario Windows puede no ofrecer actualizaciones de función. `tasks.mare-backup` también pregunta (en compilaciones recientes ejecuta el evaluador). En el build 26300 dos de ellas ya no existen; el plan las informa `not-present`.
 - `tasks.family-safety-*` preguntan: con controles parentales activos dejarían de aplicarse.
 - No se toca `DiskDiagnosticResolver` (avisa de fallos SMART), `Flighting\*`, `Defrag`, `Chkdsk`, `Servicing` ni `RegIdleBackup` (lista negra y "No incluido").
 - Una tarea que no existe en un build (por ejemplo `SpeechModelDownloadTask` en 26300) se omite como `not-present`, sin error.
@@ -3438,9 +3472,9 @@ Contenido completo de `catalog/tasks.json` (21 ajustes):
     {
       "id": "tasks.mare-backup",
       "title": { "es": "Desactivar la recopilación de apps para Copia de seguridad de Windows", "en": "Disable app collection for Windows Backup" },
-      "why": { "es": "Recoge la lista de tus programas para la copia en la nube; esa lista no se restaurará.", "en": "Collects your program list for the cloud backup; that list will not be restored." },
-      "risk": "low",
-      "ask": false,
+      "why": { "es": "Recoge la lista de tus programas para la copia en la nube (esa lista no se restaurará). En compilaciones recientes también ejecuta el evaluador de compatibilidad, así que desactivarla puede detener las ofertas de actualizaciones de función.", "en": "Collects your program list for the cloud backup (that list will not be restored). On recent builds it also runs the compatibility appraiser, so disabling it may stop feature-update offers." },
+      "risk": "medium",
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "task",
       "scope": "machine",
@@ -3677,7 +3711,7 @@ git commit -m "feat: catálogo de tareas programadas"
 Dos archivos nuevos. Decisiones aplicadas:
 
 - `performance.delivery-optimization-http-only` usa la directiva `DODownloadMode = 0` (Pro y superiores). `100` (Bypass) está obsoleto y puede hacer fallar descargas.
-- `performance.background-apps-off` (`GlobalUserDisabled`) es de usuario y `medium`: Correo o Alarmas no avisan con la app cerrada.
+- `performance.background-apps-off` (`GlobalUserDisabled`) es de usuario, `medium` con `ask: true` y solo Windows 10: Correo o Alarmas no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse.
 - Transparencia y animación de minimizar no se repiten aquí: son `ui.transparency-off` y `ui.window-animations-off`.
 - `power.high-performance-plan` lleva `requires: ["no-battery"]` y `ask: true`; en equipos con Modern Standby el plan ni aparece (`not-present`).
 - `power.usb-selective-suspend-ac-off` fija solo `ac: 0` (Task 4): con batería no cambia nada.
@@ -3762,10 +3796,10 @@ Contenido completo de `catalog/performance.json` (3 ajustes):
     {
       "id": "performance.background-apps-off",
       "title": { "es": "No dejar que las apps de la Store corran en segundo plano", "en": "Do not let Store apps run in the background" },
-      "why": { "es": "Ahorra batería y memoria; a cambio, apps como Correo o Alarmas no avisan con la app cerrada. Puedes permitir apps una a una en Configuración.", "en": "Saves battery and memory; in exchange, apps like Mail or Alarms do not notify while closed. You can allow apps one by one in Settings." },
+      "why": { "es": "Ahorra batería y memoria; a cambio, apps como Correo o Alarmas no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse. Puedes permitir apps una a una en Configuración.", "en": "Saves battery and memory; in exchange, apps like Mail or Alarms do not notify while closed and Windows Spotlight backgrounds may stop refreshing. You can allow apps one by one in Settings." },
       "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "ask": true,
+      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "name": "GlobalUserDisabled", "kind": "DWord", "value": 1 },
@@ -4356,7 +4390,7 @@ Contenido completo de `catalog/gaming.json` (11 ajustes):
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\GameBar", "name": "AutoGameModeEnabled", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/en-us/previous-versions/windows/desktop/gamemode/game-mode-portal", "https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/customize-power-slider"]
+      "sources": ["https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-windows-11", "https://github.com/farag2/Sophia-Script-for-Windows/blob/main/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
     },
     {
       "id": "gaming.game-dvr-off",
@@ -4395,7 +4429,7 @@ Contenido completo de `catalog/gaming.json` (11 ajustes):
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\GameDVR", "name": "HistoricalCaptureEnabled", "kind": "DWord", "value": 0 },
       "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-applicationmanagement"]
+      "sources": ["https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-windows-11", "https://github.com/farag2/Sophia-Script-for-Windows/blob/main/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
     },
     {
       "id": "gaming.gamebar-controller-off",
@@ -5076,7 +5110,7 @@ Archivo nuevo. Usa la acción `onedrive` (Task 20). Decisiones aplicadas:
 
 - Solo apps cuyo deshacer funciona: `winget show --id <storeId> --source msstore --exact` las encontró el 2026-10-01 y el catálogo de la Store confirmó que ese id instala el mismo paquete Appx. Las que winget no encuentra (Solitaire, Tips, People, Mapas, las apps 3D, Wallet...) quedan fuera y se listan en `catalog/notes/excluded.json` (Task 24).
 - Teams nuevo (`MSTeams`, `storeId` `XP8BT8DW290MPQ`, que acepta la Task 2): el nombre Appx y el id están verificados (la API de la Store que usa winget devuelve `MSTeams_8wekyb3d8bbwe`). El Copilot `XP9CXNGPPJ97XX` no entra: no se sabe qué paquete instala.
-- `ask: true` y `medium`: Copilot, Obtener ayuda, Reproductor multimedia, Asistencia rápida, Vínculo móvil, Outlook nuevo, Seguridad familiar, Teams y OneDrive.
+- `ask: true` y `medium`: Copilot, Obtener ayuda, Alarmas y reloj, Reproductor multimedia, Asistencia rápida, Vínculo móvil, la app Xbox, Xbox Game Bar, Outlook nuevo, Seguridad familiar, Correo y Calendario, Teams y OneDrive.
 - `apps.dev-home` avisa que deshacer instala la app que hoy ocupa su lugar en la Store.
 - Nunca la Store, winget, Seguridad de Windows, Edge, los frameworks ni los componentes de inicio de sesión de Xbox (lo comprueba "Blacklist guard").
 
@@ -5124,7 +5158,7 @@ Describe 'apps catalog' {
 
     It 'asks before removing the apps people often use' {
         $asked = @(Get-CategoryTweak 'apps' | Where-Object { $_.ask } | ForEach-Object { $_.id }) -join ','
-        $asked | Should -Be 'apps.copilot,apps.get-help,apps.media-player,apps.quick-assist,apps.phone-link,apps.outlook-new,apps.family-safety,apps.msteams,apps.onedrive'
+        $asked | Should -Be 'apps.copilot,apps.get-help,apps.alarms-clock,apps.media-player,apps.quick-assist,apps.phone-link,apps.xbox-gaming-app,apps.xbox-game-bar,apps.outlook-new,apps.family-safety,apps.mail-calendar,apps.msteams,apps.onedrive'
     }
 
     It 'gives every Store app the id that winget reinstalls' {
@@ -5133,6 +5167,71 @@ Describe 'apps catalog' {
         }
         (Get-CategoryTweak 'apps' | Where-Object { $_.id -eq 'apps.msteams' }).set.storeId | Should -Be 'XP8BT8DW290MPQ'
         (Get-CategoryTweak 'apps' | Where-Object { $_.id -eq 'apps.onedrive' }).set.script | Should -Be 'onedrive'
+    }
+}
+
+Describe 'review decisions of the catalog' {
+    BeforeAll {
+        $script:All = @(Import-TuneupCatalog -Path $CatalogDir)
+        function Get-One([string]$Id) { $found = @($All | Where-Object { $_.id -eq $Id }); $found.Count | Should -Be 1 -Because $Id; $found[0] }
+    }
+
+    It 'keeps Recall behind -Include: high risk, and it says undo cannot bring the snapshots back' {
+        foreach ($id in 'ai.recall-snapshots-off', 'ai.recall-unavailable') {
+            $tweak = Get-One $id
+            $tweak.risk | Should -Be 'high' -Because $id
+            [string]$tweak.why.es | Should -BeLike '*deshacer no puede devolverlas*' -Because $id
+            [string]$tweak.why.en | Should -BeLike '*undo cannot bring them back*' -Because $id
+        }
+    }
+
+    It 'asks before the compatibility backup task, which also feeds the appraiser' {
+        $tweak = Get-One 'tasks.mare-backup'
+        $tweak.risk | Should -Be 'medium'
+        $tweak.ask | Should -BeTrue
+        [string]$tweak.why.en | Should -BeLike '*appraiser*'
+    }
+
+    It 'does not ship the Xbox services: they are Manual by default and Disabled breaks the Xbox sign-in' {
+        $names = @($All | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
+        foreach ($name in 'XblGameSave', 'XblAuthManager', 'XboxNetApiSvc', 'XboxGipSvc') { $names | Should -Not -Contain $name }
+    }
+
+    It 'asks before background apps are stopped, and only for Windows 10' {
+        $tweak = Get-One 'performance.background-apps-off'
+        $tweak.ask | Should -BeTrue
+        @($tweak.os.families) -join ',' | Should -Be '10'
+        [string]$tweak.why.en | Should -BeLike '*Spotlight*'
+    }
+
+    It 'sets Edge diagnostic data to required data only, as a low-risk tweak' {
+        @($All | Where-Object { $_.id -eq 'edge.diagnostic-data-off' }).Count | Should -Be 0
+        $tweak = Get-One 'edge.diagnostic-data-required'
+        $tweak.set.name | Should -Be 'DiagnosticData'
+        $tweak.set.value | Should -Be 1
+        $tweak.risk | Should -Be 'low'
+    }
+
+    It 'declares the editions the documentation gives' -TestCases @(
+        @{ Id = 'ads.settings-home-365'; Editions = 'Enterprise,Education' }
+        @{ Id = 'ui.news-interests-win10'; Editions = 'Pro,Enterprise,Education' }
+        @{ Id = 'ads.start-hide-recommended-policy'; Editions = 'Pro,Enterprise,Education' }
+        @{ Id = 'ai.notepad-ai-off'; Editions = 'Home,Pro,Enterprise,Education' }
+        @{ Id = 'privacy.diagnostic-data-required'; Editions = 'Pro,Enterprise,Education' }
+    ) {
+        param($Id, $Editions)
+        @((Get-One $Id).os.editions) -join ',' | Should -Be $Editions
+    }
+
+    It 'says that the Edge sidebar policy skips Microsoft-account profiles, and that diagnostic data is not for Insider builds' {
+        [string](Get-One 'edge.sidebar-off').why.en | Should -BeLike '*Microsoft account*'
+        [string](Get-One 'privacy.diagnostic-data-required').why.en | Should -BeLike '*Insider*'
+    }
+
+    It 'cites the Microsoft settings reference for Game Mode and background recording' {
+        foreach ($id in 'gaming.game-mode-on', 'gaming.background-recording-off') {
+            @((Get-One $id).sources) | Should -Contain 'https://learn.microsoft.com/en-us/windows/apps/develop/settings/settings-windows-11' -Because $id
+        }
     }
 }
 ```
@@ -5349,7 +5448,7 @@ Contenido completo de `catalog/apps.json` (30 ajustes):
       "title": { "es": "Quitar Alarmas y reloj", "en": "Remove Alarms & Clock" },
       "why": { "es": "Se pierden alarmas, temporizadores y sesiones de concentración.", "en": "Alarms, timers and focus sessions are lost." },
       "risk": "medium",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "appx",
       "scope": "machine",
@@ -5414,7 +5513,7 @@ Contenido completo de `catalog/apps.json` (30 ajustes):
       "title": { "es": "Quitar la app Xbox", "en": "Remove the Xbox app" },
       "why": { "es": "Necesaria para Game Pass y para instalar algunos juegos de la Store.", "en": "Needed for Game Pass and for installing some Store games." },
       "risk": "medium",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "appx",
       "scope": "machine",
@@ -5427,7 +5526,7 @@ Contenido completo de `catalog/apps.json` (30 ajustes):
       "title": { "es": "Quitar la Xbox Game Bar", "en": "Remove the Xbox Game Bar" },
       "why": { "es": "Barra de juego con captura; sin ella Win+G no hace nada.", "en": "Gaming bar with capture; Win+G does nothing without it." },
       "risk": "medium",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "appx",
       "scope": "machine",
@@ -5505,7 +5604,7 @@ Contenido completo de `catalog/apps.json` (30 ajustes):
       "title": { "es": "Quitar Correo y Calendario (descontinuada)", "en": "Remove Mail and Calendar (discontinued)" },
       "why": { "es": "Microsoft la reemplazó por el nuevo Outlook; People depende de ella.", "en": "Microsoft replaced it with the new Outlook; People depends on it." },
       "risk": "medium",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "appx",
       "scope": "machine",
@@ -5611,14 +5710,14 @@ Reparto (decisiones 1 y 6):
 |---|---|---|---|---|
 | `base` | 21: extensiones, ID de publicidad, experiencias personalizadas, encuestas, 17 de anuncios de usuario | — | — | No |
 | `dev` (`desarrollo`) | 6: archivos ocultos, "Finalizar tarea", modo desarrollador, rutas largas, sudo, USB con corriente | — | `dev.sudo-enable` | Sí |
-| `gaming` (`juegos`) | 12: los 10 de juegos menos integridad de memoria, plan Alto rendimiento, USB con corriente | apps, servicios y tarea de Xbox (6) | `gaming.gamebar-controller-off`, `power.high-performance-plan` | Sí |
-| `privacy` (`privacidad`) | 55: privacidad, búsqueda, IA, Edge, DiagTrack, tareas de telemetría, Bing y Copilot | — | 10 (ubicación, Encontrar mi dispositivo, informes de errores, Recall x2, DiagTrack, evaluador x3, Copilot) | Sí |
-| `laptop` (`portatil`, `portátil`) | 7: apps en segundo plano, Delivery Optimization, Edge en segundo plano e inicio acelerado, WIA, Mapas, red en suspensión con batería | — | `power.standby-network-off-battery` | Sí |
-| `legacy` (`equipo-antiguo`, `antiguo`) | 30: efectos visuales, Widgets, Explorador, fondo, tareas que pesan en disco, 7 apps poco usadas | — | — | Sí |
+| `gaming` (`juegos`) | 12: los 10 de juegos menos integridad de memoria, plan Alto rendimiento, USB con corriente | apps y tarea de Xbox (3) | `gaming.gamebar-controller-off`, `power.high-performance-plan` | Sí |
+| `privacy` (`privacidad`) | 53: privacidad, búsqueda, IA, Edge, DiagTrack, tareas de telemetría, Bing y Copilot | — | 9 (ubicación, Encontrar mi dispositivo, informes de errores, DiagTrack, copia de apps, evaluador x3, Copilot) | Sí |
+| `laptop` (`portatil`, `portátil`) | 7: apps en segundo plano (solo Windows 10), Delivery Optimization, Edge en segundo plano e inicio acelerado, WIA, Mapas, red en suspensión con batería | — | `performance.background-apps-off`, `power.standby-network-off-battery` | Sí |
+| `legacy` (`equipo-antiguo`, `antiguo`) | 30: efectos visuales, Widgets, Explorador, fondo, tareas que pesan en disco, 7 apps poco usadas | — | `performance.background-apps-off` (solo Windows 10) | Sí |
 | `work` (`trabajo`) | 10: solo ajustes de usuario sin directivas | Teams, Outlook nuevo, OneDrive, Microsoft 365, Power Automate | — | No |
-| `lite` (`liviano`) | 105: lo que LTSC no trae y recortes de servicios y tareas (todas las apps, servicios, tareas y Edge del catálogo, más interfaz, IA y búsqueda local) | — | 21 (servicios de usuario, evaluador, Seguridad familiar, apps) | Sí |
+| `lite` (`liviano`) | 102: lo que LTSC no trae y recortes de servicios y tareas (todas las apps, servicios, tareas y Edge del catálogo, más interfaz, IA y búsqueda local) | — | 26 (servicios de usuario, evaluador y copia de apps, Seguridad familiar, apps) | Sí |
 
-Ningún perfil incluye un ajuste `high` (`privacy.diagnostic-data-off`, `gaming.memory-integrity-off`). `lite` incluye las apps, servicios y tarea de Xbox y Teams/Outlook/OneDrive: `gaming` y `work` los conservan cuando se combinan (`keep` gana). Nada toca WSL, Hyper-V, contenedores ni `SharedAccess` (lo comprueba "Blacklist guard").
+Ningún perfil incluye un ajuste `high` (`privacy.diagnostic-data-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable`, `gaming.memory-integrity-off`). `lite` incluye las apps y la tarea de Xbox y Teams/Outlook/OneDrive: `gaming` y `work` los conservan cuando se combinan (`keep` gana). Nada toca WSL, Hyper-V, contenedores ni `SharedAccess` (lo comprueba "Blacklist guard").
 
 - [ ] **Step 1: Pruebas que fallan**
 
@@ -5673,9 +5772,9 @@ Describe 'The eight profiles' {
         (Get-Plan -ProfileIds 'lite' -Include 'apps.onedrive' | Where-Object { $_.Id -eq 'apps.onedrive' }).Action | Should -Be 'apply'
     }
 
-    It 'keeps the Xbox apps, services and task when gaming is combined with lite' {
+    It 'keeps the Xbox apps and task when gaming is combined with lite' {
         $plan = Get-Plan -ProfileIds 'gaming', 'lite'
-        foreach ($tweakId in 'apps.xbox-gaming-app', 'apps.xbox-game-bar', 'services.xbox-game-save', 'services.xbox-auth-manager', 'services.xbox-live-networking', 'tasks.xbox-game-save') {
+        foreach ($tweakId in 'apps.xbox-gaming-app', 'apps.xbox-game-bar', 'tasks.xbox-game-save') {
             ($plan | Where-Object { $_.Id -eq $tweakId }).Reason | Should -Be 'kept-by-profile' -Because $tweakId
         }
     }
@@ -5804,9 +5903,6 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "keep": [
     "apps.xbox-gaming-app",
     "apps.xbox-game-bar",
-    "services.xbox-game-save",
-    "services.xbox-auth-manager",
-    "services.xbox-live-networking",
     "tasks.xbox-game-save"
   ]
 }
@@ -5846,15 +5942,13 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
     "ads.settings-home-365",
     "ai.copilot-button-off",
     "ai.copilot-policy-off",
-    "ai.recall-snapshots-off",
-    "ai.recall-unavailable",
     "ai.click-to-do-off",
     "ai.notepad-ai-off",
     "ai.paint-cocreator-off",
     "ai.paint-image-creator-off",
     "ai.paint-generative-fill-off",
     "edge.personalization-reporting-off",
-    "edge.diagnostic-data-off",
+    "edge.diagnostic-data-required",
     "edge.feedback-off",
     "edge.new-tab-feed-off",
     "edge.shopping-off",
@@ -6025,7 +6119,7 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
     "privacy.ceip-off",
     "performance.delivery-optimization-http-only",
     "edge.personalization-reporting-off",
-    "edge.diagnostic-data-off",
+    "edge.diagnostic-data-required",
     "edge.feedback-off",
     "edge.new-tab-feed-off",
     "edge.shopping-off",
@@ -6051,9 +6145,6 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
     "services.contact-data",
     "services.user-data-storage",
     "services.user-data-access",
-    "services.xbox-game-save",
-    "services.xbox-auth-manager",
-    "services.xbox-live-networking",
     "tasks.ceip-consolidator",
     "tasks.ceip-usbceip",
     "tasks.autochk-proxy",
@@ -6249,6 +6340,7 @@ Lo que se evaluó y quedó fuera por otros motivos (apps que no se pueden reinst
 | `RmSvc` | Radio y modo avión: sin él no se controlan Wi-Fi ni Bluetooth desde Configuración. |
 | `WpnService` | Notificaciones y mosaicos. |
 | `SysMain`, `WSearch` | La especificación conserva SysMain (ayuda en discos mecánicos); sin WSearch la búsqueda de Inicio y del Explorador deja de encontrar archivos. |
+| `XblGameSave`, `XblAuthManager`, `XboxNetApiSvc` | Ya vienen en manual y Windows los inicia cuando hacen falta; deshabilitarlos rompe el inicio de sesión de Xbox y de los juegos de Game Pass. |
 | `Spooler` | Sin él no se imprime; solo tendría sentido con detección de impresoras. |
 | `EventLog`, `Schedule`, `Winmgmt`, `RpcSs`, `CryptSvc`, `sppsvc`, `AppIDSvc`, `TrustedInstaller` | Infraestructura de Windows: registros, tareas, WMI, RPC, certificados, activación, AppLocker y servicing. |
 
@@ -6329,6 +6421,7 @@ What was evaluated and left out for other reasons (apps that cannot be reinstall
 | `RmSvc` | Radio and airplane mode: without it Wi-Fi and Bluetooth cannot be controlled from Settings. |
 | `WpnService` | Notifications and tiles. |
 | `SysMain`, `WSearch` | The design keeps SysMain (it helps on hard disks); without WSearch Start and Explorer search stop finding files. |
+| `XblGameSave`, `XblAuthManager`, `XboxNetApiSvc` | They are already Manual and Windows starts them when needed; disabling them breaks the Xbox and Game Pass sign-in. |
 | `Spooler` | Without it nothing prints; it would only make sense with printer detection. |
 | `EventLog`, `Schedule`, `Winmgmt`, `RpcSs`, `CryptSvc`, `sppsvc`, `AppIDSvc`, `TrustedInstaller` | Windows infrastructure: logs, tasks, WMI, RPC, certificates, activation, AppLocker and servicing. |
 
@@ -6838,7 +6931,7 @@ Wrote C:\Users\Edgar\Documents\GitHub\windows-tuneup\docs\es\catalog.md
 Wrote C:\Users\Edgar\Documents\GitHub\windows-tuneup\docs\en\catalog.md
 ```
 
-Revisar a mano el principio de `docs/es/catalog.md`: el resumen dice `| **Total** | **169** |`, la tabla de perfiles tiene ocho filas (`lite` con 105 ajustes), "Ajustes que preguntan" lista 30 y "Ajustes de riesgo alto" dos (`privacy.diagnostic-data-off` y `gaming.memory-integrity-off`). Cada página ronda los 120 KB.
+Revisar a mano el principio de `docs/es/catalog.md`: el resumen dice `| **Total** | **166** |`, la tabla de perfiles tiene ocho filas (`lite` con 102 ajustes), "Ajustes que preguntan" lista 36 y "Ajustes de riesgo alto" cuatro (`privacy.diagnostic-data-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable` y `gaming.memory-integrity-off`). Cada página ronda los 120 KB.
 
 - [ ] **Step 7: Verificar que pasa**
 
@@ -7172,7 +7265,7 @@ Reglas que valen para todos:
 
 **Pregunta antes de:** `gaming.gamebar-controller-off` (el botón Xbox del mando deja de abrir Game Bar) y `power.high-performance-plan` (plan Alto rendimiento; solo en equipos sin batería).
 
-**Qué conserva:** las apps de Xbox y Game Bar, sus servicios y su tarea de partidas guardadas, que Game Pass y muchos juegos necesitan. Combinado con Liviano, también se conservan.
+**Qué conserva:** las apps de Xbox y Game Bar y su tarea de partidas guardadas, que Game Pass y muchos juegos necesitan. Los servicios de Xbox no están en el catálogo: ya vienen en manual y deshabilitarlos rompe el inicio de sesión de Xbox. Combinado con Liviano, también se conservan.
 
 **Riesgo alto, solo con `-Include`:** `gaming.memory-integrity-off` (integridad de memoria): puede dar entre 1 y 15 % más de FPS en algunos juegos a cambio de menos protección contra drivers maliciosos.
 
@@ -7182,9 +7275,9 @@ Reglas que valen para todos:
 
 **Qué hace:** deja los datos de diagnóstico en "Requeridos" (Pro, Enterprise y Education; Home ignora esa directiva), apaga el Programa de mejora de la experiencia, el historial de actividad y su subida, el portapapeles en la nube, el seguimiento de apps abiertas, la voz en línea (el dictado de Win+H deja de funcionar), el aprendizaje de lo que escribes, Bing y el historial en la búsqueda, los archivos recientes de Inicio, Copilot y Click to Do, las funciones de IA en la nube del Bloc de notas y Paint, las tareas de telemetría y lo que Edge envía a Microsoft. Quita la integración de Bing en Inicio.
 
-**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable` (borra las capturas de Recall), `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
+**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.mare-backup` (también ejecuta el evaluador de compatibilidad), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
 
-**Riesgo alto, solo con `-Include`:** `privacy.diagnostic-data-off` (datos de diagnóstico apagados del todo, solo Enterprise y Education). Úsalo junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor.
+**Riesgo alto, solo con `-Include`:** `privacy.diagnostic-data-off` (datos de diagnóstico apagados del todo, solo Enterprise y Education). Úsalo junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor. También son de riesgo alto `ai.recall-snapshots-off` y `ai.recall-unavailable` (Recall: borran las capturas ya guardadas y deshacer no puede devolverlas); ningún perfil los incluye.
 
 **Qué conserva:** las actualizaciones de seguridad. Las directivas de Edge hacen que Edge diga "Administrado por tu organización": es solo un aviso.
 
@@ -7194,7 +7287,7 @@ Reglas que valen para todos:
 
 **Qué hace:** impide que las apps de la Store corran en segundo plano (puedes permitir apps una a una en Configuración), quita los procesos precargados de Edge, deja de compartir descargas de Windows con otros equipos, pasa a manual los servicios de escáner y de mapas.
 
-**Pregunta antes de:** `power.standby-network-off-battery` (sin red durante la suspensión moderna con batería; solo en equipos con batería y Pro o superior).
+**Pregunta antes de:** `performance.background-apps-off` (solo Windows 10: las apps de la Store no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse) y `power.standby-network-off-battery` (sin red durante la suspensión moderna con batería; solo en equipos con batería y Pro o superior).
 
 **Qué conserva:** SysMain, la suspensión moderna, la hibernación y el plan de energía del fabricante.
 
@@ -7203,6 +7296,8 @@ Reglas que valen para todos:
 ## Equipo antiguo (`legacy`, alias `equipo-antiguo`, `antiguo`)
 
 **Qué hace:** apaga la transparencia, las animaciones de ventanas, las sombras y la selección translúcida y Aero Peek (algunas se notan al volver a iniciar sesión), Widgets y Noticias e intereses, el análisis del tipo de cada carpeta en el Explorador, las apps de la Store en segundo plano y Edge en segundo plano; desactiva tareas de fondo que pesan en discos mecánicos (WinSAT, diagnósticos, mapas, Carpetas de trabajo) y quita apps preinstaladas que casi nadie usa (Clipchamp, Noticias, Tiempo, Finanzas, Mensajes, Portal de realidad mixta, Películas y TV).
+
+**Pregunta antes de:** `performance.background-apps-off` (solo Windows 10; ver Portátil).
 
 **Qué conserva:** todo lo de Base, Defender, Windows Update y la búsqueda (reducir la indexación todavía no está en el catálogo).
 
@@ -7222,7 +7317,7 @@ Reglas que valen para todos:
 
 **Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas, Widgets, Copilot, Teams, Xbox, Vínculo móvil, Outlook nuevo, Correo y Calendario; OneDrive pregunta antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, Xbox Live, dispositivos conectados, Carpetas de trabajo, WinSAT. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
 
-**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.outlook-new`, `apps.family-safety`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive o si hay archivos solo en la nube.
+**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive o si hay archivos solo en la nube.
 
 **Qué conserva:** Defender, las actualizaciones de seguridad, WinRE, la Store y winget (de ellos depende deshacer). Quitar la Store no está en el catálogo.
 
@@ -7279,7 +7374,7 @@ Rules that apply to all of them:
 
 **Asks before:** `gaming.gamebar-controller-off` (the controller's Xbox button no longer opens Game Bar) and `power.high-performance-plan` (High performance plan; only on machines without a battery).
 
-**What it keeps:** the Xbox apps and Game Bar, their services and their game save task, which Game Pass and many games need. Combined with Lite, they are kept too.
+**What it keeps:** the Xbox apps and Game Bar and their game save task, which Game Pass and many games need. The Xbox services are not in the catalog: they are already Manual and disabling them breaks the Xbox sign-in. Combined with Lite, they are kept too.
 
 **High risk, only with `-Include`:** `gaming.memory-integrity-off` (memory integrity): it can give 1 to 15% more FPS in some games in exchange for less protection against malicious drivers.
 
@@ -7289,9 +7384,9 @@ Rules that apply to all of them:
 
 **What it does:** keeps diagnostic data at "Required" (Pro, Enterprise and Education; Home ignores that policy), turns off the Customer Experience Improvement Program, activity history and its upload, cloud clipboard, app launch tracking, online speech (Win+H dictation stops working), typing personalization, Bing and history in search, recent files in Start, Copilot and Click to Do, the cloud AI features of Notepad and Paint, the telemetry tasks and what Edge sends to Microsoft. It removes the Bing integration in Start.
 
-**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable` (it deletes the Recall snapshots), `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
+**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.mare-backup` (it also runs the compatibility appraiser), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
 
-**High risk, only with `-Include`:** `privacy.diagnostic-data-off` (diagnostic data fully off, Enterprise and Education only). Use it together with `-Exclude privacy.diagnostic-data-required`, which writes the same value.
+**High risk, only with `-Include`:** `privacy.diagnostic-data-off` (diagnostic data fully off, Enterprise and Education only). Use it together with `-Exclude privacy.diagnostic-data-required`, which writes the same value. `ai.recall-snapshots-off` and `ai.recall-unavailable` are high risk too (Recall: they delete the snapshots already saved and undo cannot bring them back); no profile includes them.
 
 **What it keeps:** security updates. The Edge policies make Edge say "Managed by your organization": it is only a notice.
 
@@ -7301,7 +7396,7 @@ Rules that apply to all of them:
 
 **What it does:** stops Store apps from running in the background (you can allow apps one by one in Settings), removes Edge's preloaded processes, stops sharing Windows downloads with other PCs, and sets the scanner and maps services to manual.
 
-**Asks before:** `power.standby-network-off-battery` (no network during modern standby on battery; only on machines with a battery and Pro or later).
+**Asks before:** `performance.background-apps-off` (Windows 10 only: Store apps do not notify while closed and Windows Spotlight backgrounds may stop refreshing) and `power.standby-network-off-battery` (no network during modern standby on battery; only on machines with a battery and Pro or later).
 
 **What it keeps:** SysMain, modern standby, hibernation and the manufacturer's power plan.
 
@@ -7310,6 +7405,8 @@ Rules that apply to all of them:
 ## Older PC (`legacy`, aliases `equipo-antiguo`, `antiguo`)
 
 **What it does:** turns off transparency, window animations, shadows and translucent selection and Aero Peek (some show after signing in again), Widgets and News and interests, File Explorer's folder type detection, Store apps in the background and Edge in the background; turns off background tasks that weigh on hard disks (WinSAT, diagnostics, maps, Work Folders) and removes preinstalled apps that almost nobody uses (Clipchamp, News, Weather, Finance, Messaging, Mixed Reality Portal, Movies & TV).
+
+**Asks before:** `performance.background-apps-off` (Windows 10 only; see Laptop).
 
 **What it keeps:** everything in Base, Defender, Windows Update and search (smaller indexing is not in the catalog yet).
 
@@ -7329,7 +7426,7 @@ Rules that apply to all of them:
 
 **What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps, Widgets, Copilot, Teams, Xbox, Phone Link, the new Outlook, Mail and Calendar; OneDrive asks first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, Xbox Live, connected devices, Work Folders, WinSAT. Search stays local (no Bing). Edge without promotional content or background processes.
 
-**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.outlook-new`, `apps.family-safety`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive or when files only live in the cloud.
+**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive or when files only live in the cloud.
 
 **What it keeps:** Defender, security updates, WinRE, the Store and winget (undo depends on them). Removing the Store is not in the catalog.
 
@@ -7367,8 +7464,8 @@ Cambios: el aviso de "catálogo de ejemplo" pasa a decir que falta el menú y la
 Optimización de Windows 10/11 por objetivos, reversible y medible.
 Goal-based, reversible and measurable Windows 10/11 optimization.
 
-> **En desarrollo.** El motor y el catálogo (169 ajustes en 8 perfiles) están completos; falta el menú interactivo (Plan 4) y la prueba de extremo a extremo de cada perfil en una máquina virtual antes de la primera release. Revisa siempre el plan con `-WhatIf` antes de aplicar.
-> **Work in progress.** The engine and the catalog (169 tweaks in 8 profiles) are complete; the interactive menu (Plan 4) and the end-to-end test of every profile in a virtual machine before the first release are still missing. Always review the plan with `-WhatIf` before applying.
+> **En desarrollo.** El motor y el catálogo (166 ajustes en 8 perfiles) están completos; falta el menú interactivo (Plan 4) y la prueba de extremo a extremo de cada perfil en una máquina virtual antes de la primera release. Revisa siempre el plan con `-WhatIf` antes de aplicar.
+> **Work in progress.** The engine and the catalog (166 tweaks in 8 profiles) are complete; the interactive menu (Plan 4) and the end-to-end test of every profile in a virtual machine before the first release are still missing. Always review the plan with `-WhatIf` before applying.
 
 ## Perfiles / Profiles
 
@@ -7610,16 +7707,16 @@ git commit -m "docs: README del Plan 3, perfiles y documentación"
 | `privacy.json` | 18 | 18 registry | 9 | 3 | 1 |
 | `ads.json` | 28 | 28 registry | 26 | 0 | 0 |
 | `ui.json` | 12 | 12 registry | 10 | 0 | 0 |
-| `ai.json` | 10 | 9 registry, 1 service | 4 | 2 | 0 |
+| `ai.json` | 10 | 9 registry, 1 service | 4 | 2 | 2 |
 | `edge.json` | 17 | 17 registry | 0 | 0 | 0 |
-| `services.json` | 13 | 13 service | 0 | 7 | 0 |
-| `tasks.json` | 21 | 21 task | 0 | 5 | 0 |
-| `performance.json` | 3 | 3 registry | 2 | 0 | 0 |
+| `services.json` | 10 | 10 service | 0 | 7 | 0 |
+| `tasks.json` | 21 | 21 task | 0 | 6 | 0 |
+| `performance.json` | 3 | 3 registry | 2 | 1 | 0 |
 | `power.json` | 3 | 2 powercfg, 1 registry | 0 | 2 | 0 |
 | `gaming.json` | 11 | 9 registry, 2 action | 8 | 1 | 1 |
 | `dev.json` | 3 | 3 registry | 0 | 1 | 0 |
-| `apps.json` | 30 | 29 appx, 1 action | 0 | 9 | 0 |
-| **Total** | **169** | | **59** | **30** | **2** |
+| `apps.json` | 30 | 29 appx, 1 action | 0 | 13 | 0 |
+| **Total** | **166** | | **59** | **36** | **4** |
 
 Perfiles: `base` 21, `dev` 6, `gaming` 12 (+6 `keep`), `privacy` 55, `laptop` 7, `legacy` 30, `work` 10 (+5 `keep`), `lite` 105.
 

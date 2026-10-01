@@ -72,7 +72,7 @@
       "why": { "es": "Quita el widget de noticias de la barra de tareas de Windows 10.", "en": "Removes the news widget from the Windows 10 taskbar." },
       "risk": "low",
       "ask": false,
-      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
       "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\Windows Feeds", "name": "EnableFeeds", "kind": "DWord", "value": 0 },

@@ -29,10 +29,10 @@
     {
       "id": "performance.background-apps-off",
       "title": { "es": "No dejar que las apps de la Store corran en segundo plano", "en": "Do not let Store apps run in the background" },
-      "why": { "es": "Ahorra batería y memoria; a cambio, apps como Correo o Alarmas no avisan con la app cerrada. Puedes permitir apps una a una en Configuración.", "en": "Saves battery and memory; in exchange, apps like Mail or Alarms do not notify while closed. You can allow apps one by one in Settings." },
+      "why": { "es": "Ahorra batería y memoria; a cambio, apps como Correo o Alarmas no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse. Puedes permitir apps una a una en Configuración.", "en": "Saves battery and memory; in exchange, apps like Mail or Alarms do not notify while closed and Windows Spotlight backgrounds may stop refreshing. You can allow apps one by one in Settings." },
       "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "ask": true,
+      "os": { "families": ["10"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "user",
       "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "name": "GlobalUserDisabled", "kind": "DWord", "value": 1 },

@@ -94,9 +94,9 @@
     {
       "id": "tasks.mare-backup",
       "title": { "es": "Desactivar la recopilación de apps para Copia de seguridad de Windows", "en": "Disable app collection for Windows Backup" },
-      "why": { "es": "Recoge la lista de tus programas para la copia en la nube; esa lista no se restaurará.", "en": "Collects your program list for the cloud backup; that list will not be restored." },
-      "risk": "low",
-      "ask": false,
+      "why": { "es": "Recoge la lista de tus programas para la copia en la nube (esa lista no se restaurará). En compilaciones recientes también ejecuta el evaluador de compatibilidad, así que desactivarla puede detener las ofertas de actualizaciones de función.", "en": "Collects your program list for the cloud backup (that list will not be restored). On recent builds it also runs the compatibility appraiser, so disabling it may stop feature-update offers." },
+      "risk": "medium",
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "task",
       "scope": "machine",

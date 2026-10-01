@@ -77,51 +77,118 @@ Describe 'Shipped catalog quality' {
 }
 
 Describe 'Blacklist guard' {
-    It 'never touches a service that the blacklist or a profile protects' {
-        $protected = @('WinDefend', 'WdNisSvc', 'Sense', 'SecurityHealthService', 'wscsvc', 'mpssvc', 'BFE', 'wuauserv', 'UsoSvc',
-            'WaaSMedicSvc', 'BITS', 'TrustedInstaller', 'CryptSvc', 'SharedAccess', 'LanmanServer', 'LanmanWorkstation', 'WerSvc', 'DPS',
-            'RmSvc', 'WpnService', 'webthreatdefsvc', 'webthreatdefusersvc', 'SysMain', 'WSearch', 'vmcompute', 'vmms', 'hns', 'HvHost',
-            'LxssManager', 'WslService', 'EventLog', 'Schedule', 'Winmgmt', 'RpcSs', 'sppsvc', 'VSS', 'swprv', 'AppIDSvc', 'Spooler')
-        $touched = @($Catalog | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
-        @($touched | Where-Object { $protected -contains $_ }) -join ', ' | Should -BeNullOrEmpty
-    }
-
-    It 'never writes a registry value of the blacklist' {
-        $names = @('SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'SystemResponsiveness', 'TcpAckFrequency', 'TCPNoDelay',
-            'DisableAntiSpyware', 'DisableRealtimeMonitoring', 'EnableLUA', 'ConsentPromptBehaviorAdmin', 'EnableSmartScreen',
-            'SmartScreenEnabled', 'NoAutoUpdate', 'DisableWindowsUpdateAccess', 'FeatureSettingsOverride', 'FeatureSettingsOverrideMask',
-            'PagingFiles', 'EnableFirewall')
-        $paths = @('\Windows Defender', '\WindowsUpdate', '\WindowsFirewall', '\Services\SharedAccess', '\Session Manager\Memory Management')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'registry' }) {
-            $names | Should -Not -Contain ([string]$tweak.set.name) -Because $tweak.id
-            foreach ($fragment in $paths) { ([string]$tweak.set.path).Contains($fragment) | Should -BeFalse -Because "$($tweak.id) writes under $fragment" }
-        }
-    }
-
-    It 'never disables a scheduled task of Defender, updates, recovery or disk health' {
-        $folders = @('\Microsoft\Windows\Windows Defender\', '\Microsoft\Windows\WindowsUpdate\', '\Microsoft\Windows\UpdateOrchestrator\',
+    BeforeAll {
+        # Every comparison ignores case: Windows paths, service names and package names do.
+        $script:ProtectedServices = @('WinDefend', 'WdNisSvc', 'Sense', 'SecurityHealthService', 'wscsvc', 'mpssvc', 'BFE', 'wuauserv', 'UsoSvc',
+            'WaaSMedicSvc', 'BITS', 'DoSvc', 'InstallService', 'AppXSvc', 'ClipSVC', 'wlidsvc', 'TrustedInstaller', 'CryptSvc', 'SharedAccess',
+            'LanmanServer', 'LanmanWorkstation', 'WerSvc', 'DPS', 'RmSvc', 'WpnService', 'webthreatdefsvc', 'webthreatdefusersvc', 'SysMain',
+            'WSearch', 'vmcompute', 'vmms', 'hns', 'HvHost', 'LxssManager', 'WslService', 'EventLog', 'Schedule', 'Winmgmt', 'RpcSs', 'sppsvc',
+            'VSS', 'swprv', 'AppIDSvc', 'Spooler')
+        $script:BlockedValueNames = @('SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'SystemResponsiveness', 'TcpAckFrequency', 'TCPNoDelay',
+            'DisableAntiSpyware', 'DisableRealtimeMonitoring', 'EnableSmartScreen', 'SmartScreenEnabled', 'NoAutoUpdate', 'DisableWindowsUpdateAccess',
+            'FeatureSettingsOverride', 'FeatureSettingsOverrideMask', 'PagingFiles', 'EnableFirewall',
+            'EnableLUA', 'ConsentPromptBehaviorAdmin', 'ConsentPromptBehaviorUser', 'PromptOnSecureDesktop', 'EnableVirtualization',
+            'FilterAdministratorToken', 'LocalAccountTokenFilterPolicy',
+            'EnableVirtualizationBasedSecurity', 'RequirePlatformSecurityFeatures', 'HypervisorEnforcedCodeIntegrity', 'LsaCfgFlags')
+        $script:BlockedPathFragments = @('\Windows Defender', '\WindowsUpdate', '\WindowsFirewall', '\Session Manager\Memory Management', '\DeviceGuard')
+        # The one tweak that is meant to turn memory integrity off (high risk, only with -Include).
+        $script:VirtualizationSecurityException = 'gaming.memory-integrity-off'
+        $script:ProtectedTaskFolders = @('\Microsoft\Windows\Windows Defender\', '\Microsoft\Windows\WindowsUpdate\', '\Microsoft\Windows\UpdateOrchestrator\',
             '\Microsoft\Windows\WaaSMedic\', '\Microsoft\Windows\SystemRestore\', '\Microsoft\Windows\RecoveryEnvironment\',
             '\Microsoft\Windows\Chkdsk\', '\Microsoft\Windows\Defrag\', '\Microsoft\Windows\Servicing\', '\Microsoft\Windows\Registry\')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'task' }) {
-            $folders | Should -Not -Contain ([string]$tweak.set.path) -Because $tweak.id
-            [string]$tweak.set.name | Should -Not -Be 'Microsoft-Windows-DiskDiagnosticResolver' -Because $tweak.id
+        $script:ProtectedTaskNames = @('Microsoft-Windows-DiskDiagnosticResolver')
+        # The apps Windows needs or that people expect to keep, plus the frameworks and sign-in components.
+        $script:ProtectedApps = @('Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsTerminal',
+            'Microsoft.WindowsCalculator', 'Microsoft.Windows.Photos', 'Microsoft.WindowsNotepad', 'Microsoft.Paint', 'Microsoft.ScreenSketch',
+            'Microsoft.WindowsCamera', 'Microsoft.SecHealthUI', 'Microsoft.MicrosoftEdge*', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxIdentityProvider',
+            'Microsoft.XboxSpeechToTextOverlay', 'Microsoft.XboxGameCallableUI', 'MicrosoftWindows.Client.CoreAI', 'MicrosoftWindows.Client.CBS',
+            'Microsoft.NET.*', 'Microsoft.VCLibs.*', 'Microsoft.UI.Xaml.*', 'Microsoft.WindowsAppRuntime*', 'MicrosoftCorporationII.WinAppRuntime*')
+
+        function Get-BlacklistViolation($Tweak) {
+            $type = [string]$Tweak.type
+            $set = $Tweak.set
+            $id = [string]$Tweak.id
+            if ($type -eq 'service') {
+                if ($ProtectedServices -contains [string]$set.name) { "$id touches the protected service $($set.name)" }
+            }
+            if ($type -eq 'registry') {
+                $path = [string]$set.path
+                if ($BlockedValueNames -contains [string]$set.name -and $id -ne $VirtualizationSecurityException) { "$id writes the protected value $($set.name)" }
+                foreach ($fragment in $BlockedPathFragments) {
+                    if ($id -eq $VirtualizationSecurityException) { continue }
+                    if ($path.IndexOf($fragment, [StringComparison]::OrdinalIgnoreCase) -ge 0) { "$id writes under $fragment" }
+                }
+                foreach ($service in $ProtectedServices) {
+                    if ($path -match ('(?i)\\Services\\' + [regex]::Escape($service) + '(\\|$)')) { "$id writes the configuration of the protected service $service" }
+                }
+            }
+            if ($type -eq 'task') {
+                $folder = ([string]$set.path).TrimEnd('\') + '\'
+                foreach ($protectedFolder in $ProtectedTaskFolders) {
+                    # Also catches a subfolder and a path written without its final backslash.
+                    if ($folder.StartsWith($protectedFolder, [StringComparison]::OrdinalIgnoreCase)) { "$id disables a task under $protectedFolder" }
+                }
+                if ($ProtectedTaskNames -contains [string]$set.name) { "$id disables the task $($set.name)" }
+            }
+            if ($type -eq 'appx') {
+                foreach ($pattern in $ProtectedApps) {
+                    # A wildcard in the catalog name must not slip past the list either.
+                    if (([string]$set.name -like $pattern) -or ($pattern -like [string]$set.name)) { "$id removes the protected app $pattern" }
+                }
+            }
+            if ($type -eq 'feature' -or $type -eq 'capability') {
+                if ([string]$set.name -match '^(Microsoft-Hyper-V|VirtualMachinePlatform|HypervisorPlatform|Containers|Microsoft-Windows-Subsystem-Linux)') {
+                    "$id touches a virtualization feature that WSL, Hyper-V or containers need"
+                }
+            }
         }
     }
 
-    It 'never removes the Store, winget, Windows Security, Edge, frameworks or the Xbox sign-in components' {
-        $patterns = @('Microsoft.WindowsStore', 'Microsoft.StorePurchaseApp', 'Microsoft.DesktopAppInstaller', 'Microsoft.SecHealthUI',
-            'Microsoft.MicrosoftEdge*', 'Microsoft.Xbox.TCUI', 'Microsoft.XboxIdentityProvider', 'Microsoft.XboxSpeechToTextOverlay',
-            'Microsoft.XboxGameCallableUI', 'MicrosoftWindows.Client.CoreAI', 'MicrosoftWindows.Client.CBS', 'Microsoft.NET.*',
-            'Microsoft.VCLibs.*', 'Microsoft.UI.Xaml.*', 'Microsoft.WindowsAppRuntime*', 'MicrosoftCorporationII.WinAppRuntime*')
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'appx' }) {
-            foreach ($pattern in $patterns) { [string]$tweak.set.name | Should -Not -BeLike $pattern -Because $tweak.id }
+    It 'trips no rule of the blacklist' {
+        $violations = @($Catalog | ForEach-Object { Get-BlacklistViolation $_ })
+        $violations -join "`n" | Should -BeNullOrEmpty
+    }
+
+    It 'keeps every protected service, task and app of the lists out of the catalog by name' {
+        $services = @($Catalog | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
+        @($services | Where-Object { $ProtectedServices -contains $_ }) -join ', ' | Should -BeNullOrEmpty
+        $apps = @($Catalog | Where-Object { $_.type -eq 'appx' } | ForEach-Object { [string]$_.set.name })
+        foreach ($keep in 'Microsoft.WindowsStore', 'Microsoft.DesktopAppInstaller', 'Microsoft.WindowsTerminal', 'Microsoft.WindowsCalculator',
+            'Microsoft.Windows.Photos', 'Microsoft.WindowsNotepad', 'Microsoft.Paint', 'Microsoft.ScreenSketch', 'Microsoft.WindowsCamera', 'Microsoft.SecHealthUI') {
+            $apps | Should -Not -Contain $keep
         }
     }
 
-    It 'never touches the virtualization features that WSL, Hyper-V and containers need' {
-        foreach ($tweak in $Catalog | Where-Object { $_.type -eq 'feature' -or $_.type -eq 'capability' }) {
-            [string]$tweak.set.name | Should -Not -Match '^(Microsoft-Hyper-V|VirtualMachinePlatform|HypervisorPlatform|Containers|Microsoft-Windows-Subsystem-Linux)' -Because $tweak.id
-        }
+    It 'catches <Name>' -TestCases @(
+        # The four ways past the first version of these checks.
+        @{ Name = 'a registry path written in another case'; Type = 'registry'; Set = @{ path = 'HKLM:\software\policies\microsoft\WINDOWS DEFENDER'; name = 'Foo'; kind = 'DWord'; value = 1 } }
+        @{ Name = 'a value inside the key of a protected service'; Type = 'registry'; Set = @{ path = 'HKLM:\SYSTEM\CurrentControlSet\Services\WinDefend'; name = 'Start'; kind = 'DWord'; value = 4 } }
+        @{ Name = 'a task in a subfolder of a protected folder, in another case'; Type = 'task'; Set = @{ path = '\microsoft\windows\windowsupdate\Sub'; name = 'Any'; state = 'Disabled' } }
+        @{ Name = 'a keep-list app'; Type = 'appx'; Set = @{ name = 'Microsoft.WindowsCalculator'; storeId = '9WZDNCRFHVN5'; action = 'remove' } }
+        # More of the same kind.
+        @{ Name = 'the Store written with a wildcard'; Type = 'appx'; Set = @{ name = 'Microsoft.Windows*'; storeId = '9WZDNCRFHVN5'; action = 'remove' } }
+        @{ Name = 'a protected service in another case'; Type = 'service'; Set = @{ name = 'wuauserv'.ToUpper(); startType = 'Disabled'; stop = $true } }
+        @{ Name = 'a UAC value'; Type = 'registry'; Set = @{ path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; name = 'PromptOnSecureDesktop'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a UAC value for standard users'; Type = 'registry'; Set = @{ path = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'; name = 'ConsentPromptBehaviorUser'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a virtualization-based security key'; Type = 'registry'; Set = @{ path = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard'; name = 'EnableVirtualizationBasedSecurity'; kind = 'DWord'; value = 0 } }
+        @{ Name = 'a task of the update orchestrator'; Type = 'task'; Set = @{ path = '\Microsoft\Windows\UpdateOrchestrator'; name = 'Schedule Scan'; state = 'Disabled' } }
+        @{ Name = 'the disk diagnostic task'; Type = 'task'; Set = @{ path = '\Microsoft\Windows\DiskDiagnostic\'; name = 'Microsoft-Windows-DiskDiagnosticResolver'; state = 'Disabled' } }
+        @{ Name = 'a virtualization feature'; Type = 'feature'; Set = @{ name = 'Microsoft-Hyper-V-All'; state = 'Disabled' } }
+    ) {
+        param($Type, $Set)
+        $tweak = [pscustomobject]@{ id = 'test.bad'; type = $Type; set = [pscustomobject]$Set }
+        @(Get-BlacklistViolation $tweak).Count | Should -BeGreaterThan 0
+    }
+
+    It 'lets a harmless tweak and the explicit memory integrity tweak through' {
+        $harmless = [pscustomobject]@{ id = 'test.ok'; type = 'registry'; set = [pscustomobject]@{ path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; name = 'HideFileExt'; kind = 'DWord'; value = 0 } }
+        @(Get-BlacklistViolation $harmless).Count | Should -Be 0
+        $memory = $ById['gaming.memory-integrity-off']
+        $memory.risk | Should -Be 'high'
+        @(Get-BlacklistViolation $memory).Count | Should -Be 0
+        $copy = $memory | Select-Object -Property *
+        $copy.id = 'test.other'
+        @(Get-BlacklistViolation $copy).Count | Should -BeGreaterThan 0
     }
 }
 
@@ -137,7 +204,16 @@ Describe 'Shipped profiles' {
             $tweak = $ById[$tweakId]
             Test-TuneupUserScopedTweak -Tweak $tweak | Should -BeTrue -Because $tweakId
             Test-TuneupPolicyTweak -Tweak $tweak | Should -BeFalse -Because $tweakId
+            Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -BeFalse -Because $tweakId
         }
+    }
+
+    It 'treats the HKCU policies of the catalog as needing an administrator, so base cannot hold them' {
+        $policies = @($Catalog | Where-Object { $_.scope -eq 'user' -and (Test-TuneupPolicyTweak -Tweak $_) } | ForEach-Object { $_.id })
+        $policies | Should -Contain 'ads.start-hide-recommended-policy'
+        $policies | Should -Contain 'ai.copilot-policy-off'
+        foreach ($id in $policies) { Test-TuneupTweakNeedsAdmin -Tweak $ById[$id] | Should -BeTrue -Because $id }
+        foreach ($id in $policies) { @((Get-ProfileById 'base').include) | Should -Not -Contain $id }
     }
 
     It 'has no high-risk tweak in any profile' {

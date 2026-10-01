@@ -29,7 +29,7 @@
     {
       "id": "privacy.diagnostic-data-required",
       "title": { "es": "Enviar solo los datos de diagnóstico requeridos", "en": "Send only required diagnostic data" },
-      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro." },
+      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Las compilaciones de Windows Insider necesitan los datos opcionales: no lo apliques en un equipo del programa Insider.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. Windows Insider builds need optional data: do not apply it on an Insider device." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },

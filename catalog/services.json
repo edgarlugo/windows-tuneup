@@ -133,45 +133,6 @@
       "rebootRequired": false,
       "signOutRequired": true,
       "sources": ["https://learn.microsoft.com/windows/application-management/per-user-services-in-windows", "https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server"]
-    },
-    {
-      "id": "services.xbox-game-save",
-      "title": { "es": "Desactivar el servicio de partidas guardadas de Xbox Live", "en": "Disable the Xbox Live Game Save service" },
-      "why": { "es": "Sincroniza partidas guardadas con Xbox Live y despierta una tarea periódica. El perfil Gaming lo conserva.", "en": "Syncs game saves with Xbox Live and wakes a periodic task. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XblGameSave", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server", "https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
-    },
-    {
-      "id": "services.xbox-auth-manager",
-      "title": { "es": "Desactivar el servicio de autenticación de Xbox Live", "en": "Disable the Xbox Live Auth Manager service" },
-      "why": { "es": "Solo lo usan los juegos y apps que inician sesión en Xbox Live. El perfil Gaming lo conserva.", "en": "Only used by games and apps that sign in to Xbox Live. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XblAuthManager", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://learn.microsoft.com/windows-server/security/windows-services/security-guidelines-for-disabling-system-services-in-windows-server", "https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
-    },
-    {
-      "id": "services.xbox-live-networking",
-      "title": { "es": "Desactivar el servicio de red de Xbox Live", "en": "Disable the Xbox Live Networking service" },
-      "why": { "es": "Solo lo usan los juegos con multijugador de Xbox Live. El perfil Gaming lo conserva.", "en": "Only used by games with Xbox Live multiplayer. The Gaming profile keeps it." },
-      "risk": "medium",
-      "ask": false,
-      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
-      "type": "service",
-      "scope": "machine",
-      "set": { "name": "XboxNetApiSvc", "startType": "Disabled", "stop": true },
-      "rebootRequired": false,
-      "sources": ["https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/Services.json"]
     }
   ]
 }

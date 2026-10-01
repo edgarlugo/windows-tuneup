@@ -14,15 +14,15 @@
       "sources": ["https://learn.microsoft.com/deployedge/microsoft-edge-browser-policies/personalizationreportingenabled", "https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Disable_Telemetry.reg", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
     },
     {
-      "id": "edge.diagnostic-data-off",
-      "title": { "es": "Edge no envía datos de diagnóstico", "en": "Edge sends no diagnostic data" },
-      "why": { "es": "Edge deja de enviar a Microsoft datos de uso y de errores del navegador.", "en": "Edge stops sending browser usage and crash data to Microsoft." },
+      "id": "edge.diagnostic-data-required",
+      "title": { "es": "Edge envía solo los datos de diagnóstico requeridos", "en": "Edge sends only required diagnostic data" },
+      "why": { "es": "Edge deja de enviar a Microsoft los datos opcionales de uso, sitios visitados y errores; solo envía los requeridos para mantenerse seguro y al día.", "en": "Edge stops sending optional usage, visited-site and crash data to Microsoft; it only sends the data required to stay secure and up to date." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
-      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "DiagnosticData", "kind": "DWord", "value": 0 },
+      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Edge", "name": "DiagnosticData", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
       "sources": ["https://learn.microsoft.com/deployedge/microsoft-edge-browser-policies/diagnosticdata", "https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Disable_Telemetry.reg", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
     },
@@ -146,7 +146,7 @@
     {
       "id": "edge.sidebar-off",
       "title": { "es": "Edge sin barra lateral", "en": "Edge without the sidebar" },
-      "why": { "es": "Oculta la barra lateral con Copilot, Descubrir y accesos de compras.", "en": "Hides the sidebar with Copilot, Discover and shopping shortcuts." },
+      "why": { "es": "Oculta la barra lateral de Edge (Copilot, Descubrir, accesos de compras). No rige en perfiles con cuenta Microsoft; el icono de Copilot de la barra de herramientas lo controla otra directiva (Microsoft365CopilotChatIconEnabled).", "en": "Hides the Edge sidebar (Copilot, Discover, shopping shortcuts). It does not apply to profiles signed in with a Microsoft account; the Copilot icon in the toolbar is controlled by another policy (Microsoft365CopilotChatIconEnabled)." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
