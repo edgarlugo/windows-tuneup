@@ -7295,7 +7295,7 @@ Reglas que valen para todos:
 - **Riesgo alto:** ningún perfil incluye ajustes de riesgo alto; solo se aplican con `-Include`.
 - **Edición y hardware:** una directiva que tu edición ignora (por ejemplo, Home) o un ajuste pensado para otro hardware (con o sin batería) se omite y el plan dice por qué.
 - **Equipos de una organización:** en un equipo unido a un dominio o inscrito en Intune no se tocan directivas (`\Policies\`): el plan las muestra como "equipo administrado".
-- **Administrador:** `base` y `work` solo tienen ajustes de tu usuario y se aplican sin elevar. Los demás traen cambios de sistema: abre PowerShell como administrador, o deja fuera esos ajustes con `-Exclude`.
+- **Administrador:** `base` y `work` solo tienen ajustes de tu usuario que no son directivas y se aplican sin elevar. Los demás traen cambios de sistema o directivas de tu usuario (Windows solo deja leerlas y escribirlas a un administrador): abre PowerShell como administrador, o deja fuera esos ajustes con `-Exclude`. Sin elevar, el plan los marca como de administrador y aplicar se niega.
 - **Deshacer:** `.\tuneup.ps1 -Undo last` devuelve todo lo de la última corrida. Las apps se reinstalan desde la Store para tu cuenta (ver el README).
 
 ## Base (`base`)
@@ -7356,7 +7356,7 @@ Reglas que valen para todos:
 
 ## Equipo antiguo (`legacy`, alias `equipo-antiguo`, `antiguo`)
 
-**Qué hace:** apaga la transparencia, las animaciones de ventanas, las sombras y la selección translúcida y Aero Peek (algunas se notan al volver a iniciar sesión), Widgets y Noticias e intereses, el análisis del tipo de cada carpeta en el Explorador, las apps de la Store en segundo plano y Edge en segundo plano; desactiva tareas de fondo que pesan en discos mecánicos (WinSAT, diagnósticos, mapas, Carpetas de trabajo) y quita apps preinstaladas que casi nadie usa (Clipchamp, Noticias, Tiempo, Finanzas, Mensajes, Portal de realidad mixta, Películas y TV).
+**Qué hace:** apaga la transparencia, las animaciones de ventanas, las sombras y la selección translúcida y Aero Peek (algunas se notan al volver a iniciar sesión), Widgets y Noticias e intereses, el análisis del tipo de cada carpeta en el Explorador, las apps de la Store en segundo plano y Edge en segundo plano; deja de compartir descargas de Windows con otros equipos, pasa a manual los servicios de escáner y de mapas; desactiva tareas de fondo que pesan en discos mecánicos (WinSAT, diagnósticos, mapas, Carpetas de trabajo) y quita apps preinstaladas que casi nadie usa (Clipchamp, Noticias, Tiempo, Finanzas, Mensajes, Portal de realidad mixta, Películas y TV).
 
 **Pregunta antes de:** `performance.background-apps-off` (solo Windows 10; ver Portátil).
 
@@ -7376,9 +7376,9 @@ Reglas que valen para todos:
 
 ## Liviano (`lite`, alias `liviano`)
 
-**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas, Widgets, Copilot, Teams, Xbox, Vínculo móvil, Outlook nuevo, Correo y Calendario; OneDrive pregunta antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, Xbox Live, dispositivos conectados, Carpetas de trabajo, WinSAT. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
+**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas, Widgets, Copilot, Teams, Xbox, Vínculo móvil, Outlook nuevo, Correo y Calendario; OneDrive pregunta antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, la tarea de partidas guardadas de Xbox, dispositivos conectados, Carpetas de trabajo, WinSAT. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
 
-**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive o si hay archivos solo en la nube.
+**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no se pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio.
 
 **Qué conserva:** Defender, las actualizaciones de seguridad, WinRE, la Store y winget (de ellos depende deshacer). Quitar la Store no está en el catálogo.
 
@@ -7404,7 +7404,7 @@ Rules that apply to all of them:
 - **High risk:** no profile includes high-risk tweaks; they are only applied with `-Include`.
 - **Edition and hardware:** a policy that your edition ignores (for example, Home) or a tweak meant for other hardware (with or without a battery) is skipped and the plan says why.
 - **Machines of an organization:** on a domain-joined or Intune-enrolled machine policies (`\Policies\`) are left alone: the plan shows them as "managed device".
-- **Administrator:** `base` and `work` only hold settings of your user and apply without elevation. The others bring system changes: open PowerShell as administrator, or leave those tweaks out with `-Exclude`.
+- **Administrator:** `base` and `work` only hold settings of your user that are not policies and apply without elevation. The others bring system changes or policies of your user (Windows only lets an administrator read and write them): open PowerShell as administrator, or leave those tweaks out with `-Exclude`. Without elevation the plan marks them as needing an administrator and applying refuses.
 - **Undo:** `.\tuneup.ps1 -Undo last` gives back everything of the last run. Apps are reinstalled from the Store for your account (see the README).
 
 ## Base (`base`)
@@ -7465,7 +7465,7 @@ Rules that apply to all of them:
 
 ## Older PC (`legacy`, aliases `equipo-antiguo`, `antiguo`)
 
-**What it does:** turns off transparency, window animations, shadows and translucent selection and Aero Peek (some show after signing in again), Widgets and News and interests, File Explorer's folder type detection, Store apps in the background and Edge in the background; turns off background tasks that weigh on hard disks (WinSAT, diagnostics, maps, Work Folders) and removes preinstalled apps that almost nobody uses (Clipchamp, News, Weather, Finance, Messaging, Mixed Reality Portal, Movies & TV).
+**What it does:** turns off transparency, window animations, shadows and translucent selection and Aero Peek (some show after signing in again), Widgets and News and interests, File Explorer's folder type detection, Store apps in the background and Edge in the background; stops sharing Windows downloads with other PCs, sets the scanner and maps services to manual; turns off background tasks that weigh on hard disks (WinSAT, diagnostics, maps, Work Folders) and removes preinstalled apps that almost nobody uses (Clipchamp, News, Weather, Finance, Messaging, Mixed Reality Portal, Movies & TV).
 
 **Asks before:** `performance.background-apps-off` (Windows 10 only; see Laptop).
 
@@ -7485,9 +7485,9 @@ Rules that apply to all of them:
 
 ## Lite (`lite`, alias `liviano`)
 
-**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps, Widgets, Copilot, Teams, Xbox, Phone Link, the new Outlook, Mail and Calendar; OneDrive asks first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, Xbox Live, connected devices, Work Folders, WinSAT. Search stays local (no Bing). Edge without promotional content or background processes.
+**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps, Widgets, Copilot, Teams, Xbox, Phone Link, the new Outlook, Mail and Calendar; OneDrive asks first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, the Xbox game save task, connected devices, Work Folders, WinSAT. Search stays local (no Bing). Edge without promotional content or background processes.
 
-**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive or when files only live in the cloud.
+**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when not every file could be checked, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop.
 
 **What it keeps:** Defender, security updates, WinRE, the Store and winget (undo depends on them). Removing the Store is not in the catalog.
 
