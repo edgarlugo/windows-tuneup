@@ -1542,9 +1542,9 @@ Contenido completo de `catalog/privacy.json` (18 ajustes):
     {
       "id": "privacy.diagnostic-data-required",
       "title": { "es": "Enviar solo los datos de diagnóstico requeridos", "en": "Send only required diagnostic data" },
-      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Las compilaciones de Windows Insider necesitan los datos opcionales: no lo apliques en un equipo del programa Insider.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. Windows Insider builds need optional data: do not apply it on an Insider device." },
+      "why": { "es": "Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Pregunta antes porque un equipo del programa Windows Insider necesita los datos opcionales y dejaría de recibir compilaciones: no lo apliques ahí.", "en": "Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. It asks first because a Windows Insider device needs the optional data and would stop receiving builds: do not apply it there." },
       "risk": "low",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
       "type": "registry",
       "scope": "machine",
@@ -3524,9 +3524,9 @@ Contenido completo de `catalog/tasks.json` (21 ajustes):
     {
       "id": "tasks.xbox-game-save",
       "title": { "es": "Desactivar la tarea de partidas guardadas de Xbox", "en": "Disable the Xbox game save task" },
-      "why": { "es": "Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. El perfil Gaming la conserva.", "en": "Wakes the Xbox Live game save service even if you do not play. The Gaming profile keeps it." },
+      "why": { "es": "Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. Pregunta antes porque los juegos de Game Pass pueden perder la sincronización de sus partidas guardadas; el perfil Gaming la conserva.", "en": "Wakes the Xbox Live game save service even if you do not play. It asks first because Game Pass games can lose the sync of their saved games; the Gaming profile keeps it." },
       "risk": "low",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "task",
       "scope": "machine",
@@ -6000,8 +6000,8 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "aliases": ["portatil", "portátil"],
   "title": { "es": "Portátil", "en": "Laptop" },
   "description": {
-    "es": "Más batería: apps de la Store sin correr en segundo plano, Edge sin procesos precargados y sin red en suspensión con batería.",
-    "en": "More battery: Store apps do not run in the background, Edge keeps no preloaded processes and no network in standby on battery."
+    "es": "Más batería: sin compartir descargas de Windows, Edge sin procesos al iniciar ni en segundo plano, escáner y mapas en manual, y sin red en suspensión con batería (pregunta antes). En Windows 10 también apaga las apps de la Store en segundo plano (pregunta antes).",
+    "en": "More battery: no sharing of Windows downloads, no Edge processes at startup or in the background, scanner and maps set to manual, and no network in standby on battery (asks first). On Windows 10 it also stops Store apps in the background (asks first)."
   },
   "include": [
     "performance.background-apps-off",
@@ -6071,8 +6071,8 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "aliases": ["trabajo"],
   "title": { "es": "Trabajo", "en": "Work" },
   "description": {
-    "es": "Solo ajustes de tu usuario, sin políticas, para equipos de una organización. Conserva Teams, Outlook, OneDrive y Microsoft 365.",
-    "en": "Only settings of your user, no policies, for machines of an organization. Keeps Teams, Outlook, OneDrive and Microsoft 365."
+    "es": "Solo ajustes de tu usuario, sin políticas, para equipos de una organización. Conserva Teams, Outlook, OneDrive, Microsoft 365, To Do y Carpetas de trabajo.",
+    "en": "Only settings of your user, no policies, for machines of an organization. Keeps Teams, Outlook, OneDrive, Microsoft 365, To Do and Work Folders."
   },
   "include": [
     "privacy.app-launch-tracking-off",
@@ -6091,7 +6091,10 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
     "apps.outlook-new",
     "apps.onedrive",
     "apps.office-hub",
-    "apps.power-automate"
+    "apps.power-automate",
+    "apps.todos",
+    "tasks.work-folders-logon",
+    "tasks.work-folders-maintenance"
   ]
 }
 ```
@@ -6104,8 +6107,8 @@ Expected: FAIL en `ships exactly base, dev, gaming, privacy, laptop, legacy, wor
   "aliases": ["liviano"],
   "title": { "es": "Liviano", "en": "Lite" },
   "description": {
-    "es": "Quita lo que Windows LTSC no trae (apps, Widgets, Copilot, Teams, Xbox, Vínculo móvil; OneDrive con pregunta) y recorta servicios y tareas. Sin tocar Defender, Windows Update ni WinRE.",
-    "en": "Removes what Windows LTSC does not ship (apps, Widgets, Copilot, Teams, Xbox, Phone Link; OneDrive asks first) and trims services and tasks. Defender, Windows Update and WinRE are left alone."
+    "es": "Quita lo que Windows LTSC no trae (apps, Widgets, Teams, Xbox, Vínculo móvil, la app Copilot, Outlook, Correo y OneDrive preguntan antes) y recorta servicios y tareas (casi todos los servicios preguntan antes). Sin tocar Defender, Windows Update ni WinRE.",
+    "en": "Removes what Windows LTSC does not ship (apps, Widgets; Teams, Xbox, Phone Link, the Copilot app, Outlook, Mail and OneDrive ask first) and trims services and tasks (most service cuts ask first). Defender, Windows Update and WinRE are left alone."
   },
   "include": [
     "ads.backup-reminders",
@@ -6992,7 +6995,7 @@ Wrote C:\Users\Edgar\Documents\GitHub\windows-tuneup\docs\es\catalog.md
 Wrote C:\Users\Edgar\Documents\GitHub\windows-tuneup\docs\en\catalog.md
 ```
 
-Revisar a mano el principio de `docs/es/catalog.md`: el resumen dice `| **Total** | **166** |`, la tabla de perfiles tiene ocho filas (`lite` con 102 ajustes), "Ajustes que preguntan" lista 36 y "Ajustes de riesgo alto" cuatro (`privacy.diagnostic-data-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable` y `gaming.memory-integrity-off`). Cada página ronda los 120 KB.
+Revisar a mano el principio de `docs/es/catalog.md`: el resumen dice `| **Total** | **166** |`, la tabla de perfiles tiene ocho filas (`lite` con 102 ajustes), "Ajustes que preguntan" lista 38 y "Ajustes de riesgo alto" cuatro (`privacy.diagnostic-data-off`, `ai.recall-snapshots-off`, `ai.recall-unavailable` y `gaming.memory-integrity-off`). Cada página ronda los 120 KB.
 
 - [ ] **Step 7: Verificar que pasa**
 
@@ -7296,6 +7299,7 @@ Reglas que valen para todos:
 - **Edición y hardware:** una directiva que tu edición ignora (por ejemplo, Home) o un ajuste pensado para otro hardware (con o sin batería) se omite y el plan dice por qué.
 - **Equipos de una organización:** en un equipo unido a un dominio o inscrito en Intune no se tocan directivas (`\Policies\`): el plan las muestra como "equipo administrado".
 - **Administrador:** `base` y `work` solo tienen ajustes de tu usuario que no son directivas y se aplican sin elevar. Los demás traen cambios de sistema o directivas de tu usuario (Windows solo deja leerlas y escribirlas a un administrador): abre PowerShell como administrador, o deja fuera esos ajustes con `-Exclude`. Sin elevar, el plan los marca como de administrador y aplicar se niega.
+- **Elevar con otra cuenta:** si abres PowerShell como administrador con la contraseña de otro administrador, el proceso ya no es la cuenta que inició sesión en el escritorio y los ajustes de usuario irían al `HKCU` de esa otra cuenta. Por eso el plan los omite con el motivo `session-user` (aunque los pidas con `-Include`); los ajustes de sistema siguen su curso. Para aplicar los de usuario, abre PowerShell como administrador desde la cuenta que inició sesión.
 - **Deshacer:** `.\tuneup.ps1 -Undo last` devuelve todo lo de la última corrida. Las apps se reinstalan desde la Store para tu cuenta (ver el README).
 
 ## Base (`base`)
@@ -7336,17 +7340,17 @@ Reglas que valen para todos:
 
 **Qué hace:** deja los datos de diagnóstico en "Requeridos" (Pro, Enterprise y Education; Home ignora esa directiva), apaga el Programa de mejora de la experiencia, el historial de actividad y su subida, el portapapeles en la nube, el seguimiento de apps abiertas, la voz en línea (el dictado de Win+H deja de funcionar), el aprendizaje de lo que escribes, Bing y el historial en la búsqueda, los archivos recientes de Inicio, Copilot y Click to Do, las funciones de IA en la nube del Bloc de notas y Paint, las tareas de telemetría y lo que Edge envía a Microsoft. Quita la integración de Bing en Inicio.
 
-**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.mare-backup` (también ejecuta el evaluador de compatibilidad), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
+**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `privacy.diagnostic-data-required` (un equipo del programa Windows Insider necesita los datos opcionales y dejaría de recibir compilaciones), `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.mare-backup` (también ejecuta el evaluador de compatibilidad), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
 
 **Riesgo alto, solo con `-Include`:** `privacy.diagnostic-data-off` (datos de diagnóstico apagados del todo, solo Enterprise y Education). Úsalo junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor. También son de riesgo alto `ai.recall-snapshots-off` y `ai.recall-unavailable` (Recall: borran las capturas ya guardadas y deshacer no puede devolverlas); ningún perfil los incluye.
 
-**Qué conserva:** las actualizaciones de seguridad. Las directivas de Edge hacen que Edge diga "Administrado por tu organización": es solo un aviso.
+**Qué conserva:** las actualizaciones de seguridad. Las directivas de Edge hacen que Edge diga "Administrado por tu organización" y las de Windows hacen que Configuración diga "Tu organización administra algunos valores": es solo un aviso.
 
 **Administrador:** sí.
 
 ## Portátil (`laptop`, alias `portatil`, `portátil`)
 
-**Qué hace:** impide que las apps de la Store corran en segundo plano (puedes permitir apps una a una en Configuración), quita los procesos precargados de Edge, deja de compartir descargas de Windows con otros equipos, pasa a manual los servicios de escáner y de mapas.
+**Qué hace:** deja de compartir descargas de Windows con otros equipos (Pro y superiores), quita los procesos precargados de Edge y su ejecución en segundo plano, pasa a manual los servicios de escáner y de mapas y quita la red durante la suspensión moderna con batería. Solo en Windows 10 impide además que las apps de la Store corran en segundo plano (puedes permitir apps una a una en Configuración); en Windows 11 ese ajuste no existe.
 
 **Pregunta antes de:** `performance.background-apps-off` (solo Windows 10: las apps de la Store no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse) y `power.standby-network-off-battery` (sin red durante la suspensión moderna con batería; solo en equipos con batería y Pro o superior).
 
@@ -7370,15 +7374,15 @@ Reglas que valen para todos:
 
 **Por qué:** en un equipo de una organización las directivas son de TI. Este perfil no toca ninguna y no necesita administrador.
 
-**Qué conserva:** Teams, Outlook (nuevo), OneDrive, Microsoft 365 y Power Automate, aunque lo combines con Liviano.
+**Qué conserva:** Teams, Outlook (nuevo), OneDrive, Microsoft 365, Power Automate, To Do y las tareas de Carpetas de trabajo, aunque lo combines con Liviano.
 
 **Administrador:** no.
 
 ## Liviano (`lite`, alias `liviano`)
 
-**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas, Widgets, Copilot, Teams, Xbox, Vínculo móvil, Outlook nuevo, Correo y Calendario; OneDrive pregunta antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, la tarea de partidas guardadas de Xbox, dispositivos conectados, Carpetas de trabajo, WinSAT. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
+**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas y Widgets; Teams, Xbox, Vínculo móvil, la app Copilot, Outlook nuevo, Correo y Calendario y OneDrive preguntan antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, la tarea de partidas guardadas de Xbox, dispositivos conectados, Carpetas de trabajo, WinSAT; casi todos los recortes de servicios preguntan antes. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
 
-**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no se pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio.
+**Pregunta antes de:** `privacy.diagnostic-data-required` (equipos Windows Insider), `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.xbox-game-save`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no se pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio.
 
 **Qué conserva:** Defender, las actualizaciones de seguridad, WinRE, la Store y winget (de ellos depende deshacer). Quitar la Store no está en el catálogo.
 
@@ -7405,6 +7409,7 @@ Rules that apply to all of them:
 - **Edition and hardware:** a policy that your edition ignores (for example, Home) or a tweak meant for other hardware (with or without a battery) is skipped and the plan says why.
 - **Machines of an organization:** on a domain-joined or Intune-enrolled machine policies (`\Policies\`) are left alone: the plan shows them as "managed device".
 - **Administrator:** `base` and `work` only hold settings of your user that are not policies and apply without elevation. The others bring system changes or policies of your user (Windows only lets an administrator read and write them): open PowerShell as administrator, or leave those tweaks out with `-Exclude`. Without elevation the plan marks them as needing an administrator and applying refuses.
+- **Elevating as another account:** if you open PowerShell as administrator with another administrator's password, the process is no longer the account signed in at the desktop and user tweaks would go to that other account's `HKCU`. So the plan skips them with the reason `session-user` (even when you ask for them with `-Include`); system tweaks go on. To apply the user ones, open PowerShell as administrator from the account that is signed in.
 - **Undo:** `.\tuneup.ps1 -Undo last` gives back everything of the last run. Apps are reinstalled from the Store for your account (see the README).
 
 ## Base (`base`)
@@ -7445,17 +7450,17 @@ Rules that apply to all of them:
 
 **What it does:** keeps diagnostic data at "Required" (Pro, Enterprise and Education; Home ignores that policy), turns off the Customer Experience Improvement Program, activity history and its upload, cloud clipboard, app launch tracking, online speech (Win+H dictation stops working), typing personalization, Bing and history in search, recent files in Start, Copilot and Click to Do, the cloud AI features of Notepad and Paint, the telemetry tasks and what Edge sends to Microsoft. It removes the Bing integration in Start.
 
-**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.mare-backup` (it also runs the compatibility appraiser), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
+**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `privacy.diagnostic-data-required` (a Windows Insider device needs the optional data and would stop receiving builds), `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.mare-backup` (it also runs the compatibility appraiser), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
 
 **High risk, only with `-Include`:** `privacy.diagnostic-data-off` (diagnostic data fully off, Enterprise and Education only). Use it together with `-Exclude privacy.diagnostic-data-required`, which writes the same value. `ai.recall-snapshots-off` and `ai.recall-unavailable` are high risk too (Recall: they delete the snapshots already saved and undo cannot bring them back); no profile includes them.
 
-**What it keeps:** security updates. The Edge policies make Edge say "Managed by your organization": it is only a notice.
+**What it keeps:** security updates. The Edge policies make Edge say "Managed by your organization" and the Windows ones make Settings say "Some settings are managed by your organization": it is only a notice.
 
 **Administrator:** yes.
 
 ## Laptop (`laptop`, aliases `portatil`, `portátil`)
 
-**What it does:** stops Store apps from running in the background (you can allow apps one by one in Settings), removes Edge's preloaded processes, stops sharing Windows downloads with other PCs, and sets the scanner and maps services to manual.
+**What it does:** stops sharing Windows downloads with other PCs (Pro and later), removes Edge's preloaded processes and its background run, sets the scanner and maps services to manual and removes the network during modern standby on battery. On Windows 10 only, it also stops Store apps from running in the background (you can allow apps one by one in Settings); on Windows 11 that tweak does not exist.
 
 **Asks before:** `performance.background-apps-off` (Windows 10 only: Store apps do not notify while closed and Windows Spotlight backgrounds may stop refreshing) and `power.standby-network-off-battery` (no network during modern standby on battery; only on machines with a battery and Pro or later).
 
@@ -7479,15 +7484,15 @@ Rules that apply to all of them:
 
 **Why:** on a machine of an organization the policies belong to IT. This profile touches none and needs no administrator.
 
-**What it keeps:** Teams, Outlook (new), OneDrive, Microsoft 365 and Power Automate, even when combined with Lite.
+**What it keeps:** Teams, Outlook (new), OneDrive, Microsoft 365, Power Automate, To Do and the Work Folders tasks, even when combined with Lite.
 
 **Administrator:** no.
 
 ## Lite (`lite`, alias `liviano`)
 
-**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps, Widgets, Copilot, Teams, Xbox, Phone Link, the new Outlook, Mail and Calendar; OneDrive asks first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, the Xbox game save task, connected devices, Work Folders, WinSAT. Search stays local (no Bing). Edge without promotional content or background processes.
+**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps and Widgets; Teams, Xbox, Phone Link, the Copilot app, the new Outlook, Mail and Calendar and OneDrive ask first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, the Xbox game save task, connected devices, Work Folders, WinSAT; most service cuts ask first. Search stays local (no Bing). Edge without promotional content or background processes.
 
-**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when not every file could be checked, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop.
+**Asks before:** `privacy.diagnostic-data-required` (Windows Insider devices), `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.xbox-game-save`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when not every file could be checked, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop.
 
 **What it keeps:** Defender, security updates, WinRE, the Store and winget (undo depends on them). Removing the Store is not in the catalog.
 
@@ -7525,8 +7530,8 @@ Cambios: el aviso de "catálogo de ejemplo" pasa a decir que falta el menú y la
 Optimización de Windows 10/11 por objetivos, reversible y medible.
 Goal-based, reversible and measurable Windows 10/11 optimization.
 
-> **En desarrollo.** El motor y el catálogo (166 ajustes en 8 perfiles) están completos; falta el menú interactivo (Plan 4) y la prueba de extremo a extremo de cada perfil en una máquina virtual antes de la primera release. Revisa siempre el plan con `-WhatIf` antes de aplicar.
-> **Work in progress.** The engine and the catalog (166 tweaks in 8 profiles) are complete; the interactive menu (Plan 4) and the end-to-end test of every profile in a virtual machine before the first release are still missing. Always review the plan with `-WhatIf` before applying.
+> **En desarrollo.** El motor y el catálogo (166 ajustes: 162 alcanzables desde los 8 perfiles y 4 de riesgo alto que solo se aplican con `-Include`) están completos; falta el menú interactivo (Plan 4) y la prueba de extremo a extremo de cada perfil en una máquina virtual antes de la primera release. Revisa siempre el plan con `-WhatIf` antes de aplicar.
+> **Work in progress.** The engine and the catalog (166 tweaks: 162 reachable from the 8 profiles and 4 high-risk ones that are only applied with `-Include`) are complete; the interactive menu (Plan 4) and the end-to-end test of every profile in a virtual machine before the first release are still missing. Always review the plan with `-WhatIf` before applying.
 
 ## Perfiles / Profiles
 
@@ -7536,10 +7541,10 @@ Goal-based, reversible and measurable Windows 10/11 optimization.
 | `dev` | `desarrollo` | Modo desarrollador, rutas largas, archivos ocultos, "Finalizar tarea"; respeta WSL y Hyper-V. / Developer Mode, long paths, hidden files, "End task"; keeps WSL and Hyper-V. | Sí / Yes |
 | `gaming` | `juegos` | Modo Juego, sin grabación en segundo plano ni aceleración del mouse, GPU con menos latencia; conserva Xbox. / Game Mode, no background recording or mouse acceleration, lower GPU latency; keeps Xbox. | Sí / Yes |
 | `privacy` | `privacidad` | Telemetría al mínimo, historial de actividad, Bing, Copilot, Edge (Recall solo con `-Include`). / Minimum telemetry, activity history, Bing, Copilot, Edge (Recall only with `-Include`). | Sí / Yes |
-| `laptop` | `portatil`, `portátil` | Más batería: apps y Edge sin procesos de fondo, sin red en suspensión con batería. / More battery: apps and Edge without background processes, no network in standby on battery. | Sí / Yes |
+| `laptop` | `portatil`, `portátil` | Más batería: sin compartir descargas, Edge sin procesos de fondo, escáner y mapas en manual, sin red en suspensión con batería (pregunta); apps en segundo plano solo en Windows 10 (pregunta). / More battery: no download sharing, Edge without background processes, scanner and maps manual, no network in standby on battery (asks); background apps on Windows 10 only (asks). | Sí / Yes |
 | `legacy` | `equipo-antiguo`, `antiguo` | Sin transparencia ni animaciones, menos tareas de fondo y apps preinstaladas. / No transparency or animations, fewer background tasks and preinstalled apps. | Sí / Yes |
-| `work` | `trabajo` | Solo ajustes de tu usuario, sin directivas; conserva Teams, Outlook y OneDrive. / Only settings of your user, no policies; keeps Teams, Outlook and OneDrive. | No |
-| `lite` | `liviano` | Quita lo que LTSC no trae y recorta servicios y tareas; sin tocar Defender, Update ni WinRE. / Removes what LTSC does not ship and trims services and tasks; Defender, Update and WinRE untouched. | Sí / Yes |
+| `work` | `trabajo` | Solo ajustes de tu usuario, sin directivas; conserva Teams, Outlook, OneDrive, To Do y Carpetas de trabajo. / Only settings of your user, no policies; keeps Teams, Outlook, OneDrive, To Do and Work Folders. | No |
+| `lite` | `liviano` | Quita lo que LTSC no trae y recorta servicios y tareas; Teams, Xbox, Vínculo móvil, la app Copilot, Outlook, Correo y OneDrive preguntan antes, y casi todos los servicios también; sin tocar Defender, Update ni WinRE. / Removes what LTSC does not ship and trims services and tasks; Teams, Xbox, Phone Link, the Copilot app, Outlook, Mail and OneDrive ask first, and so do most services; Defender, Update and WinRE untouched. | Sí / Yes |
 
 Guía de cada perfil / Guide to each profile: [docs/es/profiles.md](docs/es/profiles.md) · [docs/en/profiles.md](docs/en/profiles.md). Catálogo completo / Full catalog: [docs/es/catalog.md](docs/es/catalog.md) · [docs/en/catalog.md](docs/en/catalog.md). Lo que nunca se aplica / What is never applied: [docs/es/blacklist.md](docs/es/blacklist.md) · [docs/en/blacklist.md](docs/en/blacklist.md).
 
@@ -7551,7 +7556,9 @@ Guía de cada perfil / Guide to each profile: [docs/es/profiles.md](docs/es/prof
 - Windows 10 or 11 (build 19041 or later) with Windows PowerShell 5.1. If started from PowerShell 7 (`pwsh`), the script relaunches itself in Windows PowerShell 5.1. Windows Server and older builds are refused unless `-Force` is given.
 - Los ajustes de sistema y las directivas de tu usuario (las claves `Policies` de `HKCU`, que Windows solo deja leer y escribir a un administrador) necesitan PowerShell como administrador. Sin elevar, un plan que contenga cualquiera de ellos se rechaza completo (no se aplica nada): usar `-Exclude` para dejar fuera esos ajustes o abrir PowerShell como administrador. Los perfiles `base` (siempre aplicado) y `work` solo tienen ajustes de registro de usuario (`HKCU`) que no son directivas y se aplican sin elevar; los demás traen cambios de sistema o directivas.
 - System-wide tweaks and policies of your user (the `Policies` keys of `HKCU`, which Windows only lets an administrator read and write) need PowerShell as administrator. Without elevation, a plan that contains any of them is refused entirely (nothing is applied): use `-Exclude` to leave those tweaks out or open PowerShell as administrator. The `base` (always applied) and `work` profiles only hold user registry tweaks (`HKCU`) that are not policies and apply without elevation; the others bring system changes or policies.
+- Si elevas con la contraseña de otro administrador (la cuenta del proceso no es la que inició sesión en el escritorio), el plan omite todos los ajustes de usuario con el motivo `session-user`: escribirían en el `HKCU` de esa otra cuenta. Los ajustes de sistema siguen su curso; para los de usuario, abre PowerShell como administrador desde la cuenta que inició sesión. Una ejecución sin elevar no cambia.
 - `-Health` necesita administrador. `-Measure` no, pero sin administrador no puede leer la duración del arranque. Deshacer la quita de una app de la Store usa `winget` (App Installer); elevado, solo el `winget.exe` que Windows instaló en `Program Files\WindowsApps`, nunca el alias de la carpeta del usuario.
+- If you elevate with another administrator's password (the account of the process is not the one signed in at the desktop), the plan skips every user tweak with the reason `session-user`: they would land in that other account's `HKCU`. System tweaks go on; for the user ones, open PowerShell as administrator from the account that is signed in. A run that is not elevated is unaffected.
 - `-Health` needs administrator. `-Measure` does not, but without administrator it cannot read the boot duration. Undoing the removal of a Store app uses `winget` (App Installer); elevated, only the `winget.exe` that Windows installed under `Program Files\WindowsApps`, never the alias in the user's folder.
 - Ejecutar `windows-tuneup` desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`): quien pueda modificar `actions/` o `engine/` ejecuta código con los permisos de quien aplica los ajustes. La revisión de las acciones (solo se leen definiciones de funciones, sin ejecutar nada al cargar) es defensa en profundidad, no sustituye ese permiso de carpeta.
 - Run `windows-tuneup` from a folder that only administrators can write to (for example under `Program Files`): anyone who can change `actions/` or `engine/` runs code with the rights of whoever applies the tweaks. The check of action scripts (only function definitions are read, nothing runs while loading) is defense in depth, not a substitute for that folder permission.
@@ -7672,7 +7679,7 @@ Every document carries `schemaVersion` (currently `1`), `command` and `warnings`
 
 | `command` | Campos principales / Main fields |
 |---|---|
-| `plan` | `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `items` (`id`, `title`, `risk`, `scope`, `action`, `reason`, `rebootRequired`), `summary` (`apply`, `skip`) |
+| `plan` | `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `items` (`id`, `title`, `risk`, `scope`, `action`, `reason`, `rebootRequired`, `signOutRequired`, `requires`), `summary` (`apply`, `skip`) |
 | `apply` | `runId`, `runDir`, `finishedAt`, `environment`, `restorePoint`, `rebootRequired`, `signOutRequired`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `refused`, `journalErrors`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`, `refused`) |
 | `status` | `items` (`id`, `title`, `status`, `runId`) |
 | `undo` | `runId`, `rebootRequired`, `results` (mismos campos que `apply` / same fields as `apply`), `summary` (`restored`, `failed`, `skipped`) |
@@ -7740,6 +7747,16 @@ git add README.md
 git commit -m "docs: README del Plan 3, perfiles y documentación"
 ```
 
+### Correcciones posteriores a la revisión final
+
+Se hicieron después de las Tasks 22 a 27 (los bloques de perfiles, `profiles.md`, README y los dos ajustes de catálogo de este plan ya muestran el estado final; el código del motor y de las pruebas está en el repositorio, que es la fuente de verdad):
+
+- **Cuenta del escritorio.** `Get-TuneupEnvironment` suma `IsSessionUser` (`Test-TuneupSessionUser`, solo se consulta si el proceso es administrador). `New-TuneupPlan` omite todo ajuste `scope: user` con el motivo `session-user` cuando `IsAdmin` y no `IsSessionUser`, antes de leer su estado y aunque se pida con `-Include`; los ajustes de sistema siguen. El texto `reason.session-user` (es y en) dice qué hacer. `New-TestEnvironment` acepta `-IsAdmin` e `-IsSessionUser`.
+- **Preguntas nuevas.** `privacy.diagnostic-data-required` (equipos Windows Insider) y `tasks.xbox-game-save` pasan a `ask: true`; `gaming` sigue conservando la tarea. Con eso `privacy` tiene 10 ajustes que preguntan y `lite` 28; en total 38.
+- **Trabajo.** `work.keep` suma `apps.todos`, `tasks.work-folders-logon` y `tasks.work-folders-maintenance`.
+- **Textos.** Descripciones de `lite` y `laptop`, README y `profiles.md` (Insider, aviso de "administrado por tu organización" de Windows, elevar con otra cuenta); la sección 11 de la especificación (4h, 4f, 3, 6) y la sección 3 (1 a 15 % de FPS).
+- **Salida.** El reporte de aplicar muestra una negativa por `$result.refused` (no por tener `detail`) y los elementos del plan en JSON traen `signOutRequired` y `requires`.
+
 ---
 
 ## Autorrevisión
@@ -7765,25 +7782,25 @@ git commit -m "docs: README del Plan 3, perfiles y documentación"
 
 | Archivo | Ajustes | Tipos | De usuario | Preguntan | Riesgo alto |
 |---|---|---|---|---|---|
-| `privacy.json` | 18 | 18 registry | 9 | 3 | 1 |
+| `privacy.json` | 18 | 18 registry | 9 | 4 | 1 |
 | `ads.json` | 28 | 28 registry | 26 | 0 | 0 |
 | `ui.json` | 12 | 12 registry | 10 | 0 | 0 |
 | `ai.json` | 10 | 9 registry, 1 service | 4 | 2 | 2 |
 | `edge.json` | 17 | 17 registry | 0 | 0 | 0 |
 | `services.json` | 10 | 10 service | 0 | 7 | 0 |
-| `tasks.json` | 21 | 21 task | 0 | 6 | 0 |
+| `tasks.json` | 21 | 21 task | 0 | 7 | 0 |
 | `performance.json` | 3 | 3 registry | 2 | 1 | 0 |
 | `power.json` | 3 | 2 powercfg, 1 registry | 0 | 2 | 0 |
 | `gaming.json` | 11 | 9 registry, 2 action | 8 | 1 | 1 |
 | `dev.json` | 3 | 3 registry | 0 | 1 | 0 |
 | `apps.json` | 30 | 29 appx, 1 action | 0 | 13 | 0 |
-| **Total** | **166** | | **59** | **36** | **4** |
+| **Total** | **166** | | **59** | **38** | **4** |
 
-Perfiles: `base` 21, `dev` 6, `gaming` 12 (+3 `keep`), `privacy` 53, `laptop` 7, `legacy` 30, `work` 10 (+5 `keep`), `lite` 102.
+Perfiles: `base` 21, `dev` 6, `gaming` 12 (+3 `keep`), `privacy` 53, `laptop` 7, `legacy` 30, `work` 10 (+8 `keep`), `lite` 102.
 
 **Búsqueda de marcadores pendientes:** no quedan "TBD", "TODO", "similar a la Task N" ni pasos sin código. Cada archivo nuevo va completo; cada cambio a un archivo existente da el texto exacto a reemplazar o el punto exacto donde agregar.
 
-**Consistencia de ids entre catálogo, perfiles y `keep`:** `Test-TuneupProfileSet` (que ya exige que todo id de `include` y `keep` exista y que ningún `include` sea `high`) pasa con los ocho perfiles; `tests/CatalogQuality.Tests.ps1` comprueba además que ningún id esté en `include` y `keep` del mismo perfil, que `gaming` + `lite` conserve los 3 ids de Xbox y `work` + `lite` los 5 de trabajo; `tests/CatalogContent.Tests.ps1` fija los ids de cada archivo en orden; `tests/Docs.Tests.ps1` exige que la guía nombre cada id que pregunta y cada id de riesgo alto; `tests/CatalogDoc.Tests.ps1` exige que el catálogo generado tenga una sección por id y que `excluded.json` no nombre un paquete que el catálogo quita.
+**Consistencia de ids entre catálogo, perfiles y `keep`:** `Test-TuneupProfileSet` (que ya exige que todo id de `include` y `keep` exista y que ningún `include` sea `high`) pasa con los ocho perfiles; `tests/CatalogQuality.Tests.ps1` comprueba además que ningún id esté en `include` y `keep` del mismo perfil, que `gaming` + `lite` conserve los 3 ids de Xbox y `work` + `lite` los 8 de trabajo; `tests/CatalogContent.Tests.ps1` fija los ids de cada archivo en orden; `tests/Docs.Tests.ps1` exige que la guía nombre cada id que pregunta y cada id de riesgo alto; `tests/CatalogDoc.Tests.ps1` exige que el catálogo generado tenga una sección por id y que `excluded.json` no nombre un paquete que el catálogo quita.
 
 **Consistencia de nombres:**
 

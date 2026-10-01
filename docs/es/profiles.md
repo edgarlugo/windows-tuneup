@@ -13,6 +13,7 @@ Reglas que valen para todos:
 - **Edición y hardware:** una directiva que tu edición ignora (por ejemplo, Home) o un ajuste pensado para otro hardware (con o sin batería) se omite y el plan dice por qué.
 - **Equipos de una organización:** en un equipo unido a un dominio o inscrito en Intune no se tocan directivas (`\Policies\`): el plan las muestra como "equipo administrado".
 - **Administrador:** `base` y `work` solo tienen ajustes de tu usuario que no son directivas y se aplican sin elevar. Los demás traen cambios de sistema o directivas de tu usuario (Windows solo deja leerlas y escribirlas a un administrador): abre PowerShell como administrador, o deja fuera esos ajustes con `-Exclude`. Sin elevar, el plan los marca como de administrador y aplicar se niega.
+- **Elevar con otra cuenta:** si abres PowerShell como administrador con la contraseña de otro administrador, el proceso ya no es la cuenta que inició sesión en el escritorio y los ajustes de usuario irían al `HKCU` de esa otra cuenta. Por eso el plan los omite con el motivo `session-user` (aunque los pidas con `-Include`); los ajustes de sistema siguen su curso. Para aplicar los de usuario, abre PowerShell como administrador desde la cuenta que inició sesión.
 - **Deshacer:** `.\tuneup.ps1 -Undo last` devuelve todo lo de la última corrida. Las apps se reinstalan desde la Store para tu cuenta (ver el README).
 
 ## Base (`base`)
@@ -53,17 +54,17 @@ Reglas que valen para todos:
 
 **Qué hace:** deja los datos de diagnóstico en "Requeridos" (Pro, Enterprise y Education; Home ignora esa directiva), apaga el Programa de mejora de la experiencia, el historial de actividad y su subida, el portapapeles en la nube, el seguimiento de apps abiertas, la voz en línea (el dictado de Win+H deja de funcionar), el aprendizaje de lo que escribes, Bing y el historial en la búsqueda, los archivos recientes de Inicio, Copilot y Click to Do, las funciones de IA en la nube del Bloc de notas y Paint, las tareas de telemetría y lo que Edge envía a Microsoft. Quita la integración de Bing en Inicio.
 
-**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.mare-backup` (también ejecuta el evaluador de compatibilidad), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
+**Pregunta antes de:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `privacy.diagnostic-data-required` (un equipo del programa Windows Insider necesita los datos opcionales y dejaría de recibir compilaciones), `services.diagtrack` (el servicio de telemetría; no usar con Defender for Endpoint), `tasks.mare-backup` (también ejecuta el evaluador de compatibilidad), `tasks.appraiser`, `tasks.appraiser-exp` y `tasks.program-data-updater` (pueden impedir que Windows ofrezca actualizaciones de función) y `apps.copilot`.
 
 **Riesgo alto, solo con `-Include`:** `privacy.diagnostic-data-off` (datos de diagnóstico apagados del todo, solo Enterprise y Education). Úsalo junto con `-Exclude privacy.diagnostic-data-required`, que escribe el mismo valor. También son de riesgo alto `ai.recall-snapshots-off` y `ai.recall-unavailable` (Recall: borran las capturas ya guardadas y deshacer no puede devolverlas); ningún perfil los incluye.
 
-**Qué conserva:** las actualizaciones de seguridad. Las directivas de Edge hacen que Edge diga "Administrado por tu organización": es solo un aviso.
+**Qué conserva:** las actualizaciones de seguridad. Las directivas de Edge hacen que Edge diga "Administrado por tu organización" y las de Windows hacen que Configuración diga "Tu organización administra algunos valores": es solo un aviso.
 
 **Administrador:** sí.
 
 ## Portátil (`laptop`, alias `portatil`, `portátil`)
 
-**Qué hace:** impide que las apps de la Store corran en segundo plano (puedes permitir apps una a una en Configuración), quita los procesos precargados de Edge, deja de compartir descargas de Windows con otros equipos, pasa a manual los servicios de escáner y de mapas.
+**Qué hace:** deja de compartir descargas de Windows con otros equipos (Pro y superiores), quita los procesos precargados de Edge y su ejecución en segundo plano, pasa a manual los servicios de escáner y de mapas y quita la red durante la suspensión moderna con batería. Solo en Windows 10 impide además que las apps de la Store corran en segundo plano (puedes permitir apps una a una en Configuración); en Windows 11 ese ajuste no existe.
 
 **Pregunta antes de:** `performance.background-apps-off` (solo Windows 10: las apps de la Store no avisan con la app cerrada y los fondos de Windows Spotlight pueden dejar de actualizarse) y `power.standby-network-off-battery` (sin red durante la suspensión moderna con batería; solo en equipos con batería y Pro o superior).
 
@@ -87,15 +88,15 @@ Reglas que valen para todos:
 
 **Por qué:** en un equipo de una organización las directivas son de TI. Este perfil no toca ninguna y no necesita administrador.
 
-**Qué conserva:** Teams, Outlook (nuevo), OneDrive, Microsoft 365 y Power Automate, aunque lo combines con Liviano.
+**Qué conserva:** Teams, Outlook (nuevo), OneDrive, Microsoft 365, Power Automate, To Do y las tareas de Carpetas de trabajo, aunque lo combines con Liviano.
 
 **Administrador:** no.
 
 ## Liviano (`lite`, alias `liviano`)
 
-**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas, Widgets, Copilot, Teams, Xbox, Vínculo móvil, Outlook nuevo, Correo y Calendario; OneDrive pregunta antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, la tarea de partidas guardadas de Xbox, dispositivos conectados, Carpetas de trabajo, WinSAT. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
+**Qué hace:** quita lo que Windows 11 LTSC no trae (apps preinstaladas y Widgets; Teams, Xbox, Vínculo móvil, la app Copilot, Outlook nuevo, Correo y Calendario y OneDrive preguntan antes) y recorta servicios y tareas que LTSC sí mantiene: telemetría, mapas, escáner, la tarea de partidas guardadas de Xbox, dispositivos conectados, Carpetas de trabajo, WinSAT; casi todos los recortes de servicios preguntan antes. La búsqueda queda solo local (sin Bing). Edge sin contenido promocional ni procesos en segundo plano.
 
-**Pregunta antes de:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no se pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio.
+**Pregunta antes de:** `privacy.diagnostic-data-required` (equipos Windows Insider), `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.xbox-game-save`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` y `apps.onedrive`. Desinstalar OneDrive nunca borra archivos: se niega si Escritorio, Documentos o Imágenes están en OneDrive, si hay archivos solo en la nube, si no se pudo revisar cada archivo, si otra cuenta del equipo tiene datos en riesgo o si el proceso no corre con la cuenta que inició sesión en el escritorio.
 
 **Qué conserva:** Defender, las actualizaciones de seguridad, WinRE, la Store y winget (de ellos depende deshacer). Quitar la Store no está en el catálogo.
 

@@ -13,6 +13,7 @@ Rules that apply to all of them:
 - **Edition and hardware:** a policy that your edition ignores (for example, Home) or a tweak meant for other hardware (with or without a battery) is skipped and the plan says why.
 - **Machines of an organization:** on a domain-joined or Intune-enrolled machine policies (`\Policies\`) are left alone: the plan shows them as "managed device".
 - **Administrator:** `base` and `work` only hold settings of your user that are not policies and apply without elevation. The others bring system changes or policies of your user (Windows only lets an administrator read and write them): open PowerShell as administrator, or leave those tweaks out with `-Exclude`. Without elevation the plan marks them as needing an administrator and applying refuses.
+- **Elevating as another account:** if you open PowerShell as administrator with another administrator's password, the process is no longer the account signed in at the desktop and user tweaks would go to that other account's `HKCU`. So the plan skips them with the reason `session-user` (even when you ask for them with `-Include`); system tweaks go on. To apply the user ones, open PowerShell as administrator from the account that is signed in.
 - **Undo:** `.\tuneup.ps1 -Undo last` gives back everything of the last run. Apps are reinstalled from the Store for your account (see the README).
 
 ## Base (`base`)
@@ -53,17 +54,17 @@ Rules that apply to all of them:
 
 **What it does:** keeps diagnostic data at "Required" (Pro, Enterprise and Education; Home ignores that policy), turns off the Customer Experience Improvement Program, activity history and its upload, cloud clipboard, app launch tracking, online speech (Win+H dictation stops working), typing personalization, Bing and history in search, recent files in Start, Copilot and Click to Do, the cloud AI features of Notepad and Paint, the telemetry tasks and what Edge sends to Microsoft. It removes the Bing integration in Start.
 
-**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.mare-backup` (it also runs the compatibility appraiser), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
+**Asks before:** `privacy.location-off`, `privacy.find-my-device-off`, `privacy.error-reporting-off`, `privacy.diagnostic-data-required` (a Windows Insider device needs the optional data and would stop receiving builds), `services.diagtrack` (the telemetry service; do not use it with Defender for Endpoint), `tasks.mare-backup` (it also runs the compatibility appraiser), `tasks.appraiser`, `tasks.appraiser-exp` and `tasks.program-data-updater` (they can stop Windows from offering feature updates) and `apps.copilot`.
 
 **High risk, only with `-Include`:** `privacy.diagnostic-data-off` (diagnostic data fully off, Enterprise and Education only). Use it together with `-Exclude privacy.diagnostic-data-required`, which writes the same value. `ai.recall-snapshots-off` and `ai.recall-unavailable` are high risk too (Recall: they delete the snapshots already saved and undo cannot bring them back); no profile includes them.
 
-**What it keeps:** security updates. The Edge policies make Edge say "Managed by your organization": it is only a notice.
+**What it keeps:** security updates. The Edge policies make Edge say "Managed by your organization" and the Windows ones make Settings say "Some settings are managed by your organization": it is only a notice.
 
 **Administrator:** yes.
 
 ## Laptop (`laptop`, aliases `portatil`, `portátil`)
 
-**What it does:** stops Store apps from running in the background (you can allow apps one by one in Settings), removes Edge's preloaded processes, stops sharing Windows downloads with other PCs, and sets the scanner and maps services to manual.
+**What it does:** stops sharing Windows downloads with other PCs (Pro and later), removes Edge's preloaded processes and its background run, sets the scanner and maps services to manual and removes the network during modern standby on battery. On Windows 10 only, it also stops Store apps from running in the background (you can allow apps one by one in Settings); on Windows 11 that tweak does not exist.
 
 **Asks before:** `performance.background-apps-off` (Windows 10 only: Store apps do not notify while closed and Windows Spotlight backgrounds may stop refreshing) and `power.standby-network-off-battery` (no network during modern standby on battery; only on machines with a battery and Pro or later).
 
@@ -87,15 +88,15 @@ Rules that apply to all of them:
 
 **Why:** on a machine of an organization the policies belong to IT. This profile touches none and needs no administrator.
 
-**What it keeps:** Teams, Outlook (new), OneDrive, Microsoft 365 and Power Automate, even when combined with Lite.
+**What it keeps:** Teams, Outlook (new), OneDrive, Microsoft 365, Power Automate, To Do and the Work Folders tasks, even when combined with Lite.
 
 **Administrator:** no.
 
 ## Lite (`lite`, alias `liviano`)
 
-**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps, Widgets, Copilot, Teams, Xbox, Phone Link, the new Outlook, Mail and Calendar; OneDrive asks first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, the Xbox game save task, connected devices, Work Folders, WinSAT. Search stays local (no Bing). Edge without promotional content or background processes.
+**What it does:** removes what Windows 11 LTSC does not ship (preinstalled apps and Widgets; Teams, Xbox, Phone Link, the Copilot app, the new Outlook, Mail and Calendar and OneDrive ask first) and trims services and tasks that LTSC keeps: telemetry, maps, scanner, the Xbox game save task, connected devices, Work Folders, WinSAT; most service cuts ask first. Search stays local (no Bing). Edge without promotional content or background processes.
 
-**Asks before:** `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when not every file could be checked, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop.
+**Asks before:** `privacy.diagnostic-data-required` (Windows Insider devices), `services.diagtrack`, `services.geolocation`, `services.connected-devices`, `services.connected-devices-user`, `services.contact-data`, `services.user-data-storage`, `services.user-data-access`, `tasks.appraiser`, `tasks.appraiser-exp`, `tasks.program-data-updater`, `tasks.mare-backup`, `tasks.xbox-game-save`, `tasks.family-safety-monitor`, `tasks.family-safety-refresh`, `apps.copilot`, `apps.get-help`, `apps.alarms-clock`, `apps.media-player`, `apps.quick-assist`, `apps.phone-link`, `apps.xbox-gaming-app`, `apps.xbox-game-bar`, `apps.outlook-new`, `apps.family-safety`, `apps.mail-calendar`, `apps.msteams` and `apps.onedrive`. Uninstalling OneDrive never deletes files: it refuses when Desktop, Documents or Pictures are in OneDrive, when files only live in the cloud, when not every file could be checked, when another account of the machine has data at risk or when the process does not run as the account signed in to the desktop.
 
 **What it keeps:** Defender, security updates, WinRE, the Store and winget (undo depends on them). Removing the Store is not in the catalog.
 

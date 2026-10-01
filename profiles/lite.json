@@ -3,8 +3,8 @@
   "aliases": ["liviano"],
   "title": { "es": "Liviano", "en": "Lite" },
   "description": {
-    "es": "Quita lo que Windows LTSC no trae (apps, Widgets, Copilot, Teams, Xbox, Vínculo móvil; OneDrive con pregunta) y recorta servicios y tareas. Sin tocar Defender, Windows Update ni WinRE.",
-    "en": "Removes what Windows LTSC does not ship (apps, Widgets, Copilot, Teams, Xbox, Phone Link; OneDrive asks first) and trims services and tasks. Defender, Windows Update and WinRE are left alone."
+    "es": "Quita lo que Windows LTSC no trae (apps, Widgets, Teams, Xbox, Vínculo móvil, la app Copilot, Outlook, Correo y OneDrive preguntan antes) y recorta servicios y tareas (casi todos los servicios preguntan antes). Sin tocar Defender, Windows Update ni WinRE.",
+    "en": "Removes what Windows LTSC does not ship (apps, Widgets; Teams, Xbox, Phone Link, the Copilot app, Outlook, Mail and OneDrive ask first) and trims services and tasks (most service cuts ask first). Defender, Windows Update and WinRE are left alone."
   },
   "include": [
     "ads.backup-reminders",
