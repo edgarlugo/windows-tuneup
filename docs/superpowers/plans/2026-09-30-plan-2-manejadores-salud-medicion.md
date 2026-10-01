@@ -2877,8 +2877,8 @@ Describe 'Power setting' {
         $script:Keys[$UserValues] = [pscustomobject]@{ ACSettingIndex = 0 }
         $script:FailDc = $false
         $script:ActiveText = $ActiveBalanced
-        Mock -ModuleName Tuneup Test-Path { $script:Keys.ContainsKey($LiteralPath) } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
-        Mock -ModuleName Tuneup Get-ItemProperty { $script:Keys[$LiteralPath] } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
+        Mock -ModuleName Tuneup Test-Path { $script:Keys.ContainsKey([string]$LiteralPath) } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
+        Mock -ModuleName Tuneup Get-ItemProperty { $script:Keys[[string]$LiteralPath] } -ParameterFilter { $LiteralPath -like 'HKLM:\SYSTEM\CurrentControlSet\Control\Power\*' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg { $script:ActiveText } -ParameterFilter { $Arguments[0] -eq '/getactivescheme' }
         Mock -ModuleName Tuneup Invoke-TuneupPowercfg {
             if ($script:FailDc -and $Arguments[0] -eq '/setdcvalueindex') { throw 'powercfg /setdcvalueindex failed with exit code 1: Invalid Parameters' }
@@ -2938,6 +2938,13 @@ Describe 'Power setting' {
         $outcome = Get-TuneupOutcome -Output @(Set-PowercfgTweakDesired -Tweak $SettingTweak)
         $outcome.partial | Should -BeTrue
         $outcome.detail | Should -BeLike '*AC power was changed*setdcvalueindex*'
+    }
+
+    It 'reports a partial change, not a missing DC value, when only activating the scheme again fails' {
+        Mock -ModuleName Tuneup Invoke-TuneupPowercfg { throw 'powercfg /setactive failed with exit code 1: Invalid Parameters' } -ParameterFilter { $Arguments[0] -eq '/setactive' }
+        $outcome = Get-TuneupOutcome -Output @(Set-PowercfgTweakDesired -Tweak $SettingTweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -BeLike '*AC and DC power were changed*activating the scheme again failed*'
     }
 
     It 'restores the saved values to the saved scheme even after another one was activated' {
@@ -3063,10 +3070,16 @@ function Set-TuneupPowerSettingIndex {
     Invoke-TuneupPowercfg -Arguments @('/setacvalueindex', $Scheme, $Subgroup, $Setting, [string]$Ac) | Out-Null
     try {
         Invoke-TuneupPowercfg -Arguments @('/setdcvalueindex', $Scheme, $Subgroup, $Setting, [string]$Dc) | Out-Null
-        # A change to the active scheme takes effect once it is activated again.
-        if ($Scheme -eq (Get-TuneupActivePowerScheme)) { Invoke-TuneupPowercfg -Arguments @('/setactive', $Scheme) | Out-Null }
     } catch {
         $message = "The value on AC power was changed, but not the rest: $($_.Exception.Message)"
+        if ($ReportPartial) { return (New-TuneupOutcome -Partial -Detail $message) }
+        throw $message
+    }
+    # A change to the active scheme takes effect once it is activated again.
+    try {
+        if ($Scheme -eq (Get-TuneupActivePowerScheme)) { Invoke-TuneupPowercfg -Arguments @('/setactive', $Scheme) | Out-Null }
+    } catch {
+        $message = "The values on AC and DC power were changed, but activating the scheme again failed: $($_.Exception.Message)"
         if ($ReportPartial) { return (New-TuneupOutcome -Partial -Detail $message) }
         throw $message
     }
