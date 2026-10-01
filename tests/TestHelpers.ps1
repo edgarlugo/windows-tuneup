@@ -38,11 +38,13 @@ function New-TestEnvironment {
         [int]$Build = 26100,
         [string]$Edition = 'Pro',
         [bool]$IsManaged = $false,
-        [bool]$HasBattery = $false
+        [bool]$HasBattery = $false,
+        [bool]$IsAdmin = $true,
+        [bool]$IsSessionUser = $true
     )
     [pscustomobject]@{
         Family = $Family; Build = $Build; UBR = 0; Edition = $Edition; IsServer = $false
-        IsManaged = $IsManaged; IsAdmin = $true; HasBattery = $HasBattery; PendingReboot = $false
+        IsManaged = $IsManaged; IsAdmin = $IsAdmin; IsSessionUser = $IsSessionUser; HasBattery = $HasBattery; PendingReboot = $false
     }
 }
 

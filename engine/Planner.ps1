@@ -107,6 +107,9 @@ function New-TuneupPlan {
         elseif (-not (Test-TuneupCompatible -Tweak $tweak -Environment $Environment)) { $reason = 'incompatible' }
         elseif (-not (Test-TuneupHardwareMatch -Tweak $tweak -Environment $Environment)) { $reason = 'not-applicable-hardware' }
         elseif ($Environment.IsManaged -and (Test-TuneupPolicyTweak -Tweak $tweak)) { $reason = 'managed-device' }
+        # Elevated with another administrator's password: HKCU is that administrator's, not the account
+        # at this desktop. A user tweak would change the wrong account, even when asked for by name.
+        elseif ($Environment.IsAdmin -and ($Environment.IsSessionUser -eq $false) -and ($tweak.scope -ceq 'user')) { $reason = 'session-user' }
         else {
             if ((Test-TuneupHandlerReadNeedsAdmin -Tweak $tweak) -and -not $Environment.IsAdmin) {
                 # Applying it needs elevation anyway; the plan says it is checked then instead of

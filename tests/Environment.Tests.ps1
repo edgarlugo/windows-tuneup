@@ -114,3 +114,18 @@ Describe 'Test-TuneupSessionUser' {
         foreach ($sid in @(Get-TuneupSessionUserSid)) { $sid | Should -Match '^S-1-' }
     }
 }
+
+Describe 'Get-TuneupEnvironment account at the desktop' {
+    It 'asks whether the process is the account at the desktop only when elevated' -TestCases @(
+        @{ Admin = $true; Same = $false; Expected = $false }
+        @{ Admin = $true; Same = $true; Expected = $true }
+        @{ Admin = $false; Same = $false; Expected = $true }
+    ) {
+        param($Admin, $Same, $Expected)
+        $script:Admin = $Admin
+        $script:Same = $Same
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $script:Admin }
+        Mock -ModuleName Tuneup Test-TuneupSessionUser { $script:Same }
+        (Get-TuneupEnvironment).IsSessionUser | Should -Be $Expected
+    }
+}

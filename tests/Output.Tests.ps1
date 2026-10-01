@@ -180,11 +180,17 @@ Describe 'Write-TuneupApplyReport' {
     }
 
     It 'shows a tweak that refused to change anything, with its reason and detail' {
-        $refused = [pscustomobject]@{ id = 'test.refused'; title = 'Title refused'; status = 'skipped'; reason = 'other-user'; error = $null; detail = 'Nothing was changed'; rebootRequired = $false }
+        $refused = [pscustomobject]@{ id = 'test.refused'; title = 'Title refused'; status = 'skipped'; reason = 'other-user'; error = $null; detail = 'Nothing was changed'; rebootRequired = $false; refused = $true }
         $text = (Write-TuneupApplyReport -Report (New-TestReport @($refused, $PlanSkip)) 6>&1 | Out-String)
         $text | Should -Match '\[skipped\] Title refused: belongs to another user'
         $text | Should -Match 'Nothing was changed'
         $text | Should -Not -Match 'Title skipped'
+    }
+
+    It 'decides what to show by the refused flag, not by the presence of a detail' {
+        $plain = [pscustomobject]@{ id = 'test.plain'; title = 'Title plain'; status = 'skipped'; reason = 'already-applied'; error = $null; detail = 'A note'; rebootRequired = $false; refused = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($plain)) 6>&1 | Out-String)
+        $text | Should -Not -Match 'Title plain'
     }
 
     It 'shows a partial tweak with its explanation' {
@@ -197,6 +203,18 @@ Describe 'Write-TuneupApplyReport' {
 }
 
 Describe 'Write-TuneupPlanReport' {
+    It 'tells in each item whether it asks for a sign-out and which hardware it needs' {
+        $plain = New-TestPlanItem 'user' 'apply'
+        $special = New-TestPlanItem 'machine' 'apply'
+        $special.Tweak | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $special.Tweak | Add-Member -NotePropertyName requires -NotePropertyValue @('battery')
+        $json = Write-TuneupPlanReport -Plan @($plain, $special) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
+        $json.items[0].signOutRequired | Should -BeFalse
+        @($json.items[0].requires).Count | Should -Be 0
+        $json.items[1].signOutRequired | Should -BeTrue
+        @($json.items[1].requires) | Should -Be @('battery')
+    }
+
     It 'marks a plan with system changes as requiring elevation' {
         $json = Write-TuneupPlanReport -Plan @((New-TestPlanItem 'user' 'apply'), (New-TestPlanItem 'machine' 'apply')) -Environment (New-TestEnvironment) -Json | ConvertFrom-Json
         $json.requiresAdmin | Should -BeTrue

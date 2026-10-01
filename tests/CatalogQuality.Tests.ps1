@@ -278,9 +278,9 @@ Describe 'The eight profiles' {
         }
     }
 
-    It 'keeps Teams, Outlook, OneDrive and Microsoft 365 when work is combined with lite' {
+    It 'keeps Teams, Outlook, OneDrive, Microsoft 365, To Do and Work Folders when work is combined with lite' {
         $plan = Get-Plan -ProfileIds 'work', 'lite'
-        foreach ($tweakId in 'apps.msteams', 'apps.outlook-new', 'apps.onedrive', 'apps.office-hub', 'apps.power-automate') {
+        foreach ($tweakId in 'apps.msteams', 'apps.outlook-new', 'apps.onedrive', 'apps.office-hub', 'apps.power-automate', 'apps.todos', 'tasks.work-folders-logon', 'tasks.work-folders-maintenance') {
             ($plan | Where-Object { $_.Id -eq $tweakId }).Reason | Should -Be 'kept-by-profile' -Because $tweakId
         }
     }

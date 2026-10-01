@@ -46,7 +46,7 @@
   "reason.onedrive-scan-incomplete": "left alone: not every file of OneDrive could be checked, so it is not certain that none lives only in the cloud",
   "reason.onedrive-other-accounts": "left alone: it is installed for all users and another account of this PC has OneDrive folders or files at risk",
   "reason.onedrive-session-user": "left alone: the process does not run as the account signed in at this desktop, which owns OneDrive and its files",
-  "reason.session-user": "left alone: the process does not run as the account signed in at this desktop, so the setting would land in another account",
+  "reason.session-user": "left alone: the process does not run as the account signed in at this desktop, so the setting would land in another account; open PowerShell as administrator from that account",
   "reason.reinstalled-onedrive": "OneDrive reinstalled with winget; sign in to OneDrive again",
   "status.applied": "applied",
   "status.partial": "partial",

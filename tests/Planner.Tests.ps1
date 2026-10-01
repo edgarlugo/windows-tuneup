@@ -245,3 +245,36 @@ Describe 'Test-TuneupTweakNeedsAdmin' {
         Test-TuneupTweakNeedsAdmin -Tweak $tweak | Should -BeFalse
     }
 }
+
+Describe 'New-TuneupPlan when elevated as another account' {
+    BeforeAll {
+        $script:Foreign = New-TestEnvironment -IsAdmin $true -IsSessionUser $false
+    }
+
+    It 'skips every user tweak, even one asked for by name, because it would land in the other account' {
+        $plan = Invoke-Plan -ProfileIds 'gaming' -Include 'ui.a' -Environment $Foreign
+        foreach ($id in 'ui.a', 'ui.b') { Get-Reason $plan $id | Should -Be 'session-user' -Because $id }
+        Get-Action $plan 'ui.a' | Should -Be 'skip'
+    }
+
+    It 'still plans the machine tweaks' {
+        $plan = Invoke-Plan -ProfileIds 'lite' -Include 'policy.example' -Environment $Foreign
+        Get-Action $plan 'policy.example' | Should -Be 'apply'
+    }
+
+    It 'does not read the state of a user tweak it leaves out' {
+        $plan = Invoke-Plan -Include 'ui.b' -Environment $Foreign -TestState { param($tweak) if ($tweak.scope -eq 'user') { throw 'must not read' }; 'not-applied' }
+        Get-Reason $plan 'ui.b' | Should -Be 'session-user'
+    }
+
+    It 'leaves a run that is not elevated alone, and a run as the account at the desktop' {
+        $notElevated = Invoke-Plan -ProfileIds 'gaming' -Environment (New-TestEnvironment -IsAdmin $false -IsSessionUser $false)
+        Get-Action $notElevated 'ui.b' | Should -Be 'apply'
+        $sameAccount = Invoke-Plan -ProfileIds 'gaming' -Environment (New-TestEnvironment -IsAdmin $true -IsSessionUser $true)
+        Get-Action $sameAccount 'ui.b' | Should -Be 'apply'
+    }
+
+    It 'reports the exclusion before the account' {
+        Get-Reason (Invoke-Plan -ProfileIds 'gaming' -Exclude 'ui.b' -Environment $Foreign) 'ui.b' | Should -Be 'excluded'
+    }
+}

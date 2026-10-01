@@ -32,13 +32,14 @@ English version: [../en/catalog.md](../en/catalog.md).
 | `privacy` Privacidad | `privacidad` | 53 | 0 |
 | `laptop` Portátil | `portatil`, `portátil` | 7 | 0 |
 | `legacy` Equipo antiguo | `equipo-antiguo`, `antiguo` | 30 | 0 |
-| `work` Trabajo | `trabajo` | 10 | 5 |
+| `work` Trabajo | `trabajo` | 10 | 8 |
 | `lite` Liviano | `liviano` | 102 | 0 |
 
 ## Ajustes que preguntan
 
 Estos ajustes llevan `ask: true`: sin menú interactivo y con `-Yes` se omiten, salvo que los pidas por nombre con `-Include`.
 
+- `privacy.diagnostic-data-required`: Enviar solo los datos de diagnóstico requeridos
 - `privacy.location-off`: Desactivar la ubicación del equipo
 - `privacy.find-my-device-off`: Desactivar Encontrar mi dispositivo
 - `privacy.error-reporting-off`: Desactivar el informe de errores de Windows
@@ -55,6 +56,7 @@ Estos ajustes llevan `ask: true`: sin menú interactivo y con `-Yes` se omiten, 
 - `tasks.appraiser-exp`: Desactivar el evaluador de compatibilidad (variante Exp)
 - `tasks.program-data-updater`: Desactivar el actualizador de datos de programas
 - `tasks.mare-backup`: Desactivar la recopilación de apps para Copia de seguridad de Windows
+- `tasks.xbox-game-save`: Desactivar la tarea de partidas guardadas de Xbox
 - `tasks.family-safety-monitor`: Desactivar el monitor de Seguridad familiar
 - `tasks.family-safety-refresh`: Desactivar la actualización de Seguridad familiar
 - `performance.background-apps-off`: No dejar que las apps de la Store corran en segundo plano
@@ -143,9 +145,9 @@ Evita que Microsoft use tus datos de diagnóstico para sugerencias y anuncios.
 
 **Enviar solo los datos de diagnóstico requeridos**
 
-Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Las compilaciones de Windows Insider necesitan los datos opcionales: no lo apliques en un equipo del programa Insider.
+Impide los datos de diagnóstico opcionales (uso, navegación, volcados); Requerido es el mínimo en Pro. Pregunta antes porque un equipo del programa Windows Insider necesita los datos opcionales y dejaría de recibir compilaciones: no lo apliques ahí.
 
-- **Tipo:** `registry`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
+- **Tipo:** `registry`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** sí
 - **En perfiles:** `privacy`, `lite`; **Lo mantienen:** ninguno
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Pro, Enterprise, Education
 - **Después de aplicar:** nada
@@ -1403,9 +1405,9 @@ Descarga actualizaciones de mapas sin conexión que casi nadie usa.
 
 **Desactivar la tarea de partidas guardadas de Xbox**
 
-Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. El perfil Gaming la conserva.
+Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. Pregunta antes porque los juegos de Game Pass pueden perder la sincronización de sus partidas guardadas; el perfil Gaming la conserva.
 
-- **Tipo:** `task`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
+- **Tipo:** `task`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** sí
 - **En perfiles:** `lite`; **Lo mantienen:** `gaming`
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
 - **Después de aplicar:** nada
@@ -1442,7 +1444,7 @@ Recoge datos de uso de almacenamiento para diagnóstico; no limpia ni cambia nad
 Carpetas de trabajo es una función de empresa; sin ella la tarea solo se ejecuta en cada inicio de sesión sin hacer nada.
 
 - **Tipo:** `task`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
-- **En perfiles:** `legacy`, `lite`; **Lo mantienen:** ninguno
+- **En perfiles:** `legacy`, `lite`; **Lo mantienen:** `work`
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
 - **Después de aplicar:** nada
 - **Fuentes:** <https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/ScheduledTasks.json>
@@ -1454,7 +1456,7 @@ Carpetas de trabajo es una función de empresa; sin ella la tarea solo se ejecut
 Mantenimiento periódico de una función de empresa que no se usa en equipos personales.
 
 - **Tipo:** `task`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
-- **En perfiles:** `legacy`, `lite`; **Lo mantienen:** ninguno
+- **En perfiles:** `legacy`, `lite`; **Lo mantienen:** `work`
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
 - **Después de aplicar:** nada
 - **Fuentes:** <https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/ScheduledTasks.json>
@@ -1946,7 +1948,7 @@ Solo sirve para enviar comentarios a Microsoft o para Insiders.
 Las tareas viven en tu cuenta Microsoft; reaparecen al reinstalar.
 
 - **Tipo:** `appx`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
-- **En perfiles:** `lite`; **Lo mantienen:** ninguno
+- **En perfiles:** `lite`; **Lo mantienen:** `work`
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
 - **Después de aplicar:** nada
 - **Fuentes:** <https://github.com/Raphire/Win11Debloat/blob/master/Config/Apps.json>, <https://apps.microsoft.com/detail/9nblggh5r558>, <https://learn.microsoft.com/windows/application-management/overview-windows-apps>, <https://learn.microsoft.com/powershell/module/appx/remove-appxpackage>

@@ -32,13 +32,14 @@ Versión en español: [../es/catalog.md](../es/catalog.md).
 | `privacy` Privacy | `privacidad` | 53 | 0 |
 | `laptop` Laptop | `portatil`, `portátil` | 7 | 0 |
 | `legacy` Older PC | `equipo-antiguo`, `antiguo` | 30 | 0 |
-| `work` Work | `trabajo` | 10 | 5 |
+| `work` Work | `trabajo` | 10 | 8 |
 | `lite` Lite | `liviano` | 102 | 0 |
 
 ## Tweaks that ask first
 
 These tweaks have `ask: true`: without the interactive menu and with `-Yes` they are skipped, unless you ask for them by name with `-Include`.
 
+- `privacy.diagnostic-data-required`: Send only required diagnostic data
 - `privacy.location-off`: Turn off device location
 - `privacy.find-my-device-off`: Turn off Find My Device
 - `privacy.error-reporting-off`: Turn off Windows Error Reporting
@@ -55,6 +56,7 @@ These tweaks have `ask: true`: without the interactive menu and with `-Yes` they
 - `tasks.appraiser-exp`: Disable the compatibility appraiser (Exp variant)
 - `tasks.program-data-updater`: Disable the program data updater
 - `tasks.mare-backup`: Disable app collection for Windows Backup
+- `tasks.xbox-game-save`: Disable the Xbox game save task
 - `tasks.family-safety-monitor`: Disable the Family Safety monitor
 - `tasks.family-safety-refresh`: Disable the Family Safety refresh
 - `performance.background-apps-off`: Do not let Store apps run in the background
@@ -143,9 +145,9 @@ Stops Microsoft from using your diagnostic data for tips and ads.
 
 **Send only required diagnostic data**
 
-Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. Windows Insider builds need optional data: do not apply it on an Insider device.
+Blocks optional diagnostic data (usage, browsing, crash dumps); Required is the minimum on Pro. It asks first because a Windows Insider device needs the optional data and would stop receiving builds: do not apply it there.
 
-- **Type:** `registry`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
+- **Type:** `registry`; **Scope:** machine (administrator); **Risk:** low; **Asks:** yes
 - **In profiles:** `privacy`, `lite`; **Kept by:** none
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Pro, Enterprise, Education
 - **After applying:** nothing
@@ -1403,9 +1405,9 @@ Downloads offline map updates that almost nobody uses.
 
 **Disable the Xbox game save task**
 
-Wakes the Xbox Live game save service even if you do not play. The Gaming profile keeps it.
+Wakes the Xbox Live game save service even if you do not play. It asks first because Game Pass games can lose the sync of their saved games; the Gaming profile keeps it.
 
-- **Type:** `task`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
+- **Type:** `task`; **Scope:** machine (administrator); **Risk:** low; **Asks:** yes
 - **In profiles:** `lite`; **Kept by:** `gaming`
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
 - **After applying:** nothing
@@ -1442,7 +1444,7 @@ Collects storage usage data for diagnostics; it does not clean or change anythin
 Work Folders is a business feature; without it the task just runs at every sign-in and does nothing.
 
 - **Type:** `task`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
-- **In profiles:** `legacy`, `lite`; **Kept by:** none
+- **In profiles:** `legacy`, `lite`; **Kept by:** `work`
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
 - **After applying:** nothing
 - **Sources:** <https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/ScheduledTasks.json>
@@ -1454,7 +1456,7 @@ Work Folders is a business feature; without it the task just runs at every sign-
 Periodic maintenance of a business feature that personal machines do not use.
 
 - **Type:** `task`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
-- **In profiles:** `legacy`, `lite`; **Kept by:** none
+- **In profiles:** `legacy`, `lite`; **Kept by:** `work`
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
 - **After applying:** nothing
 - **Sources:** <https://github.com/The-Virtual-Desktop-Team/Virtual-Desktop-Optimization-Tool/blob/main/2009/ConfigurationFiles/ScheduledTasks.json>
@@ -1946,7 +1948,7 @@ Only used to send feedback to Microsoft or by Insiders.
 Tasks live in your Microsoft account; they come back when you reinstall.
 
 - **Type:** `appx`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
-- **In profiles:** `lite`; **Kept by:** none
+- **In profiles:** `lite`; **Kept by:** `work`
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
 - **After applying:** nothing
 - **Sources:** <https://github.com/Raphire/Win11Debloat/blob/master/Config/Apps.json>, <https://apps.microsoft.com/detail/9nblggh5r558>, <https://learn.microsoft.com/windows/application-management/overview-windows-apps>, <https://learn.microsoft.com/powershell/module/appx/remove-appxpackage>

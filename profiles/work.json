@@ -3,8 +3,8 @@
   "aliases": ["trabajo"],
   "title": { "es": "Trabajo", "en": "Work" },
   "description": {
-    "es": "Solo ajustes de tu usuario, sin políticas, para equipos de una organización. Conserva Teams, Outlook, OneDrive y Microsoft 365.",
-    "en": "Only settings of your user, no policies, for machines of an organization. Keeps Teams, Outlook, OneDrive and Microsoft 365."
+    "es": "Solo ajustes de tu usuario, sin políticas, para equipos de una organización. Conserva Teams, Outlook, OneDrive, Microsoft 365, To Do y Carpetas de trabajo.",
+    "en": "Only settings of your user, no policies, for machines of an organization. Keeps Teams, Outlook, OneDrive, Microsoft 365, To Do and Work Folders."
   },
   "include": [
     "privacy.app-launch-tracking-off",
@@ -23,6 +23,9 @@
     "apps.outlook-new",
     "apps.onedrive",
     "apps.office-hub",
-    "apps.power-automate"
+    "apps.power-automate",
+    "apps.todos",
+    "tasks.work-folders-logon",
+    "tasks.work-folders-maintenance"
   ]
 }

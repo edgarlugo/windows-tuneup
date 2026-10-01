@@ -9,6 +9,8 @@ function ConvertTo-TuneupPlanView {
             action         = $item.Action
             reason         = $item.Reason
             rebootRequired = [bool]$item.Tweak.rebootRequired
+            signOutRequired = ($null -ne $item.Tweak.PSObject.Properties['signOutRequired'] -and $item.Tweak.signOutRequired -eq $true)
+            requires       = @(if ($null -ne $item.Tweak.PSObject.Properties['requires']) { $item.Tweak.requires })
         }
     }
 }
@@ -162,9 +164,9 @@ function Write-TuneupApplyReport {
             if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
             continue
         }
-        # Skips of the plan were already shown; a skip with a detail is a tweak that refused to change
-        # anything when it was applied, so it is shown with its reason.
-        if ($result.status -eq 'skipped' -and -not $result.detail) { continue }
+        # Skips of the plan were already shown; a tweak that refused to change anything when it was
+        # applied is shown with its reason.
+        if ($result.status -eq 'skipped' -and $result.refused -ne $true) { continue }
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.status -eq 'skipped' -and $result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
         Write-Host $line -ForegroundColor $colors[$result.status]

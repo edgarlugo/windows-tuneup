@@ -344,6 +344,17 @@ Describe 'review decisions of the catalog' {
         [string]$tweak.why.en | Should -BeLike '*appraiser*'
     }
 
+    It 'asks before limiting diagnostic data to Required, because Insider devices lose their builds' {
+        $tweak = Get-One 'privacy.diagnostic-data-required'
+        $tweak.ask | Should -BeTrue
+        [string]$tweak.why.en | Should -BeLike '*Insider*'
+        [string]$tweak.why.es | Should -BeLike '*Insider*'
+    }
+
+    It 'asks before the Xbox game save task, which Game Pass games use' {
+        (Get-One 'tasks.xbox-game-save').ask | Should -BeTrue
+    }
+
     It 'does not ship the Xbox services: they are Manual by default and Disabled breaks the Xbox sign-in' {
         $names = @($All | Where-Object { $_.type -eq 'service' } | ForEach-Object { [string]$_.set.name })
         foreach ($name in 'XblGameSave', 'XblAuthManager', 'XboxNetApiSvc', 'XboxGipSvc') { $names | Should -Not -Contain $name }

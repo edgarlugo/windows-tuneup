@@ -90,6 +90,7 @@ function Get-TuneupEnvironment {
     $build = [int]$currentVersion.CurrentBuild
     $edition = Resolve-TuneupEdition -EditionId ([string]$currentVersion.EditionID) -InstallationType ([string]$currentVersion.InstallationType)
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
+    $isAdmin = [bool](Test-TuneupAdmin)
     [pscustomobject]@{
         Build         = $build
         UBR           = [int]$currentVersion.UBR
@@ -97,7 +98,9 @@ function Get-TuneupEnvironment {
         Edition       = $edition
         IsServer      = ($edition -eq 'Server')
         IsManaged     = ([bool]$computer.PartOfDomain -or (Test-TuneupMdmEnrollment))
-        IsAdmin       = [bool](Test-TuneupAdmin)
+        IsAdmin       = $isAdmin
+        # Only an elevated process can be another account than the one at the desktop.
+        IsSessionUser = (-not $isAdmin) -or [bool](Test-TuneupSessionUser)
         HasBattery    = [bool](Test-TuneupHasBattery)
         PendingReboot = [bool](Test-TuneupPendingReboot)
     }

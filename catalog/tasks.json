@@ -146,9 +146,9 @@
     {
       "id": "tasks.xbox-game-save",
       "title": { "es": "Desactivar la tarea de partidas guardadas de Xbox", "en": "Disable the Xbox game save task" },
-      "why": { "es": "Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. El perfil Gaming la conserva.", "en": "Wakes the Xbox Live game save service even if you do not play. The Gaming profile keeps it." },
+      "why": { "es": "Despierta el servicio de partidas guardadas de Xbox Live aunque no juegues. Pregunta antes porque los juegos de Game Pass pueden perder la sincronización de sus partidas guardadas; el perfil Gaming la conserva.", "en": "Wakes the Xbox Live game save service even if you do not play. It asks first because Game Pass games can lose the sync of their saved games; the Gaming profile keeps it." },
       "risk": "low",
-      "ask": false,
+      "ask": true,
       "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
       "type": "task",
       "scope": "machine",
