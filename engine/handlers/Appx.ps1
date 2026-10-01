@@ -3,6 +3,16 @@
 $script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}$'
 $script:StoreIdPattern = '^[0-9A-Z]{12}$'
 
+# The lists are read once per process and dropped after any change, so a plan, the apply and the
+# check that follows it do not each list every package again.
+$script:AppxPackageCache = @{}
+$script:AppxProvisionedCache = $null
+
+function Clear-TuneupAppxCache {
+    $script:AppxPackageCache = @{}
+    $script:AppxProvisionedCache = $null
+}
+
 function Test-AppxTweakDefinition {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
@@ -14,34 +24,69 @@ function Test-AppxTweakDefinition {
 
 function Get-TuneupAppxPackage {
     param([Parameter(Mandatory)][string]$Name)
-    # -Name takes wildcards, so only the exact name is kept.
-    Get-AppxPackage -AllUsers -Name $Name -ErrorAction Stop | Where-Object { $_.Name -eq $Name }
+    if (-not $script:AppxPackageCache.ContainsKey($Name)) {
+        # -Name takes wildcards, so only the exact name is kept.
+        $script:AppxPackageCache[$Name] = @(Get-AppxPackage -AllUsers -Name $Name -ErrorAction Stop | Where-Object { $_.Name -eq $Name })
+    }
+    $script:AppxPackageCache[$Name]
 }
 
 function Get-TuneupAppxProvisionedPackage {
     param([Parameter(Mandatory)][string]$Name)
-    Get-AppxProvisionedPackage -Online -ErrorAction Stop | Where-Object { $_.DisplayName -eq $Name }
+    if ($null -eq $script:AppxProvisionedCache) {
+        $script:AppxProvisionedCache = @(Get-AppxProvisionedPackage -Online -ErrorAction Stop)
+    }
+    $script:AppxProvisionedCache | Where-Object { $_.DisplayName -eq $Name }
 }
 
 function Remove-TuneupAppxPackage {
     param([Parameter(Mandatory)]$Package)
-    Remove-AppxPackage -Package $Package.PackageFullName -AllUsers -ErrorAction Stop
+    try {
+        Remove-AppxPackage -Package $Package.PackageFullName -AllUsers -ErrorAction Stop
+    } finally {
+        Clear-TuneupAppxCache
+    }
 }
 
 function Remove-TuneupAppxProvisionedPackage {
     param([Parameter(Mandatory)]$Package)
-    Remove-AppxProvisionedPackage -Online -PackageName $Package.PackageName -AllUsers -ErrorAction Stop | Out-Null
+    try {
+        Remove-AppxProvisionedPackage -Online -PackageName $Package.PackageName -AllUsers -ErrorAction Stop | Out-Null
+    } finally {
+        Clear-TuneupAppxCache
+    }
+}
+
+function Get-TuneupCurrentUserSid {
+    [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+}
+
+function Get-TuneupAppxUserSid {
+    param([Parameter(Mandatory)]$User)
+    # Each entry names its user either as an object with a Sid or as text like "S-1-5-21-...[PC\me]".
+    $id = $User.UserSecurityId
+    if ("$($id.Sid) $id" -match 'S-1-[0-9]+(?:-[0-9]+)+') { $Matches[0] }
+}
+
+function Get-TuneupAppxInstalledSid {
+    param([AllowEmptyCollection()][object[]]$Packages = @())
+    # -AllUsers also lists packages that are only staged for a user (provisioned, never installed).
+    $sids = New-Object 'System.Collections.Generic.HashSet[string]' -ArgumentList ([System.StringComparer]::OrdinalIgnoreCase)
+    $unknown = 0
+    foreach ($package in $Packages) {
+        foreach ($user in @($package.PackageUserInformation)) {
+            if ([string]$user.InstallState -ne 'Installed') { continue }
+            $sid = Get-TuneupAppxUserSid -User $user
+            if (-not $sid) { $unknown++; $sid = "unknown-$unknown" }
+            [void]$sids.Add($sid)
+        }
+    }
+    @($sids)
 }
 
 function Test-TuneupAppxInstalledForAnyUser {
     param([AllowEmptyCollection()][object[]]$Packages = @())
-    # -AllUsers also lists packages that are only staged for a user (provisioned, never installed).
-    foreach ($package in $Packages) {
-        foreach ($user in @($package.PackageUserInformation)) {
-            if ([string]$user.InstallState -eq 'Installed') { return $true }
-        }
-    }
-    $false
+    @(Get-TuneupAppxInstalledSid -Packages $Packages).Count -gt 0
 }
 
 function Get-AppxTweakState {
@@ -49,9 +94,13 @@ function Get-AppxTweakState {
     $name = [string]$Tweak.set.name
     $installed = @(Get-TuneupAppxPackage -Name $name)
     $provisioned = @(Get-TuneupAppxProvisionedPackage -Name $name)
+    $sids = @(Get-TuneupAppxInstalledSid -Packages $installed)
+    $me = Get-TuneupCurrentUserSid
     $versions = @(@($installed | ForEach-Object { [string]$_.Version }) + @($provisioned | ForEach-Object { [string]$_.Version }) | Where-Object { $_ })
     [pscustomobject]@{
-        installedUsers = (Test-TuneupAppxInstalledForAnyUser -Packages $installed)
+        installedUsers = ($sids.Count -gt 0)
+        currentUserHad = ($sids -contains $me)
+        otherUsers     = @($sids | Where-Object { $_ -ne $me }).Count
         provisioned    = ($provisioned.Count -gt 0)
         version        = $(if ($versions.Count) { $versions[0] } else { $null })
     }
@@ -68,9 +117,18 @@ function Test-AppxTweakState {
 function Set-AppxTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
     $name = [string]$Tweak.set.name
-    $changed = 0
     $problems = New-Object System.Collections.Generic.List[string]
-    foreach ($package in @(Get-TuneupAppxPackage -Name $name)) {
+    # Both lists are read before anything is removed: a failed read after a removal would hide that
+    # the app is already gone for its users. A package that is only staged has no user to remove it from.
+    $packages = @(Get-TuneupAppxPackage -Name $name | Where-Object { Test-TuneupAppxInstalledForAnyUser -Packages @($_) })
+    $provisioned = @()
+    try {
+        $provisioned = @(Get-TuneupAppxProvisionedPackage -Name $name)
+    } catch {
+        $problems.Add("reading the provisioned packages failed: $($_.Exception.Message)")
+    }
+    $changed = 0
+    foreach ($package in $packages) {
         try {
             Remove-TuneupAppxPackage -Package $package
             $changed++
@@ -78,7 +136,7 @@ function Set-AppxTweakDesired {
             $problems.Add("removing $($package.PackageFullName) for all users failed: $($_.Exception.Message)")
         }
     }
-    foreach ($package in @(Get-TuneupAppxProvisionedPackage -Name $name)) {
+    foreach ($package in $provisioned) {
         try {
             Remove-TuneupAppxProvisionedPackage -Package $package
             $changed++
@@ -93,8 +151,9 @@ function Set-AppxTweakDesired {
     throw $message
 }
 
-# winget: APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED (0x8A150061).
-$script:WingetAlreadyInstalled = -1978335135
+# winget exit codes that mean the app is there already: APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED
+# (0x8A150061) and APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (0x8A15002B, what --no-upgrade answers).
+$script:WingetSuccessCode = @(0, -1978335135, -1978335189)
 
 function Get-TuneupWingetPath {
     $command = Get-Command -Name 'winget.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -104,7 +163,7 @@ function Get-TuneupWingetPath {
 function Invoke-TuneupWinget {
     param([Parameter(Mandatory)][string[]]$Arguments)
     $path = Get-TuneupWingetPath
-    if (-not $path) { throw 'winget is not available. Install App Installer from the Microsoft Store and run the undo again.' }
+    if (-not $path) { throw "winget is not available for this user (run the undo from the signed-in user's elevated prompt)" }
     # winget writes UTF-8, but PowerShell decodes native output with the console code page (OEM by
     # default), which garbles accents in its messages. Switch for the call and put the page back.
     $previous = $null
@@ -124,7 +183,7 @@ function Invoke-TuneupWinget {
 
 function Get-TuneupWingetInstallArgument {
     param([Parameter(Mandatory)][string]$StoreId)
-    'install', '--id', $StoreId, '--source', 'msstore', '--exact', '--accept-package-agreements', '--accept-source-agreements', '--silent', '--disable-interactivity'
+    'install', '--id', $StoreId, '--source', 'msstore', '--exact', '--no-upgrade', '--accept-package-agreements', '--accept-source-agreements', '--silent', '--disable-interactivity'
 }
 
 function Test-TuneupAppxInstalledForCurrentUser {
@@ -135,18 +194,31 @@ function Test-TuneupAppxInstalledForCurrentUser {
 function Restore-AppxTweakState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
     $name = [string]$Tweak.set.name
-    $storeId = [string]$Tweak.set.storeId
-    if (-not $State.installedUsers) {
-        if ($State.provisioned) {
-            # Provisioning needs the package file, which the Store does not hand out.
-            return (New-TuneupOutcome -Reason 'not-reprovisioned' -Detail "$name was only provisioned for new users and cannot be provisioned again. To install it: winget install --id $storeId --source msstore")
+    $manual = "winget install --id $($Tweak.set.storeId) --source msstore"
+    # A state saved before the user fields existed only knows that someone had the app: assume the current user.
+    $currentUserHad = [bool]$State.installedUsers
+    if ($null -ne $State.PSObject.Properties['currentUserHad']) { $currentUserHad = [bool]$State.currentUserHad }
+    $others = 0
+    if ($null -ne $State.PSObject.Properties['otherUsers']) { $others = [int]$State.otherUsers }
+    # What the Store cannot give back: the provisioning and the other users' copies.
+    $notes = New-Object System.Collections.Generic.List[string]
+    if ($State.provisioned) { $notes.Add('not provisioned again for new users') }
+    if ($others -gt 0) { $notes.Add("$others other $(if ($others -eq 1) { 'user' } else { 'users' }) not restored") }
+    $reinstalled = $false
+    if ($currentUserHad -and -not (Test-TuneupAppxInstalledForCurrentUser -Name $name)) {
+        $result = Invoke-TuneupWinget -Arguments @(Get-TuneupWingetInstallArgument -StoreId $Tweak.set.storeId)
+        if ($script:WingetSuccessCode -notcontains $result.ExitCode) {
+            throw "winget could not reinstall $name ($($Tweak.set.storeId)), exit code $($result.ExitCode): $($result.Output)"
         }
-        return
+        Clear-TuneupAppxCache
+        $reinstalled = $true
     }
-    if (Test-TuneupAppxInstalledForCurrentUser -Name $name) { return }
-    $result = Invoke-TuneupWinget -Arguments @(Get-TuneupWingetInstallArgument -StoreId $storeId)
-    if ($result.ExitCode -ne 0 -and $result.ExitCode -ne $script:WingetAlreadyInstalled) {
-        throw "winget could not reinstall $name ($storeId), exit code $($result.ExitCode): $($result.Output)"
+    if ($reinstalled) {
+        $detail = $notes -join '; '
+        if ($others -gt 0) { $detail += ". Each of them can reinstall it with: $manual" }
+        return (New-TuneupOutcome -Reason 'reinstalled' -Detail $detail)
     }
-    New-TuneupOutcome -Reason 'reinstalled' -Detail "$name was reinstalled from the Microsoft Store for the current user only; it was not provisioned again for new users"
+    if (-not $notes.Count) { return }
+    $reason = $(if ($others -gt 0) { 'other-users' } else { 'not-reprovisioned' })
+    New-TuneupOutcome -Reason $reason -Detail "$($notes -join '; '). To install it by hand: $manual"
 }

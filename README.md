@@ -43,6 +43,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Undo last     
   Exit codes: 0 (everything done), 2 (not everything was completed: some changes may have been made, read the summary), 1 (aborted before changing anything; for undo, nothing was restored).
 - Idioma con `-Lang es|en`.
   Language with `-Lang es|en`.
+- Ajustes de apps (`appx`): quitar una app la quita para todos los usuarios y la desaprovisiona. Deshacer la reinstala desde la Store con `winget` **solo para la cuenta que ejecuta el deshacer** (si elevas con otra cuenta, la app queda en esa cuenta, no en la tuya), y no puede volver a provisionarla ni reponerla a otros usuarios. El catálogo no debe incluir paquetes `NonRemovable` ni de framework (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows los protege y otras apps dependen de ellos.
+  App tweaks (`appx`): removing an app removes it for all users and deprovisions it. Undo reinstalls it from the Store with `winget` **only for the account that runs the undo** (if you elevate with a different account, the app lands in that account, not yours), and it cannot provision it again or restore it for other users. The catalog must not include `NonRemovable` or framework packages (`Microsoft.NET.*`, `Microsoft.VCLibs.*`, `Microsoft.UI.Xaml.*`): Windows protects them and other apps depend on them.
 
 ## Desarrollo / Development
 
