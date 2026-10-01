@@ -172,6 +172,12 @@ Describe 'Write-TuneupPlanReport' {
         (Write-TuneupPlanReport -Plan $plan -Environment $user 6>&1 | Out-String) | Should -Match 'To apply the system changes'
         (Write-TuneupPlanReport -Plan $plan -Environment (New-TestEnvironment) 6>&1 | Out-String) | Should -Not -Match 'To apply the system changes'
     }
+
+    It 'explains a change that could not be checked without elevation' {
+        $item = New-TestPlanItem 'machine' 'apply'
+        $item.Reason = 'unverified-needs-admin'
+        (Write-TuneupPlanReport -Plan @($item) -Environment (New-TestEnvironment) 6>&1 | Out-String) | Should -Match 'checked when applied'
+    }
 }
 
 Describe 'Write-TuneupUndoReport' {

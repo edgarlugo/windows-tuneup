@@ -89,8 +89,12 @@ function Get-TuneupStatus {
     foreach ($id in @($latest.Keys)) {
         $item = $latest[$id]
         try {
-            $state = Test-TuneupState -Tweak $item.tweak
-            $status = switch ($state) { 'applied' { 'ok' } 'not-applied' { 'drift' } default { 'not-present' } }
+            if ((Test-TuneupHandlerReadNeedsAdmin -Tweak $item.tweak) -and -not (Test-TuneupAdmin)) {
+                $status = 'needs-admin'
+            } else {
+                $state = Test-TuneupState -Tweak $item.tweak
+                $status = switch ($state) { 'applied' { 'ok' } 'not-applied' { 'drift' } default { 'not-present' } }
+            }
         } catch {
             $status = 'unknown'
         }

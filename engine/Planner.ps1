@@ -77,23 +77,31 @@ function New-TuneupPlan {
         if ($null -eq $tweak) { throw (Get-TuneupText -Key 'err.unknownTweak' -Format $tweakId) }
         $requested = $Include -contains $tweakId
         $reason = $null
+        $note = $null
         if ($Exclude -contains $tweakId) { $reason = 'excluded' }
         elseif (($keep -contains $tweakId) -and -not $requested) { $reason = 'kept-by-profile' }
         elseif (-not (Test-TuneupCompatible -Tweak $tweak -Environment $Environment)) { $reason = 'incompatible' }
         elseif ($Environment.IsManaged -and (Test-TuneupPolicyTweak -Tweak $tweak)) { $reason = 'managed-device' }
         else {
-            try { $state = & $TestState $tweak } catch { $state = 'unreadable' }
+            if ((Test-TuneupHandlerReadNeedsAdmin -Tweak $tweak) -and -not $Environment.IsAdmin) {
+                # Applying it needs elevation anyway; the plan says it is checked then instead of
+                # calling it unreadable.
+                $state = 'unverified'
+            } else {
+                try { $state = & $TestState $tweak } catch { $state = 'unreadable' }
+            }
             if ($state -eq 'applied') { $reason = 'already-applied' }
             elseif ($state -eq 'not-present') { $reason = 'not-present' }
             elseif ($state -eq 'unreadable') { $reason = 'state-unreadable' }
             elseif ($tweak.risk -eq 'high' -and -not $requested) { $reason = 'high-risk-not-requested' }
             elseif ($tweak.ask -and -not $Interactive -and -not $requested) { $reason = 'needs-confirmation' }
+            elseif ($state -eq 'unverified') { $note = 'unverified-needs-admin' }
         }
         [pscustomobject]@{
             Id     = $tweakId
             Tweak  = $tweak
             Action = $(if ($reason) { 'skip' } else { 'apply' })
-            Reason = $reason
+            Reason = $(if ($reason) { $reason } else { $note })
         }
     }
 }

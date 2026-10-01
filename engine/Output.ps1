@@ -68,7 +68,9 @@ function Write-TuneupPlanReport {
     Write-Host (Get-TuneupText -Key 'plan.header' -Format $toApply, ($items.Count - $toApply))
     foreach ($item in $items) {
         if ($item.action -eq 'apply') {
-            Write-Host (Get-TuneupText -Key 'plan.apply' -Format $item.title, (Get-TuneupText -Key "risk.$($item.risk)")) -ForegroundColor Cyan
+            $line = Get-TuneupText -Key 'plan.apply' -Format $item.title, (Get-TuneupText -Key "risk.$($item.risk)")
+            if ($item.reason) { $line += ": $(Get-TuneupText -Key "reason.$($item.reason)")" }
+            Write-Host $line -ForegroundColor Cyan
         } else {
             Write-Host (Get-TuneupText -Key 'plan.skip' -Format $item.title, (Get-TuneupText -Key "reason.$($item.reason)")) -ForegroundColor DarkGray
         }
@@ -180,7 +182,7 @@ function Write-TuneupStatusReport {
     }
     if (-not $Items.Count) { Write-Host (Get-TuneupText -Key 'status.empty'); return }
     Write-Host (Get-TuneupText -Key 'status.header')
-    $colors = @{ 'ok' = 'Green'; 'drift' = 'Yellow'; 'not-present' = 'DarkGray'; 'unknown' = 'Red' }
+    $colors = @{ 'ok' = 'Green'; 'drift' = 'Yellow'; 'not-present' = 'DarkGray'; 'unknown' = 'Red'; 'needs-admin' = 'DarkYellow' }
     foreach ($item in $Items) {
         Write-Host (Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($item.status)"), "$($item.title) ($($item.runId))") -ForegroundColor $colors[$item.status]
     }

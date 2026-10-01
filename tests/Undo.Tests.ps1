@@ -262,4 +262,16 @@ Describe 'Undo and status' {
         Save-TuneupJson -Path (Join-Path $run.Dir 'result.json') -Object ([pscustomobject]@{ results = $results })
         (@(Get-TuneupStatus -StateRoot $Root) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.one'
     }
+
+    It 'says a tweak needs elevation to check instead of reading it' {
+        $appx = New-TestTweak -Id 'apps.news' -Type 'appx' -Scope 'machine' `
+            -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
+        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @($appx) | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup Test-TuneupState { throw 'must not read' }
+        $status = @(Get-TuneupStatus -StateRoot $Root)
+        $status.Count | Should -Be 1
+        $status[0].status | Should -Be 'needs-admin'
+        Should -Invoke Test-TuneupState -ModuleName Tuneup -Times 0 -Exactly
+    }
 }

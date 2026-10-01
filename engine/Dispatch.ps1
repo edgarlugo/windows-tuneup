@@ -75,3 +75,9 @@ function Get-TuneupOutcome {
     }
     $merged
 }
+
+function Test-TuneupHandlerReadNeedsAdmin {
+    param([Parameter(Mandatory)]$Tweak)
+    $handler = Get-TuneupHandler -Type $Tweak.type
+    ($null -ne $handler) -and [bool]$handler.ReadNeedsAdmin
+}
