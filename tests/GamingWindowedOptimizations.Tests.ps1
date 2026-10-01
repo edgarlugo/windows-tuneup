@@ -57,6 +57,81 @@ Describe 'gaming-windowed-optimizations action' {
         Test-TuneupState -Tweak $Tweak | Should -Be 'applied'
     }
 
+    It 'saves whose setting it is, so the undo of another account leaves it for its owner' {
+        (Get-TuneupState -Tweak $Tweak).currentUserSid | Should -Be (Get-TestCurrentSid)
+    }
+
+    It 'reads the list as Windows does: <Name>' -TestCases @(
+        @{ Name = 'any case and spaces around the name'; Text = 'AutoHDREnable=1; swapeffectupgradeenable = 1 ;'; Expected = 'applied' }
+        @{ Name = 'the last copy wins when it is on'; Text = 'SwapEffectUpgradeEnable=0;;SwapEffectUpgradeEnable=1;'; Expected = 'applied' }
+        @{ Name = 'the last copy wins when it is off'; Text = 'SwapEffectUpgradeEnable=1;SwapEffectUpgradeEnable=0;'; Expected = 'not-applied' }
+        @{ Name = 'another value is not on'; Text = 'SwapEffectUpgradeEnable=10;'; Expected = 'not-applied' }
+        @{ Name = 'a name that only starts the same is another choice'; Text = 'SwapEffectUpgradeEnableX=1;'; Expected = 'not-applied' }
+    ) {
+        param($Text, $Expected)
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value $Text | Out-Null
+        Test-TuneupState -Tweak $Tweak | Should -Be $Expected
+    }
+
+    It 'writes one copy of its choice in place of the first and keeps how the others are written' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'AutoHDREnable=1; swapeffectupgradeenable = 0 ;;VRROptimizeEnable=0 ;SwapEffectUpgradeEnable=0;' | Out-Null
+        Set-TuneupDesired -Tweak $Tweak
+        Get-TestValue | Should -BeExactly 'AutoHDREnable=1;SwapEffectUpgradeEnable=1;;VRROptimizeEnable=0 ;'
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'AutoHDREnable=1; VRROptimizeEnable=0 ;' -Force | Out-Null
+        Set-TuneupDesired -Tweak $Tweak
+        Get-TestValue | Should -BeExactly 'AutoHDREnable=1; VRROptimizeEnable=0 ;SwapEffectUpgradeEnable=1;'
+    }
+
+    It 'gives back only its own choice on undo, keeping what changed in the others since' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'VRROptimizeEnable=0;SwapEffectUpgradeEnable=0;AutoHDREnable=1;' | Out-Null
+        $state = Get-TuneupState -Tweak $Tweak
+        Set-TuneupDesired -Tweak $Tweak
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'VRROptimizeEnable=0;SwapEffectUpgradeEnable=1;AutoHDREnable=0;' -Force | Out-Null
+        Restore-TuneupState -Tweak $Tweak -State $state | Out-Null
+        Get-TestValue | Should -BeExactly 'VRROptimizeEnable=0;SwapEffectUpgradeEnable=0;AutoHDREnable=0;'
+    }
+
+    It 'takes out its choice on undo when it was not there, keeping a choice added since' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'VRROptimizeEnable=0;' | Out-Null
+        $state = Get-TuneupState -Tweak $Tweak
+        Set-TuneupDesired -Tweak $Tweak
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'VRROptimizeEnable=0;SwapEffectUpgradeEnable=1;AutoHDREnable=1;' -Force | Out-Null
+        Restore-TuneupState -Tweak $Tweak -State $state | Out-Null
+        Get-TestValue | Should -BeExactly 'VRROptimizeEnable=0;AutoHDREnable=1;'
+    }
+
+    It 'keeps the value and its key on undo when a choice was added to a value it created' {
+        $state = Get-TuneupState -Tweak $Tweak
+        Set-TuneupDesired -Tweak $Tweak
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'SwapEffectUpgradeEnable=1;AutoHDREnable=1;' -Force | Out-Null
+        Restore-TuneupState -Tweak $Tweak -State $state | Out-Null
+        Get-TestValue | Should -BeExactly 'AutoHDREnable=1;'
+    }
+
+    It 'leaves its choice on undo when the user changed it since' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'SwapEffectUpgradeEnable=0;AutoHDREnable=1;' | Out-Null
+        $state = Get-TuneupState -Tweak $Tweak
+        Set-TuneupDesired -Tweak $Tweak
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'SwapEffectUpgradeEnable=2;AutoHDREnable=1;' -Force | Out-Null
+        $outcome = Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State $state)
+        Get-TestValue | Should -BeExactly 'SwapEffectUpgradeEnable=2;AutoHDREnable=1;'
+        $outcome.detail | Should -BeLike '*changed after*left as it is*'
+    }
+
+    It 'restores a state saved before the user field existed' {
+        New-Item -Path $Key -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType String -Value 'AutoHDREnable=1;' | Out-Null
+        $state = [pscustomobject]@{ keyExisted = $true; existingAncestor = $Key; exists = $true; kind = 'String'; value = 'AutoHDREnable=1;' }
+        Set-TuneupDesired -Tweak $Tweak
+        Restore-TuneupState -Tweak $Tweak -State $state | Out-Null
+        Get-TestValue | Should -BeExactly 'AutoHDREnable=1;'
+    }
+
     It 'leaves a value that is not text alone instead of guessing' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'DirectXUserGlobalSettings' -PropertyType DWord -Value 1 | Out-Null
