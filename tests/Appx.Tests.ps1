@@ -117,3 +117,105 @@ Describe 'Appx definition' {
         (Test-AppxTweakDefinition -Tweak $tweak) -join '; ' | Should -Match 'must use scope machine'
     }
 }
+
+Describe 'Appx restore' {
+    It 'reinstalls an app that was installed, from the Store, for the current user' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = 0; Output = 'Successfully installed' } }
+        $state = [pscustomobject]@{ installedUsers = $true; provisioned = $true; version = '4.55.62231.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.reason | Should -Be 'reinstalled'
+        $outcome.detail | Should -BeLike '*current user only*not provisioned again*'
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            ($Arguments -join ' ') -eq 'install --id 9WZDNCRFHVFW --source msstore --exact --accept-package-agreements --accept-source-agreements --silent --disable-interactivity'
+        }
+    }
+
+    It 'accepts the winget code for an app that is already installed' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = -1978335135; Output = 'Found an existing package already installed.' } }
+        $state = [pscustomobject]@{ installedUsers = $true; provisioned = $false; version = '1.0' }
+        (Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)).reason | Should -Be 'reinstalled'
+    }
+
+    It 'throws with the winget exit code when the install fails' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = -1978335212; Output = 'No package found matching input criteria.' } }
+        $state = [pscustomobject]@{ installedUsers = $true; provisioned = $false; version = '1.0' }
+        { Restore-AppxTweakState -Tweak $Tweak -State $state } | Should -Throw '*exit code -1978335212*No package found*'
+    }
+
+    It 'does not call winget when the current user still has the app' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $true }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { }
+        $state = [pscustomobject]@{ installedUsers = $true; provisioned = $true; version = '1.0' }
+        (Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)).reason | Should -BeNullOrEmpty
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'does nothing for an app that was not there' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { }
+        $state = [pscustomobject]@{ installedUsers = $false; provisioned = $false; version = $null }
+        @(Restore-AppxTweakState -Tweak $Tweak -State $state).Count | Should -Be 0
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'explains that an app that was only provisioned cannot be provisioned again' {
+        Mock -ModuleName Tuneup Test-TuneupAppxInstalledForCurrentUser { $false }
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { }
+        $state = [pscustomobject]@{ installedUsers = $false; provisioned = $true; version = '1.0' }
+        $outcome = Get-TuneupOutcome -Output @(Restore-AppxTweakState -Tweak $Tweak -State $state)
+        $outcome.reason | Should -Be 'not-reprovisioned'
+        $outcome.detail | Should -BeLike '*winget install --id 9WZDNCRFHVFW --source msstore*'
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 0 -Exactly
+    }
+}
+
+Describe 'winget' {
+    It 'throws a clear error when winget is missing' {
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { }
+        { Invoke-TuneupWinget -Arguments @('--version') } | Should -Throw '*winget is not available*'
+    }
+
+    It 'runs winget through the native runner' {
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { 'C:\fake\winget.exe' }
+        Mock -ModuleName Tuneup Invoke-TuneupNative { [pscustomobject]@{ ExitCode = 0; Output = 'v1.9.25200' } }
+        (Invoke-TuneupWinget -Arguments @('--version')).Output | Should -Be 'v1.9.25200'
+        Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $FilePath -eq 'C:\fake\winget.exe' -and ($Arguments -join ' ') -eq '--version'
+        }
+    }
+
+    It 'decodes the output as UTF-8 while it runs and puts the console encoding back' {
+        $script:EncodingDuringCall = $null
+        $before = [Console]::OutputEncoding.CodePage
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { 'C:\fake\winget.exe' }
+        Mock -ModuleName Tuneup Invoke-TuneupNative {
+            $script:EncodingDuringCall = [Console]::OutputEncoding.CodePage
+            [pscustomobject]@{ ExitCode = 0; Output = 'ok' }
+        }
+        Invoke-TuneupWinget -Arguments @('--version') | Out-Null
+        $script:EncodingDuringCall | Should -Be 65001
+        [Console]::OutputEncoding.CodePage | Should -Be $before
+    }
+
+    It 'puts the console encoding back when the run throws' {
+        $before = [Console]::OutputEncoding.CodePage
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { 'C:\fake\winget.exe' }
+        Mock -ModuleName Tuneup Invoke-TuneupNative { throw 'boom' }
+        { Invoke-TuneupWinget -Arguments @('--version') } | Should -Throw '*boom*'
+        [Console]::OutputEncoding.CodePage | Should -Be $before
+    }
+}
+
+Describe 'Appx registration' {
+    It 'is a dispatched type that needs elevation to read' {
+        Get-TuneupHandlerName -Tweak $Tweak | Should -Be 'Appx'
+        (Get-TuneupHandler -Type 'appx').ReadNeedsAdmin | Should -BeTrue
+    }
+
+    It 'passes the catalog validation' {
+        (Test-TuneupTweak -Tweak $Tweak) -join '; ' | Should -BeNullOrEmpty
+    }
+}

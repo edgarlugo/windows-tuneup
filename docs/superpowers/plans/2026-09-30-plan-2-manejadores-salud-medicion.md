@@ -1001,6 +1001,13 @@ Describe 'Invoke-TuneupNative' {
         $result.Output | Should -Match 'err'
     }
 
+    It 'does not report a stale exit code from an earlier command' {
+        $global:LASTEXITCODE = 99
+        $result = Invoke-TuneupNative -FilePath 'Write-Output' -Arguments @('hi')
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Be 'hi'
+    }
+
     It 'returns exit code 0 for a tool that succeeds' {
         (Invoke-TuneupNative -FilePath $Cmd -Arguments @('/c', 'exit 0')).ExitCode | Should -Be 0
     }
@@ -1040,6 +1047,8 @@ function Invoke-TuneupNative {
     # Native tools report failure through their exit code. With Stop, Windows PowerShell 5.1 turns
     # any line they write to standard error into a terminating error before that code can be read.
     $ErrorActionPreference = 'Continue'
+    # A command that is not a native program leaves the code alone; never report an earlier one.
+    $global:LASTEXITCODE = 0
     $output = & $FilePath @Arguments 2>&1
     [pscustomobject]@{
         ExitCode = $LASTEXITCODE
@@ -1408,6 +1417,27 @@ Describe 'winget' {
             $FilePath -eq 'C:\fake\winget.exe' -and ($Arguments -join ' ') -eq '--version'
         }
     }
+
+    It 'decodes the output as UTF-8 while it runs and puts the console encoding back' {
+        $script:EncodingDuringCall = $null
+        $before = [Console]::OutputEncoding.CodePage
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { 'C:\fake\winget.exe' }
+        Mock -ModuleName Tuneup Invoke-TuneupNative {
+            $script:EncodingDuringCall = [Console]::OutputEncoding.CodePage
+            [pscustomobject]@{ ExitCode = 0; Output = 'ok' }
+        }
+        Invoke-TuneupWinget -Arguments @('--version') | Out-Null
+        $script:EncodingDuringCall | Should -Be 65001
+        [Console]::OutputEncoding.CodePage | Should -Be $before
+    }
+
+    It 'puts the console encoding back when the run throws' {
+        $before = [Console]::OutputEncoding.CodePage
+        Mock -ModuleName Tuneup Get-TuneupWingetPath { 'C:\fake\winget.exe' }
+        Mock -ModuleName Tuneup Invoke-TuneupNative { throw 'boom' }
+        { Invoke-TuneupWinget -Arguments @('--version') } | Should -Throw '*boom*'
+        [Console]::OutputEncoding.CodePage | Should -Be $before
+    }
 }
 
 Describe 'Appx registration' {
@@ -1444,7 +1474,21 @@ function Invoke-TuneupWinget {
     param([Parameter(Mandatory)][string[]]$Arguments)
     $path = Get-TuneupWingetPath
     if (-not $path) { throw 'winget is not available. Install App Installer from the Microsoft Store and run the undo again.' }
-    Invoke-TuneupNative -FilePath $path -Arguments $Arguments
+    # winget writes UTF-8, but PowerShell decodes native output with the console code page (OEM by
+    # default), which garbles accents in its messages. Switch for the call and put the page back.
+    $previous = $null
+    try {
+        $previous = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    } catch {
+        # No console is attached (for example a hosted run): keep the default decoding.
+        $previous = $null
+    }
+    try {
+        Invoke-TuneupNative -FilePath $path -Arguments $Arguments
+    } finally {
+        if ($null -ne $previous) { [Console]::OutputEncoding = $previous }
+    }
 }
 
 function Get-TuneupWingetInstallArgument {

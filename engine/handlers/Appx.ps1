@@ -92,3 +92,61 @@ function Set-AppxTweakDesired {
     if ($changed) { return (New-TuneupOutcome -Partial -Detail $message) }
     throw $message
 }
+
+# winget: APPINSTALLER_CLI_ERROR_PACKAGE_ALREADY_INSTALLED (0x8A150061).
+$script:WingetAlreadyInstalled = -1978335135
+
+function Get-TuneupWingetPath {
+    $command = Get-Command -Name 'winget.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -ne $command) { $command.Source }
+}
+
+function Invoke-TuneupWinget {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $path = Get-TuneupWingetPath
+    if (-not $path) { throw 'winget is not available. Install App Installer from the Microsoft Store and run the undo again.' }
+    # winget writes UTF-8, but PowerShell decodes native output with the console code page (OEM by
+    # default), which garbles accents in its messages. Switch for the call and put the page back.
+    $previous = $null
+    try {
+        $previous = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    } catch {
+        # No console is attached (for example a hosted run): keep the default decoding.
+        $previous = $null
+    }
+    try {
+        Invoke-TuneupNative -FilePath $path -Arguments $Arguments
+    } finally {
+        if ($null -ne $previous) { [Console]::OutputEncoding = $previous }
+    }
+}
+
+function Get-TuneupWingetInstallArgument {
+    param([Parameter(Mandatory)][string]$StoreId)
+    'install', '--id', $StoreId, '--source', 'msstore', '--exact', '--accept-package-agreements', '--accept-source-agreements', '--silent', '--disable-interactivity'
+}
+
+function Test-TuneupAppxInstalledForCurrentUser {
+    param([Parameter(Mandatory)][string]$Name)
+    @(Get-AppxPackage -Name $Name -ErrorAction Stop | Where-Object { $_.Name -eq $Name }).Count -gt 0
+}
+
+function Restore-AppxTweakState {
+    param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
+    $name = [string]$Tweak.set.name
+    $storeId = [string]$Tweak.set.storeId
+    if (-not $State.installedUsers) {
+        if ($State.provisioned) {
+            # Provisioning needs the package file, which the Store does not hand out.
+            return (New-TuneupOutcome -Reason 'not-reprovisioned' -Detail "$name was only provisioned for new users and cannot be provisioned again. To install it: winget install --id $storeId --source msstore")
+        }
+        return
+    }
+    if (Test-TuneupAppxInstalledForCurrentUser -Name $name) { return }
+    $result = Invoke-TuneupWinget -Arguments @(Get-TuneupWingetInstallArgument -StoreId $storeId)
+    if ($result.ExitCode -ne 0 -and $result.ExitCode -ne $script:WingetAlreadyInstalled) {
+        throw "winget could not reinstall $name ($storeId), exit code $($result.ExitCode): $($result.Output)"
+    }
+    New-TuneupOutcome -Reason 'reinstalled' -Detail "$name was reinstalled from the Microsoft Store for the current user only; it was not provisioned again for new users"
+}

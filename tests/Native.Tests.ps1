@@ -12,6 +12,13 @@ Describe 'Invoke-TuneupNative' {
         $result.Output | Should -Match 'err'
     }
 
+    It 'does not report a stale exit code from an earlier command' {
+        $global:LASTEXITCODE = 99
+        $result = Invoke-TuneupNative -FilePath 'Write-Output' -Arguments @('hi')
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Be 'hi'
+    }
+
     It 'returns exit code 0 for a tool that succeeds' {
         (Invoke-TuneupNative -FilePath $Cmd -Arguments @('/c', 'exit 0')).ExitCode | Should -Be 0
     }

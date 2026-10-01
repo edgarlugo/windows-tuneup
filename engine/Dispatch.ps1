@@ -6,6 +6,7 @@ $script:TuneupHandlers = [ordered]@{
     registry = [pscustomobject]@{ Name = 'Registry'; ReadNeedsAdmin = $false }
     service  = [pscustomobject]@{ Name = 'Service'; ReadNeedsAdmin = $false }
     task     = [pscustomobject]@{ Name = 'Task'; ReadNeedsAdmin = $false }
+    appx     = [pscustomobject]@{ Name = 'Appx'; ReadNeedsAdmin = $true }
 }
 
 function Get-TuneupHandlerType {
