@@ -153,3 +153,29 @@ Describe 'edge catalog' {
         }
     }
 }
+
+Describe 'services catalog' {
+    It 'ships the services tweaks in this order' {
+        $expected = @(
+            'services.retail-demo',
+            'services.diagtrack',
+            'services.wia',
+            'services.maps-broker',
+            'services.geolocation',
+            'services.connected-devices',
+            'services.connected-devices-user',
+            'services.contact-data',
+            'services.user-data-storage',
+            'services.user-data-access',
+            'services.xbox-game-save',
+            'services.xbox-auth-manager',
+            'services.xbox-live-networking'
+        ) -join ','
+        Get-CategoryId 'services' | Should -Be $expected
+    }
+
+    It 'asks before the services that apps or features of the user rely on' {
+        $asked = @(Get-CategoryTweak 'services' | Where-Object { $_.ask } | ForEach-Object { $_.id }) -join ','
+        $asked | Should -Be 'services.diagtrack,services.geolocation,services.connected-devices,services.connected-devices-user,services.contact-data,services.user-data-storage,services.user-data-access'
+    }
+}
