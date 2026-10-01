@@ -1,7 +1,8 @@
-# Appx package names look like Microsoft.BingNews; Store ids are the 12-character product ids
-# that winget uses with --source msstore.
+# Appx package names look like Microsoft.BingNews; Store ids are the product ids that winget uses
+# with --source msstore: 12 characters (9WZDNCRFHVFW), or XP plus 12 for the newer Win32-based
+# Store products (XP8BT8DW290MPQ, new Teams).
 $script:AppxNamePattern = '^[A-Za-z0-9][A-Za-z0-9.-]{2,49}\z'
-$script:StoreIdPattern = '^[0-9A-Z]{12}\z'
+$script:StoreIdPattern = '^(?:[0-9A-Z]{12}|XP[0-9A-Z]{12})\z'
 
 # The lists are read once per process and dropped after any change, so a plan, the apply and the
 # check that follows it do not each list every package again.
@@ -17,7 +18,7 @@ function Test-AppxTweakDefinition {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
     if ([string]$set.name -cnotmatch $script:AppxNamePattern) { 'has an invalid appx package name' }
-    if ([string]$set.storeId -cnotmatch $script:StoreIdPattern) { 'needs a Microsoft Store id (12 capital letters or digits) in set.storeId' }
+    if ([string]$set.storeId -cnotmatch $script:StoreIdPattern) { 'needs a Microsoft Store id (12 capital letters or digits, or XP and 12 more) in set.storeId' }
     if ($set.action -cne 'remove') { "has an invalid appx action '$($set.action)'" }
     if ($Tweak.scope -cne 'machine') { 'must use scope machine' }
 }

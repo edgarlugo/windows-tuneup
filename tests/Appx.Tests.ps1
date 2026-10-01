@@ -283,12 +283,20 @@ Describe 'Appx definition' {
         (Test-AppxTweakDefinition -Tweak $Tweak) -join '; ' | Should -BeNullOrEmpty
     }
 
+    It 'accepts the 14-character Store ids that start with XP' {
+        $set = [pscustomobject]@{ name = 'MSTeams'; storeId = 'XP8BT8DW290MPQ'; action = 'remove' }
+        (Test-AppxTweakDefinition -Tweak (New-TestTweak -Type 'appx' -Scope 'machine' -Set $set)) -join '; ' | Should -BeNullOrEmpty
+    }
+
     It 'rejects <Problem>' -TestCases @(
         @{ Problem = 'a wildcard in the name'; Field = 'name'; Value = 'Microsoft.Bing*'; Message = 'invalid appx package name' }
         @{ Problem = 'a lowercase Store id'; Field = 'storeId'; Value = '9wzdncrfhvfw'; Message = 'Microsoft Store id' }
         @{ Problem = 'a short Store id'; Field = 'storeId'; Value = '9WZDNCRF'; Message = 'Microsoft Store id' }
         @{ Problem = 'a name with a trailing newline'; Field = 'name'; Value = "Microsoft.BingNews`n"; Message = 'invalid appx package name' }
         @{ Problem = 'a Store id with a trailing newline'; Field = 'storeId'; Value = "9WZDNCRFHVFW`n"; Message = 'Microsoft Store id' }
+        @{ Problem = 'an XP Store id one character short'; Field = 'storeId'; Value = 'XP8BT8DW290MP'; Message = 'Microsoft Store id' }
+        @{ Problem = 'a 14-character Store id that does not start with XP'; Field = 'storeId'; Value = 'XQ8BT8DW290MPQ'; Message = 'Microsoft Store id' }
+        @{ Problem = 'a lowercase XP Store id'; Field = 'storeId'; Value = 'xp8bt8dw290mpq'; Message = 'Microsoft Store id' }
         @{ Problem = 'another action'; Field = 'action'; Value = 'install'; Message = "invalid appx action 'install'" }
     ) {
         param($Field, $Value, $Message)
