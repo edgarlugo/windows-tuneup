@@ -3901,6 +3901,8 @@ git commit -m "feat: catálogos de rendimiento y energía"
 
 ### Task 16: Acción `gaming-windowed-optimizations`
 
+> **Corrección posterior a la revisión.** La lista se lee como Windows, igual en `Test` y en `Set`: piezas separadas por `;`, el nombre es lo que va antes del primer `=` sin espacios ni distinción de mayúsculas, se toleran piezas vacías y gana la última copia; `Test` da `applied` solo si esa última vale `1` (`SwapEffectUpgradeEnableX=1` es otro par). Aplicar deja una sola copia de `SwapEffectUpgradeEnable=1` en el lugar de la primera y conserva las demás piezas tal como están escritas. Deshacer ya no devuelve la cadena entera: pone el valor guardado de su par o lo quita, y conserva lo que cambió en los otros desde que se aplicó; si nada más cambió vuelve el texto exacto y, si no existía, quita el valor y la clave que creó; si el par ya no vale `1` (el usuario lo cambió), lo deja y lo dice en `detail`. El estado agrega `currentUserSid`: el deshacer de otra cuenta lo deja como `other-user` (ver la corrección de la Task 20).
+
 **Files:**
 - Create: `actions/gaming-windowed-optimizations.ps1`
 - Test: `tests/GamingWindowedOptimizations.Tests.ps1`
@@ -4086,6 +4088,8 @@ git commit -m "feat: acción de optimizaciones para juegos en ventana"
 ---
 
 ### Task 17: Acción `gaming-hags`
+
+> **Corrección posterior a la revisión.** Sin `HwSchMode` decide el controlador: el ajuste cuenta como `applied` si un adaptador que lo admite trae `HwSchEnabledByDefault` (bit 2) o `HwSchEnabled` (bit 1); `HwSchMode = 1` sigue siendo apagado y los bits de un adaptador sin soporte no cuentan. El estado agrega `driverOn`. `D3DKMTEnumAdapters2` se repite una vez si la segunda llamada responde `STATUS_BUFFER_TOO_SMALL` (apareció un adaptador entre las dos). Deshacer pide reinicio solo si cambia el valor. Una prueba fija `Marshal.SizeOf` de las cuatro estructuras (20, 16, 24 y 4 bytes en 64 bits) y el tipo de consulta 70; el tipo se carga con `Initialize-GamingHagsActionHelperNative`.
 
 **Files:**
 - Create: `actions/gaming-hags.ps1`
@@ -4678,6 +4682,15 @@ git commit -m "feat: catálogo de desarrollo"
 ---
 
 ### Task 20: Acción `onedrive`
+
+> **Corrección posterior a la revisión.**
+> - **Nada se ejecuta elevado desde una ruta que el usuario pueda escribir.** winget sale del paquete App Installer (`Microsoft.DesktopAppInstaller`) de la cuenta, o de cualquier cuenta si el proceso es administrador: editor `8wekyb3d8bbwe`, `SignatureKind` `Store` o `System`, `InstallLocation` dentro de `[Environment]::GetFolderPath('ProgramFiles')\WindowsApps\` y `winget.exe` con su carpeta de confianza (`Test-TuneupTrustedExecutable`: dueño y escritura solo de SYSTEM, TrustedInstaller o Administradores, sin junction en el camino; se aceptan vínculos físicos y se ignoran las entradas solo heredables). Si Windows no deja leer el ACL, deciden la carpeta y la firma. Elevado sin un winget así, error claro; sin elevar se puede usar el del `PATH`. Verificado en el equipo (solo lectura): App Installer 1.29.379.0 en `C:\Program Files\WindowsApps\...`, dueño SYSTEM, TrustedInstaller con control total y el resto solo lectura; `Get-Acl` se pudo leer sin elevar. El SID de TrustedInstaller del motor estaba mal escrito y se corrigió (`S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464`).
+> - **Desinstaladores de confianza.** La instalación por máquina se quita con el `OneDriveSetup.exe` de su carpeta solo si es de confianza; la por usuario, con `%SystemRoot%\System32\OneDriveSetup.exe /uninstall` (el de Windows, de TrustedInstaller y vínculo físico a WinSxS), nunca con la copia de `AppData`. Es el comando habitual de las respuestas de soporte de Microsoft para desinstalar OneDrive del usuario que lo corre, pero no se pudo comprobar aquí sin desinstalar nada (en este equipo el de System32 es 25.087 y el cliente instalado es más nuevo): si no quita la instalación, la espera lo detecta y el resultado es `failed` con el motivo, sin cambios. Las carpetas salen de `[Environment]::GetFolderPath` y las versiones se comparan como `[version]`.
+> - **Todas las cuentas.** Antes de `/allusers` se recorre `ProfileList` (SID `S-1-5-21-*` o `S-1-12-1-*`, distintos del actual): con la colmena cargada en `HKU` se revisan Known Folder Move y los archivos solo en la nube de esa cuenta; sin ella, una carpeta `OneDrive*` del perfil con contenido, o un perfil que no se puede leer, niega (`onedrive-other-accounts`). También niega si el proceso no corre con la cuenta dueña de `explorer.exe` en su sesión, o si no la puede determinar (`onedrive-session-user`): con elevación sobre el hombro `HKCU`, `AppData` y el desinstalador por usuario serían de otra cuenta.
+> - **Falla cerrado.** Lo que `Get-ChildItem` no pudo listar (`-ErrorVariable`) niega con `onedrive-scan-incomplete`; se revisan carpetas además de archivos (marcadores de carpeta), con prefijo `\\?\` para rutas largas, las bibliotecas de SharePoint o Teams sincronizadas fuera de la raíz (nombres de valor de `Accounts\*\Tenants\*`) y las carpetas `OneDrive*` del perfil. Cualquier carpeta del shell (todos los valores de `User Shell Folders`) dentro de OneDrive cuenta como Known Folder Move.
+> - **Detalles.** Cada tipo de instalación se espera por separado y un tiempo agotado es un problema (aunque el desinstalador termine con 0): `partial` si el otro tipo sí se fue, `failed` si no; el detalle de los archivos en la nube solo da la cantidad y el nombre de la carpeta de la primera, nunca una ruta; si OneDrive estaba abierto se dice en `detail`. Deshacer reinstala cada tipo que falte (primero por máquina) con el motivo `reinstalled-onedrive` y dice cuál no pudo confirmar. El estado guarda `currentUserSid` cuando está instalado.
+> - **Motor.** `Test-TuneupAppxEntryOfOtherUser` pasa a `Test-TuneupEntryOfOtherUser`: toda entrada cuyo estado trae un `currentUserSid` distinto del usuario actual queda `other-user` (la advertencia dice `<tipo> entry`) y `last` no elige su corrida para otra cuenta; para `appx` no cambia nada.
+> - Motivos nuevos con texto en `es` y `en`: `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user` y `reinstalled-onedrive`.
 
 **Files:**
 - Create: `actions/onedrive.ps1`
