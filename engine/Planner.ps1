@@ -60,7 +60,9 @@ function New-TuneupPlan {
         [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
         [Parameter(Mandatory)]$Environment,
         [Parameter(Mandatory)][scriptblock]$TestState,
-        [switch]$Interactive
+        [switch]$Interactive,
+        # Only what -ProfileIds and -Include name, without the base profile: re-applying what drifted.
+        [switch]$NoBase
     )
     $ProfileIds = @(Get-TuneupCleanList $ProfileIds)
     $Include = @(Get-TuneupCleanList $Include)
@@ -82,7 +84,7 @@ function New-TuneupPlan {
     foreach ($profileData in $Profiles) { $profilesById[[string]$profileData.id] = $profileData }
 
     $selected = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @('base') + @($ProfileIds)) {
+    foreach ($name in @($(if (-not $NoBase) { 'base' })) + @($ProfileIds)) {
         $profileId = Resolve-TuneupProfileId -Profiles $Profiles -Name $name
         if ($selected -notcontains $profileId) { $selected.Add($profileId) }
     }

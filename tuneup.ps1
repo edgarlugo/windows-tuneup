@@ -5,6 +5,8 @@
     .\tuneup.ps1 -Profile base,privacy -WhatIf
 .EXAMPLE
     .\tuneup.ps1 -Undo last
+.EXAMPLE
+    .\tuneup.ps1 -Status -Reapply
 .PARAMETER ActionsPath
     Development and testing only: loads action scripts from another folder. They run as the
     current user, with administrator rights when elevated, so use only a folder you trust.
@@ -19,6 +21,7 @@ param(
     [switch]$WhatIf,
     [switch]$Yes,
     [switch]$Status,
+    [switch]$Reapply,
     [string]$Undo,
     [string]$Tweak,
     [switch]$Json,

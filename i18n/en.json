@@ -148,5 +148,6 @@
   "preflight.enableRestore": "Turn on System Restore on {0} before applying? (y/n)",
   "preflight.restoreEnabled": "System Restore turned on: a restore point will be created.",
   "preflight.restoreKeptOff": "Going on without a restore point, with the backup of windows-tuneup only.",
-  "preflight.restoreEnableFailed": "System Restore could not be turned on: {0}"
+  "preflight.restoreEnableFailed": "System Restore could not be turned on: {0}",
+  "reapply.none": "Nothing to apply again: Windows reverted no tweak."
 }

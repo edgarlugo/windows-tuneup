@@ -11,6 +11,9 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'undo of one tweak'; Present = @('Undo', 'Tweak') }
         @{ Name = 'health with repair'; Present = @('Health', 'Repair') }
         @{ Name = 'measure with compare and idle time'; Present = @('Measure', 'Compare', 'IdleSeconds') }
+        @{ Name = 'a re-apply'; Present = @('Status', 'Reapply') }
+        @{ Name = 'a re-apply without asking'; Present = @('Status', 'Reapply', 'Yes') }
+        @{ Name = 'the plan of a re-apply'; Present = @('Status', 'Reapply', 'WhatIf') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -27,6 +30,10 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('Status', 'Profile', 'WhatIf'); Expected = '-Status -Profile -WhatIf' }
         @{ Present = @('Measure', 'Yes'); Expected = '-Measure -Yes' }
         @{ Present = @('Health', 'Include'); Expected = '-Health -Include' }
+        @{ Present = @('Reapply'); Expected = '-Reapply (-Status)' }
+        @{ Present = @('Status', 'Yes'); Expected = '-Status -Yes' }
+        @{ Present = @('Status', 'Reapply', 'Profile'); Expected = '-Status -Profile' }
+        @{ Present = @('Status', 'Reapply', 'Exclude', 'Yes'); Expected = '-Status -Exclude' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected

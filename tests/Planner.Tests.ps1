@@ -41,6 +41,12 @@ Describe 'New-TuneupPlan' {
         Get-Action $plan 'ui.a' | Should -Be 'apply'
     }
 
+    It 'plans only what it names, without the base profile, with -NoBase' {
+        $plan = @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Include @('ui.b', 'apps.onedrive') -Environment (New-TestEnvironment) -TestState $NotApplied -NoBase)
+        ($plan | ForEach-Object { "$($_.Id)=$($_.Action)" }) -join ',' | Should -Be 'ui.b=apply,apps.onedrive=apply'
+        @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Environment (New-TestEnvironment) -TestState $NotApplied -NoBase).Count | Should -Be 0
+    }
+
     It 'resolves profile aliases case-insensitively' {
         $plan = Invoke-Plan -ProfileIds 'JUEGOS'
         ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'

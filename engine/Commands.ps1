@@ -56,12 +56,56 @@ function Get-TuneupContextEnvironment {
     $Context.Environment
 }
 
+# -Reapply applies again, as a new run, the tweaks that Windows reverted (drift), with the same
+# confirmation, -Yes and -WhatIf as applying profiles. People see the status first; with -Json the
+# output is the plan or apply document of the re-apply (source reapply).
 function Invoke-TuneupStatusCommand {
-    param([Parameter(Mandatory)]$Context)
+    param([Parameter(Mandatory)]$Context, [switch]$Reapply, [switch]$PlanOnly, [switch]$Yes)
     $items = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupStatus -StateRoot $Context.StateRoot })
     $Context.Result = $items
-    Write-TuneupStatusReport -Items $items -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
-    $Context.ExitCode = 0
+    if (-not $Reapply) {
+        Write-TuneupStatusReport -Items $items -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        $Context.ExitCode = 0
+        return
+    }
+    if (-not $Context.Json) { Write-TuneupStatusReport -Items $items }
+    Invoke-TuneupReapply -Context $Context -Items $items -PlanOnly:$PlanOnly -Yes:$Yes
+}
+
+# Plans again, from the catalog of now, the tweaks whose status is drift: only them (no base profile)
+# and by name, so a tweak that asks first or is kept by a profile is applied again too; the
+# compatibility checks still apply. A drifted tweak that the catalog no longer has is left out with a
+# warning: undoing the run that applied it restores it.
+function Invoke-TuneupReapply {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$PlanOnly, [switch]$Yes)
+    $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Sort-Object -Unique)
+    if (-not $drifted.Count -and -not $Context.Json) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'reapply.none')
+        $Context.ExitCode = 0
+        return
+    }
+    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+    if ($unsupported) {
+        Write-TuneupCommandError -Context $Context -Message $unsupported
+        return
+    }
+    $definition = Import-TuneupContextDefinition -Context $Context
+    if ($definition.Problems.Count) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
+        return
+    }
+    $known = @{}
+    foreach ($tweak in $definition.Catalog) { $known[[string]$tweak.id] = $true }
+    $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
+    if ($missing.Count) {
+        Invoke-TuneupContextStep -Context $Context -Step {
+            foreach ($id in $missing) { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+        }
+    }
+    $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Include $ids -NoBase)
+    $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
 }
 
 function Invoke-TuneupUndoCommand {
@@ -165,7 +209,8 @@ function New-TuneupContextPlan {
         [AllowEmptyCollection()][string[]]$ProfileIds = @(),
         [AllowEmptyCollection()][string[]]$Include = @(),
         [AllowEmptyCollection()][string[]]$Exclude = @(),
-        [switch]$Interactive
+        [switch]$Interactive,
+        [switch]$NoBase
     )
     $planArguments = @{
         Catalog     = $Definition.Catalog
@@ -175,6 +220,7 @@ function New-TuneupContextPlan {
         Exclude     = $Exclude
         Environment = Get-TuneupContextEnvironment -Context $Context
         Interactive = $Interactive
+        NoBase      = $NoBase
         TestState   = { param($tweak) Test-TuneupState -Tweak $tweak }
     }
     @(Invoke-TuneupContextStep -Context $Context -Step { New-TuneupPlan @planArguments })
@@ -233,7 +279,7 @@ function Invoke-TuneupPlannedApply {
     $preflight = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupPreflight @preflightArguments })
     if ($PlanOnly -or -not $toApply.Count) {
         $Context.Result = $null
-        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight -Source $Request.Source -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
         $Context.ExitCode = 0
         return
     }
@@ -286,7 +332,7 @@ function Invoke-TuneupPlannedApply {
             Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint -Preflight $preflight
         }
     }
-    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment -Preflight $preflight
+    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment -Preflight $preflight -Source $Request.Source
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
     Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
     $Context.Result = $report
@@ -345,7 +391,7 @@ function Save-TuneupStoppedApply {
         elseif ($item.Id -eq $Progress.Current) { New-TuneupResult -Item $item -Status 'failed' -ErrorText 'stopped while it was being applied; -Undo can restore it' }
         else { New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted' }
     })
-    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment -Preflight $Preflight
+    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment -Preflight $Preflight -Source $Request.Source
     $saved = $true
     try {
         Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $report
@@ -378,6 +424,7 @@ function Invoke-TuneupCli {
         [switch]$PlanOnly,
         [switch]$Yes,
         [switch]$Status,
+        [switch]$Reapply,
         [string]$Undo,
         [string]$Tweak,
         [switch]$Force,
@@ -403,6 +450,7 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('PlanOnly') -and $PlanOnly) { $present += 'WhatIf' }
     if ($PSBoundParameters.ContainsKey('Yes') -and $Yes) { $present += 'Yes' }
     if ($PSBoundParameters.ContainsKey('Status') -and $Status) { $present += 'Status' }
+    if ($PSBoundParameters.ContainsKey('Reapply') -and $Reapply) { $present += 'Reapply' }
     if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
     if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
     if ($PSBoundParameters.ContainsKey('Health') -and $Health) { $present += 'Health' }
@@ -445,7 +493,7 @@ function Invoke-TuneupCli {
     Invoke-TuneupContextStep -Context $Context -Step { Write-TuneupActionLoadWarning }
     Get-TuneupContextEnvironment -Context $Context | Out-Null
 
-    if ($Status) { Invoke-TuneupStatusCommand -Context $Context; return }
+    if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }
     if ($Measure) { Invoke-TuneupMeasureCommand -Context $Context -Compare $Compare -IdleSeconds $IdleSeconds; return }

@@ -225,6 +225,17 @@ Describe 'tuneup.ps1' {
         ($json.items | Where-Object { $_.id -eq 'test.two' }).status | Should -Be 'ok'
     }
 
+    It 're-applies what drifted with -Status -Reapply -Yes' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $result = Invoke-Tuneup @('-Status', '-Reapply', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.source | Should -Be 'reapply'
+        Get-Ids $json.results | Should -Be 'test.one'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
     It 'undoes the last run' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
@@ -349,6 +360,9 @@ Describe 'tuneup.ps1' {
         @{ Arguments = @('-IdleSeconds', '5') }
         @{ Arguments = @('-Measure', '-Status') }
         @{ Arguments = @('-Measure', '-Yes') }
+        @{ Arguments = @('-Reapply') }
+        @{ Arguments = @('-Status', '-Yes') }
+        @{ Arguments = @('-Status', '-Reapply', '-Profile', 'extra') }
     ) {
         param($Arguments)
         $result = Invoke-Tuneup (@($Arguments) + '-Json')

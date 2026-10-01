@@ -148,5 +148,6 @@
   "preflight.enableRestore": "¿Activar Restaurar sistema en {0} antes de aplicar? (s/n)",
   "preflight.restoreEnabled": "Restaurar sistema activado: se creará un punto de restauración.",
   "preflight.restoreKeptOff": "Se sigue sin punto de restauración, solo con el respaldo de windows-tuneup.",
-  "preflight.restoreEnableFailed": "No se pudo activar Restaurar sistema: {0}"
+  "preflight.restoreEnableFailed": "No se pudo activar Restaurar sistema: {0}",
+  "reapply.none": "Nada que volver a aplicar: Windows no revirtió ningún ajuste."
 }

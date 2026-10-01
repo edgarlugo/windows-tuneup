@@ -53,6 +53,7 @@ function Write-TuneupPlanReport {
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
         [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles',
         [switch]$Json
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
@@ -62,6 +63,7 @@ function Write-TuneupPlanReport {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'plan'
+            source        = $Source
             environment   = ConvertTo-TuneupEnvironmentView -Environment $Environment
             requiresAdmin = $requiresAdmin
             preflight     = @($Preflight)
@@ -91,7 +93,8 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment,
-        [AllowEmptyCollection()][object[]]$Preflight = @()
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles'
     )
     # A tweak left out because its backup could not be written was not done: it is counted apart, and
     # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to
@@ -101,6 +104,7 @@ function New-TuneupApplyReport {
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
+        source         = $Source
         runId          = $Run.Id
         runDir         = $Run.Dir
         finishedAt     = (Get-Date).ToString('s')

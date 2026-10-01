@@ -184,6 +184,73 @@ Describe 'Commands' {
     }
 }
 
+Describe 'Re-applying what drifted' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'applies again, as a new run, only the tweaks that Windows reverted' {
+        $context = New-TestContext -Json
+        $first = @(Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -ProfileIds @('extra') -Yes })[0]
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $documents = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Yes })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'apply'
+        $documents[0].source | Should -Be 'reapply'
+        $documents[0].runId | Should -Not -Be $first.runId
+        ($documents[0].results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.one=applied'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        $status = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context })[0]
+        @($status.items | Where-Object { $_.status -ne 'ok' }).Count | Should -Be 0
+    }
+
+    It 'shows the plan of a re-apply with -PlanOnly and says when nothing drifted' {
+        $context = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Yes } | Out-Null
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -PlanOnly })[0]
+        $plan.command | Should -Be 'plan'
+        $plan.source | Should -Be 'reapply'
+        @($plan.items).Count | Should -Be 0
+        $human = New-TestContext
+        $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 6>&1 | Out-String)
+        $text | Should -Match 'Tweaks applied by windows-tuneup:'
+        $human.Io.Output -join "`n" | Should -Match 'Nothing to apply again: Windows reverted no tweak.'
+        $human.ExitCode | Should -Be 0
+    }
+
+    It 'asks before re-applying and leaves out, with a warning, a tweak the catalog no longer has' {
+        $context = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Include @('test.three') -Yes } | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Set-ItemProperty -LiteralPath $Key -Name 'Three' -Value 5
+        $catalog = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $catalog | Out-Null
+        $source = Get-Content -LiteralPath (Join-Path $Fixtures 'catalog\test.json') -Raw | ConvertFrom-Json
+        $source.tweaks = @($source.tweaks | Where-Object { $_.id -ne 'test.three' })
+        [System.IO.File]::WriteAllText((Join-Path $catalog 'test.json'), ($source | ConvertTo-Json -Depth 10))
+        # The profile that names test.three goes too, or the catalog check would fail first.
+        $profiles = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $profiles | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $Fixtures 'profiles') -Filter '*.json' | Where-Object { $_.Name -ne 'extra.json' } |
+            Copy-Item -Destination $profiles
+        $human = New-TestContext -Answers @('y')
+        $human.CatalogPath = $catalog
+        $human.ProfilesPath = $profiles
+        $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 3>&1 6>&1 | Out-String)
+        $text | Should -Match 'Tweak test.three was reverted but is no longer in the catalog'
+        $text | Should -Match 'Plan: 1 to apply'
+        $human.Io.Output -join "`n" | Should -Match 'Apply 1 changes\? \(y/n\)'
+        $human.ExitCode | Should -Be 0
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 5
+    }
+}
+
 Describe 'Invoke-TuneupCli' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
