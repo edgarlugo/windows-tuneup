@@ -128,6 +128,6 @@
   "metric.systemDriveFreeGB": "Free space on the system drive (GB)",
   "metric.bootDurationMs": "Last boot duration (ms)",
   "metric.uptimeMinutes": "Minutes since boot",
-  "undo.manual": "To restore it by hand, run (as administrator for a system tweak):",
+  "undo.manual": "To restore it by hand, run this in PowerShell as administrator (a user tweak does not need it):",
   "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes."
 }

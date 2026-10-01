@@ -159,8 +159,19 @@ Describe 'Undo and status' {
         Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.two' }
         $results = @(Invoke-TuneupUndo -Run $run)
         $results[0].status | Should -Be 'failed'
-        @($results[0].manual) | Should -Be @('reg.exe delete "HKCU\Software\windows-tuneup-test" /v "Two" /f')
+        @($results[0].manual) | Should -Be @("Remove-ItemProperty -LiteralPath 'HKCU:\Software\windows-tuneup-test' -Name 'Two'")
         @($results[1].manual).Count | Should -Be 0
+    }
+
+    It 'still reports a failed restore when the manual instructions cannot be built' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        Mock -ModuleName Tuneup Get-TuneupManualRestoreHint { throw 'hint broke' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].status | Should -Be 'failed'
+        $results[0].error | Should -Be 'access denied'
+        @($results[0].manual).Count | Should -Be 0
+        $results[1].status | Should -Be 'restored'
     }
 
     It 'says when a restored tweak shows only after signing in again' {
@@ -172,6 +183,26 @@ Describe 'Undo and status' {
         Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir | Out-Null
         $results = @(Invoke-TuneupUndo -Run $run)
         $results[0].signOutRequired | Should -BeTrue
+    }
+
+    It 'does not ask to sign in again for a restore that failed or was skipped' {
+        $signOut = New-TestTweak -Id 'test.signout' -Set ([pscustomobject]@{ path = $Key; name = 'SignOut'; kind = 'DWord'; value = 1 })
+        $signOut | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $other = New-TestTweak -Id 'test.other' -Set ([pscustomobject]@{ path = $Key; name = 'Other'; kind = 'DWord'; value = 1 })
+        $run = New-TuneupRun -StateRoot $Root
+        $plan = @(New-TuneupPlan -Catalog @($signOut, $other) -Profiles @(New-TestProfile -Id 'base' -Include @('test.signout', 'test.other')) `
+            -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+        Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir | Out-Null
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.signout' }
+        $failed = @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')
+        $failed[0].status | Should -Be 'failed'
+        $failed[0].signOutRequired | Should -BeFalse
+        Mock -ModuleName Tuneup Restore-TuneupState { } -ParameterFilter { $Tweak.id -eq 'test.signout' }
+        @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')[0].signOutRequired | Should -BeTrue
+        $skipped = @(Invoke-TuneupUndo -Run $run -TweakId 'test.signout')
+        $skipped[0].status | Should -Be 'skipped'
+        $skipped[0].reason | Should -Be 'already-undone'
+        $skipped[0].signOutRequired | Should -BeFalse
     }
 
     It 'keeps the run pending when a restore fails and finishes it on retry' {

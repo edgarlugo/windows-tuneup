@@ -239,6 +239,13 @@ function Get-TuneupWingetInstallArgument {
     'install', '--id', $StoreId, '--source', 'msstore', '--exact', '--no-upgrade', '--accept-package-agreements', '--accept-source-agreements', '--silent', '--disable-interactivity'
 }
 
+# The line a person can run to install an app by hand: the one source for the undo notes and the
+# instructions that -Undo gives when it fails. The id is checked before it reaches here.
+function Get-TuneupWingetManualCommand {
+    param([Parameter(Mandatory)][string]$StoreId)
+    "winget install --id $StoreId --source msstore"
+}
+
 function Test-TuneupAppxInstalledForCurrentUser {
     param([Parameter(Mandatory)][string]$Name)
     @(Get-AppxPackage -Name $Name -ErrorAction Stop | Where-Object { $_.Name -eq $Name }).Count -gt 0
@@ -247,7 +254,7 @@ function Test-TuneupAppxInstalledForCurrentUser {
 function Restore-AppxTweakState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
     $name = [string]$Tweak.set.name
-    $manual = "winget install --id $($Tweak.set.storeId) --source msstore"
+    $manual = Get-TuneupWingetManualCommand -StoreId ([string]$Tweak.set.storeId)
     # Whose copy it is was already decided when the entry was read: one that belongs to another account
     # never gets here (Get-TuneupRunJournal leaves it pending for its owner).
     # A state saved before the user fields existed only knows that someone had the app: assume the current user.

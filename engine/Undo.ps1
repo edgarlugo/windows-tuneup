@@ -28,7 +28,7 @@ function Invoke-TuneupUndo {
             detail          = $(if ($outcome) { $outcome.detail } else { $null })
             rebootRequired  = $(if ($outcome) { [bool]$outcome.rebootRequired } else { $false })
             signOutRequired = ($status -eq 'restored' -and $null -ne $signOut -and $signOut.Value -eq $true)
-            manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreHint -Tweak $entry.tweak -State $entry.state })
+            manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreLine -Tweak $entry.tweak -State $entry.state })
         }
     }
     if ($TweakId) {
