@@ -208,3 +208,34 @@ Describe 'tasks catalog' {
         Get-CategoryId 'tasks' | Should -Be $expected
     }
 }
+
+Describe 'performance catalog' {
+    It 'ships the performance tweaks in this order' {
+        $expected = @(
+            'performance.delivery-optimization-http-only',
+            'performance.explorer-folder-type-general',
+            'performance.background-apps-off'
+        ) -join ','
+        Get-CategoryId 'performance' | Should -Be $expected
+    }
+}
+
+Describe 'power catalog' {
+    It 'ships the power tweaks in this order' {
+        $expected = @(
+            'power.high-performance-plan',
+            'power.usb-selective-suspend-ac-off',
+            'power.standby-network-off-battery'
+        ) -join ','
+        Get-CategoryId 'power' | Should -Be $expected
+    }
+
+    It 'ties the power tweaks to the hardware they are meant for' {
+        $tweaks = Get-CategoryTweak 'power'
+        @(($tweaks | Where-Object { $_.id -eq 'power.high-performance-plan' }).requires) -join ',' | Should -Be 'no-battery'
+        @(($tweaks | Where-Object { $_.id -eq 'power.standby-network-off-battery' }).requires) -join ',' | Should -Be 'battery'
+        $usb = $tweaks | Where-Object { $_.id -eq 'power.usb-selective-suspend-ac-off' }
+        $usb.set.ac | Should -Be 0
+        $null -eq $usb.set.PSObject.Properties['dc'] | Should -BeTrue
+    }
+}

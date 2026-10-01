@@ -1,0 +1,43 @@
+{
+  "tweaks": [
+    {
+      "id": "performance.delivery-optimization-http-only",
+      "title": { "es": "No compartir descargas de Windows con otros equipos", "en": "Do not share Windows downloads with other PCs" },
+      "why": { "es": "Delivery Optimization descarga solo por HTTP y deja de subir actualizaciones a otros equipos de tu red. Las actualizaciones siguen llegando igual.", "en": "Delivery Optimization downloads over HTTP only and stops uploading updates to other PCs on your network. Updates keep arriving the same way." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\DeliveryOptimization", "name": "DODownloadMode", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/windows/deployment/do/waas-delivery-optimization-reference", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
+    },
+    {
+      "id": "performance.explorer-folder-type-general",
+      "title": { "es": "Que el Explorador no adivine el tipo de cada carpeta", "en": "Stop File Explorer from guessing each folder type" },
+      "why": { "es": "Explorer deja de analizar el contenido para elegir columnas (imágenes, música); las carpetas grandes abren más rápido, sobre todo en disco mecánico.", "en": "Explorer stops scanning contents to pick columns (pictures, music); large folders open faster, especially on hard disks." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Classes\\Local Settings\\Software\\Microsoft\\Windows\\Shell\\Bags\\AllFolders\\Shell", "name": "FolderType", "kind": "String", "value": "NotSpecified" },
+      "rebootRequired": false,
+      "sources": ["https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
+    },
+    {
+      "id": "performance.background-apps-off",
+      "title": { "es": "No dejar que las apps de la Store corran en segundo plano", "en": "Do not let Store apps run in the background" },
+      "why": { "es": "Ahorra batería y memoria; a cambio, apps como Correo o Alarmas no avisan con la app cerrada. Puedes permitir apps una a una en Configuración.", "en": "Saves battery and memory; in exchange, apps like Mail or Alarms do not notify while closed. You can allow apps one by one in Settings." },
+      "risk": "medium",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\BackgroundAccessApplications", "name": "GlobalUserDisabled", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json", "https://www.elevenforum.com/t/enable-or-disable-background-apps-in-windows-11.923/"]
+    }
+  ]
+}

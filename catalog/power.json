@@ -1,0 +1,45 @@
+{
+  "tweaks": [
+    {
+      "id": "power.high-performance-plan",
+      "title": { "es": "Usar el plan de energía Alto rendimiento", "en": "Use the High performance power plan" },
+      "why": { "es": "Para escritorios: mantiene el procesador listo y evita ahorros que añaden latencia. En portátiles gasta batería.", "en": "For desktops: keeps the processor ready and skips savings that add latency. Drains the battery on laptops." },
+      "risk": "medium",
+      "ask": true,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "powercfg",
+      "scope": "machine",
+      "set": { "kind": "scheme", "scheme": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c" },
+      "requires": ["no-battery"],
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/customize-power-slider", "https://github.com/farag2/Sophia-Script-for-Windows"]
+    },
+    {
+      "id": "power.usb-selective-suspend-ac-off",
+      "title": { "es": "No suspender los USB con corriente", "en": "Do not suspend USB devices on AC" },
+      "why": { "es": "Evita cortes y retardos al despertar mouse, teclado, mando o dispositivos de depuración. Con batería no cambia nada.", "en": "Avoids dropouts and delays when waking mouse, keyboard, controller or debugging devices. Nothing changes on battery." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "powercfg",
+      "scope": "machine",
+      "set": { "kind": "setting", "scheme": "SCHEME_CURRENT", "subgroup": "2a737441-1930-4402-8d77-b2bebba308a3", "setting": "48e6b7a6-50f5-4782-a5d4-53bb8f07e226", "ac": 0 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options"]
+    },
+    {
+      "id": "power.standby-network-off-battery",
+      "title": { "es": "Sin red en suspensión moderna con batería", "en": "No network in modern standby on battery" },
+      "why": { "es": "Ahorra batería mientras la tapa está cerrada. Se pierden notificaciones y Escritorio remoto hasta que despiertes el equipo.", "en": "Saves battery while the lid is closed. You lose notifications and Remote Desktop until you wake the machine." },
+      "risk": "medium",
+      "ask": true,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Power\\PowerSettings\\f15576e8-98b7-4186-b944-eafa664402d9", "name": "DCSettingIndex", "kind": "DWord", "value": 0 },
+      "requires": ["battery"],
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/modern-standby-network-connectivity", "https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Disable_Modern_Standby_Networking.reg"]
+    }
+  ]
+}
