@@ -179,3 +179,32 @@ Describe 'services catalog' {
         $asked | Should -Be 'services.diagtrack,services.geolocation,services.connected-devices,services.connected-devices-user,services.contact-data,services.user-data-storage,services.user-data-access'
     }
 }
+
+Describe 'tasks catalog' {
+    It 'ships the tasks tweaks in this order' {
+        $expected = @(
+            'tasks.ceip-consolidator',
+            'tasks.ceip-usbceip',
+            'tasks.autochk-proxy',
+            'tasks.disk-diagnostic-data-collector',
+            'tasks.appraiser',
+            'tasks.appraiser-exp',
+            'tasks.program-data-updater',
+            'tasks.mare-backup',
+            'tasks.startup-app-task',
+            'tasks.maps-toast',
+            'tasks.maps-update',
+            'tasks.xbox-game-save',
+            'tasks.power-efficiency-analyze',
+            'tasks.disk-footprint-diagnostics',
+            'tasks.work-folders-logon',
+            'tasks.work-folders-maintenance',
+            'tasks.winsat',
+            'tasks.recommended-troubleshooting',
+            'tasks.family-safety-monitor',
+            'tasks.family-safety-refresh',
+            'tasks.speech-model-download'
+        ) -join ','
+        Get-CategoryId 'tasks' | Should -Be $expected
+    }
+}
