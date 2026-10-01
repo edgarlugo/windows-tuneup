@@ -95,6 +95,22 @@ Describe 'Undo and status' {
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt') | Should -BeFalse
     }
 
+    It 'leaves the Store app of another user pending for its owner' {
+        $appx = New-TestTweak -Id 'test.appx' -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
+        $run = New-TuneupRun -StateRoot $Root
+        $journal = Join-Path $run.Dir 'snapshot.jsonl'
+        Add-TuneupJournalEntry -Path $journal -Tweak $One -State ([pscustomobject]@{ keyExisted = $false; existingAncestor = 'HKCU:\Software'; exists = $false; kind = $null; value = $null })
+        Add-TuneupJournalEntry -Path $journal -Tweak $appx -State ([pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'; otherUsers = 0; provisioned = $false })
+        Mock -ModuleName Tuneup Restore-AppxTweakState { }
+        $results = @(Invoke-TuneupUndo -Run $run -WarningAction SilentlyContinue)
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:restored:,test.appx:skipped:other-user'
+        Should -Invoke Restore-AppxTweakState -ModuleName Tuneup -Times 0 -Exactly
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
+        (Get-Content -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt')) -join ',' | Should -Be 'test.one'
+        $single = @(Invoke-TuneupUndo -Run $run -TweakId 'test.appx' -WarningAction SilentlyContinue)
+        ($single | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.appx:skipped:other-user'
+    }
+
     It 'skips a single tweak of another user' {
         $run = Invoke-TestApply $Root
         $foreign = [pscustomobject]@{ Id = $run.Id; Dir = $run.Dir; Root = $run.Root; UserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001' }

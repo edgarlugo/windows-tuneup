@@ -259,6 +259,27 @@ Describe 'Runs of other users' {
         (@(Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue) | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine'
     }
 
+    It 'skips the Store app entry whose copy belongs to another user' {
+        $appx = New-TestTweak -Id 'test.appx' -Type 'appx' -Scope 'machine' -Set ([pscustomobject]@{ name = 'Microsoft.BingNews'; storeId = '9WZDNCRFHVFW'; action = 'remove' })
+        $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak)
+        $states = @(
+            @{ id = 'mine'; state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = $MeSid; otherUsers = 0; provisioned = $false } }
+            @{ id = 'other'; state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = $OtherSid; otherUsers = 0; provisioned = $false } }
+            @{ id = 'nobody'; state = [pscustomobject]@{ installedUsers = $true; currentUserHad = $false; currentUserSid = $null; otherUsers = 2; provisioned = $true } }
+            @{ id = 'old'; state = [pscustomobject]@{ installedUsers = $true; provisioned = $false } }
+        )
+        foreach ($item in $states) {
+            $tweak = New-TestTweak -Id "test.appx-$($item.id)" -Type 'appx' -Scope 'machine' -Set $appx.set
+            Add-TuneupJournalEntry -Path (Join-Path $dir 'snapshot.jsonl') -Tweak $tweak -State $item.state -Root 'custom'
+        }
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $MeSid }
+        $journal = Get-TuneupRunJournal -Run $run -WarningVariable warned -WarningAction SilentlyContinue
+        ($journal.Entries | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.machine,test.appx-mine,test.appx-nobody,test.appx-old'
+        @($journal.Skipped) -join ',' | Should -Be 'test.appx-other'
+        (@($journal.SkippedEntries) | ForEach-Object { $_.tweak.id }) -join ',' | Should -Be 'test.appx-other'
+        "$($warned[0])" | Should -BeLike "Ignoring appx entry 'test.appx-other' of run 20250101-000000*belongs to another user*"
+    }
+
     It 'keeps every entry of a run made by the current user' {
         $dir = New-RunFolder -Root $MachineRoot -Id '20250101-000000' -Tweaks @($MachineTweak, (New-TestTweak))
         $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'machine'; UserSid = $MeSid }
