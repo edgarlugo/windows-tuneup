@@ -262,3 +262,14 @@ Describe 'gaming catalog' {
         @(Get-CategoryTweak 'gaming' | Where-Object { $_.risk -eq 'high' } | ForEach-Object { $_.id }) -join ',' | Should -Be 'gaming.memory-integrity-off'
     }
 }
+
+Describe 'dev catalog' {
+    It 'ships the dev tweaks in this order' {
+        $expected = @(
+            'dev.developer-mode',
+            'dev.long-paths',
+            'dev.sudo-enable'
+        ) -join ','
+        Get-CategoryId 'dev' | Should -Be $expected
+    }
+}

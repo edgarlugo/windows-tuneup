@@ -1,0 +1,43 @@
+{
+  "tweaks": [
+    {
+      "id": "dev.developer-mode",
+      "title": { "es": "Activar el Modo desarrollador", "en": "Turn on Developer Mode" },
+      "why": { "es": "Permite instalar apps de prueba sin licencia y crear vínculos simbólicos sin ser administrador (git, npm, pnpm).", "en": "Allows installing test apps without a license and creating symbolic links without being administrator (git, npm, pnpm)." },
+      "risk": "medium",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock", "name": "AllowDevelopmentWithoutDevLicense", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/en-us/windows/advanced-settings/developer-mode", "https://blogs.windows.com/windowsdeveloper/2016/12/02/symlinks-windows-10/"]
+    },
+    {
+      "id": "dev.long-paths",
+      "title": { "es": "Permitir rutas de más de 260 caracteres", "en": "Allow paths longer than 260 characters" },
+      "why": { "es": "Evita errores en node_modules, git y compiladores con carpetas muy anidadas. Solo lo usan las apps preparadas; el Explorador no.", "en": "Avoids errors in node_modules, git and compilers with deeply nested folders. Only apps that opt in use it; Explorer does not." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "machine",
+      "set": { "path": "HKLM:\\SYSTEM\\CurrentControlSet\\Control\\FileSystem", "name": "LongPathsEnabled", "kind": "DWord", "value": 1 },
+      "rebootRequired": true,
+      "sources": ["https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation"]
+    },
+    {
+      "id": "dev.sudo-enable",
+      "title": { "es": "Activar sudo para Windows", "en": "Turn on sudo for Windows" },
+      "why": { "es": "Permite ejecutar un comando como administrador desde una consola normal, en una ventana nueva y con confirmación de UAC.", "en": "Lets you run one command as administrator from a normal console, in a new window with a UAC prompt." },
+      "risk": "medium",
+      "ask": true,
+      "os": { "families": ["11"], "minBuild": 26100, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "machine",
+      "set": { "path": "HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Sudo", "name": "Enabled", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://learn.microsoft.com/en-us/windows/advanced-settings/sudo/", "https://github.com/microsoft/sudo"]
+    }
+  ]
+}
