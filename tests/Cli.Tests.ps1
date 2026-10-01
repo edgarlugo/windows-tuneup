@@ -236,6 +236,19 @@ Describe 'tuneup.ps1' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
+    It 'opens the menu without a command and reads the answers from standard input' {
+        # Optimize, only base, apply, back to the menu, exit.
+        $answers = @('1', '', 'y', '', '0')
+        $output = $answers | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
+            -CatalogPath (Join-Path $Fixtures 'catalog') -ProfilesPath (Join-Path $Fixtures 'profiles') `
+            -ActionsPath (Join-Path $Fixtures 'actions') -StateRoot $script:Root -Force -Lang en
+        $LASTEXITCODE | Should -Be 0
+        $text = $output -join "`n"
+        $text | Should -Match '1\. Optimize: choose profiles and apply them'
+        $text | Should -Match 'Applied: 2'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
     It 'leaves the menu at the end of standard input' {
         $output = @('2') | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en
         $LASTEXITCODE | Should -Be 0

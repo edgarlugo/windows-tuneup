@@ -76,9 +76,17 @@ function Invoke-TuneupStatusCommand {
 # Plans again, from the catalog of now, the tweaks whose status is drift: only them (no base profile)
 # and by name, so a tweak that asks first or is kept by a profile is applied again too; the
 # compatibility checks still apply. A drifted tweak that the catalog no longer has is left out with a
-# warning: undoing the run that applied it restores it.
+# warning: undoing the run that applied it restores it. -Interactive (the menu) asks about the tweaks
+# that are left out otherwise: one question for each that asks first, and each one of high risk comes
+# back only after typing the confirmation word in full.
 function Invoke-TuneupReapply {
-    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$PlanOnly, [switch]$Yes)
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items,
+        [switch]$PlanOnly,
+        [switch]$Yes,
+        [switch]$Interactive
+    )
     # In the order of the runs that applied them, not alphabetical.
     $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Select-Object -Unique)
     if (-not $drifted.Count -and -not $Context.Json) {
@@ -110,8 +118,20 @@ function Invoke-TuneupReapply {
     $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
     # Named like a profile names them, not asked for: a tweak that asks first or has high risk is left
     # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those.
-    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -NoBase)
-    $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids
+    $confirmed = @()
+    if ($Interactive) {
+        $confirmed = Confirm-TuneupMenuReappliedHighRisk -Context $Context -Catalog $definition.Catalog -Ids $ids
+        if ($null -eq $confirmed) { return }
+    }
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -Include $confirmed -NoBase -Interactive:$Interactive)
+    $declined = @()
+    if ($Interactive) {
+        # Back in the order of the runs that applied them: a confirmed tweak is planned first.
+        $plan = @(foreach ($id in $ids) { $plan | Where-Object { $_.Id -eq $id } })
+        $declined = Request-TuneupMenuAskedTweak -Context $Context -Plan $plan -Requested $confirmed
+        if ($null -eq $declined) { return }
+    }
+    $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids -Exclude $declined
     if ($Yes -and -not $PlanOnly -and -not $Context.Json) {
         # With -Yes the plan is not shown, so what is left out is listed here.
         foreach ($item in @($plan | Where-Object { $_.Action -eq 'skip' -and @('needs-confirmation', 'high-risk-not-requested') -contains $_.Reason })) {
