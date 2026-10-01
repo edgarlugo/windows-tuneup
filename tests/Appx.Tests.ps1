@@ -531,6 +531,87 @@ Describe 'winget' {
     }
 }
 
+Describe 'winget location' {
+    BeforeEach {
+        # winget runs elevated, so it is only taken from the App Installer package that Windows keeps
+        # under Program Files\WindowsApps; the alias in the user's AppData\Local\Microsoft\WindowsApps
+        # can be replaced by the user.
+        $script:WindowsApps = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'WindowsApps'
+        $script:Location = Join-Path $WindowsApps 'Microsoft.DesktopAppInstaller_1.29.379.0_x64__8wekyb3d8bbwe'
+        $script:Package = [pscustomobject]@{
+            Name = 'Microsoft.DesktopAppInstaller'; Version = '1.29.379.0'; PublisherId = '8wekyb3d8bbwe'
+            SignatureKind = 'Store'; InstallLocation = $Location
+        }
+        $script:Packages = @($Package)
+        $script:AllUsersPackages = @()
+        Mock -ModuleName Tuneup Get-TuneupAppInstallerPackage { if ($AllUsers) { $script:AllUsersPackages } else { $script:Packages } }
+        Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $true }
+        Mock -ModuleName Tuneup Test-TuneupAclDenied { $false }
+        Mock -ModuleName Tuneup Test-Path { $true } -ParameterFilter { $LiteralPath -like '*\winget.exe' }
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        Mock -ModuleName Tuneup Get-Command { [pscustomobject]@{ Source = 'C:\Users\me\AppData\Local\Microsoft\WindowsApps\winget.exe' } }
+    }
+
+    It 'takes winget from the App Installer package under WindowsApps, never from the PATH' {
+        & (Get-Module Tuneup) { Get-TuneupWingetPath } | Should -Be (Join-Path $Location 'winget.exe')
+        Should -Invoke Test-TuneupTrustedExecutable -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $Path -eq (Join-Path $Location 'winget.exe') -and $StopAt -eq $WindowsApps
+        }
+        Should -Invoke Get-Command -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'refuses, when elevated, a package that <Name>' -TestCases @(
+        @{ Name = 'is outside WindowsApps'; Property = 'InstallLocation'; Value = 'C:\Users\me\AppData\Local\Fake' }
+        @{ Name = 'climbs out of WindowsApps with ..'; Property = 'InstallLocation'; Value = '{0}\..\Fake' }
+        @{ Name = 'is WindowsApps itself'; Property = 'InstallLocation'; Value = '{0}' }
+        @{ Name = 'is from another publisher'; Property = 'PublisherId'; Value = 'abcdefghijklm' }
+        @{ Name = 'is signed by a developer'; Property = 'SignatureKind'; Value = 'Developer' }
+    ) {
+        param($Property, $Value)
+        $Package.$Property = $Value -f $WindowsApps
+        { & (Get-Module Tuneup) { Get-TuneupWingetPath } } | Should -Throw '*winget was not found where Windows installs it*'
+        Should -Invoke Get-Command -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'refuses, when elevated, a winget.exe that someone else can change' {
+        Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $false }
+        { & (Get-Module Tuneup) { Get-TuneupWingetPath } } | Should -Throw '*winget was not found where Windows installs it*'
+    }
+
+    It 'accepts a winget.exe whose ACL Windows does not let it read, inside a package of Microsoft' {
+        Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $false }
+        Mock -ModuleName Tuneup Test-TuneupAclDenied { $true }
+        & (Get-Module Tuneup) { Get-TuneupWingetPath } | Should -Be (Join-Path $Location 'winget.exe')
+    }
+
+    It 'takes the newest version and, elevated as another account, the package of any user' {
+        $older = $Package.PSObject.Copy()
+        $older.Version = '1.9.25200.0'
+        $older.InstallLocation = Join-Path $WindowsApps 'Microsoft.DesktopAppInstaller_1.9.25200.0_x64__8wekyb3d8bbwe'
+        $script:Packages = @($older, $Package)
+        & (Get-Module Tuneup) { Get-TuneupWingetPath } | Should -Be (Join-Path $Location 'winget.exe')
+        $script:Packages = @()
+        $script:AllUsersPackages = @($Package)
+        & (Get-Module Tuneup) { Get-TuneupWingetPath } | Should -Be (Join-Path $Location 'winget.exe')
+    }
+
+    It 'falls back to the PATH only when it is not elevated' {
+        $script:Packages = @()
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        & (Get-Module Tuneup) { Get-TuneupWingetPath } | Should -Be 'C:\Users\me\AppData\Local\Microsoft\WindowsApps\winget.exe'
+        Should -Invoke Get-TuneupAppInstallerPackage -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $AllUsers }
+    }
+}
+
+Describe 'winget on this machine' {
+    It 'finds the winget of App Installer and trusts it, when the package is there' {
+        $package = $null
+        try { $package = @(Get-AppxPackage -Name 'Microsoft.DesktopAppInstaller' -ErrorAction Stop)[0] } catch { $package = $null }
+        if ($null -eq $package) { Set-ItResult -Skipped -Because 'App Installer is not installed for this user'; return }
+        (& (Get-Module Tuneup) { Get-TuneupTrustedWingetPath }) | Should -Be (Join-Path $package.InstallLocation 'winget.exe')
+    }
+}
+
 Describe 'Appx registration' {
     It 'is a dispatched type that needs elevation to read' {
         Get-TuneupHandlerName -Tweak $Tweak | Should -Be 'Appx'

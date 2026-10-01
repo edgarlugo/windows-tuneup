@@ -1,7 +1,10 @@
 $script:StateOwnerSid = 'S-1-5-32-544'
 $script:TrustedSids = @('S-1-5-18', 'S-1-5-32-544')
-# Owners accepted for the folder that holds the machine state folder: SYSTEM, TrustedInstaller, Administrators.
-$script:BaseTrustedSids = @('S-1-5-18', 'S-1-5-80-956008885-3425145150-2718476148-1766412592', 'S-1-5-32-544')
+# NT SERVICE\TrustedInstaller, which owns the files of Windows and of the packages under WindowsApps.
+$script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
+# Owners accepted for the folder that holds the machine state folder, and owners and writers accepted
+# for a program that runs elevated: SYSTEM, TrustedInstaller, Administrators.
+$script:BaseTrustedSids = @('S-1-5-18', $script:TrustedInstallerSid, 'S-1-5-32-544')
 $script:UsersSid = 'S-1-5-32-545'
 $script:OwnerRightsSid = 'S-1-3-4'
 # Any of these granted to an untrusted SID lets it change or replace a state file.
@@ -128,11 +131,13 @@ function New-TuneupSecureFile {
 }
 
 function Test-TuneupTrustedSecurity {
-    param([Parameter(Mandatory)]$Security, [string[]]$TrustedSids = $script:TrustedSids)
+    param([Parameter(Mandatory)]$Security, [string[]]$TrustedSids = $script:TrustedSids, [switch]$SkipInheritOnly)
     $owner = $Security.GetOwner([System.Security.Principal.SecurityIdentifier])
     if ($null -eq $owner -or $TrustedSids -notcontains $owner.Value) { return $false }
     foreach ($rule in $Security.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
         if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        # An inherit-only entry (CREATOR OWNER on System32) only applies to what is created inside.
+        if ($SkipInheritOnly -and ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly)) { continue }
         if ($TrustedSids -contains $rule.IdentityReference.Value) { continue }
         if (([int]$rule.FileSystemRights -band $script:WriteRights) -ne 0) { return $false }
     }
@@ -151,6 +156,59 @@ function Test-TuneupTrustedItem {
         return $false
     }
     Test-TuneupTrustedSecurity -Security $security -TrustedSids $TrustedSids
+}
+
+# A program that an elevated process runs: the file and every folder above it, up to $StopAt (not
+# included), must be owned by SYSTEM, TrustedInstaller or Administrators and give no one else a right
+# to change them, so nobody else can replace the program or plant a library next to it. Hard links are
+# fine here (the programs of System32 are hard links into WinSxS): the ACL belongs to the file, whatever
+# its name. A junction or symbolic link on the way is not.
+function Test-TuneupTrustedExecutable {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$StopAt)
+    try {
+        $full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\')
+        $stop = [System.IO.Path]::GetFullPath($StopAt).TrimEnd('\') + '\'
+    }
+    catch {
+        return $false
+    }
+    if ($full.Length -le $stop.Length -or -not $full.StartsWith($stop, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $current = $full
+    $isProgram = $true
+    while ($current.Length -ge $stop.Length) {
+        try {
+            $item = Get-Item -LiteralPath $current -Force -ErrorAction Stop
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+            if ($isProgram -and $item.PSIsContainer) { return $false }
+            $security = Get-Acl -LiteralPath $current -ErrorAction Stop
+        }
+        catch {
+            return $false
+        }
+        if (-not (Test-TuneupTrustedSecurity -Security $security -TrustedSids $script:BaseTrustedSids -SkipInheritOnly)) { return $false }
+        $isProgram = $false
+        $current = Split-Path -Path $current -Parent
+        if (($current.TrimEnd('\') + '\') -ieq $stop) { break }
+    }
+    $true
+}
+
+# True only when Windows refuses to show the ACL (some files of the Store packages), not for any
+# other failure.
+function Test-TuneupAclDenied {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        Get-Acl -LiteralPath $Path -ErrorAction Stop | Out-Null
+    }
+    catch {
+        $exception = $_.Exception
+        while ($null -ne $exception) {
+            if ($exception -is [System.UnauthorizedAccessException]) { return $true }
+            $exception = $exception.InnerException
+        }
+        return ($_.CategoryInfo.Category -eq [System.Management.Automation.ErrorCategory]::PermissionDenied)
+    }
+    $false
 }
 
 function Test-TuneupBaseFolder {

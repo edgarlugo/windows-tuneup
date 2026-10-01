@@ -157,7 +157,58 @@ function Set-AppxTweakDesired {
 # APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE (0x8A15002B), in case a winget version answers that.
 $script:WingetSuccessCode = @(0, -1978335135, -1978335189)
 
+# winget comes with App Installer, a package of Microsoft (publisher id 8wekyb3d8bbwe).
+$script:AppInstallerName = 'Microsoft.DesktopAppInstaller'
+$script:MicrosoftPublisherId = '8wekyb3d8bbwe'
+
+function Get-TuneupAppInstallerPackage {
+    param([switch]$AllUsers)
+    @(Get-AppxPackage -Name $script:AppInstallerName -AllUsers:$AllUsers -ErrorAction Stop | Where-Object { $_.Name -eq $script:AppInstallerName })
+}
+
+function ConvertTo-TuneupVersion {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    $version = $null
+    if ([version]::TryParse(([string]$Text).Trim(), [ref]$version)) { return $version }
+    [version]'0.0'
+}
+
+function Get-TuneupTrustedWingetPath {
+    # The winget.exe inside the App Installer package, in the folder where Windows keeps Store packages
+    # (Program Files\WindowsApps, owned by TrustedInstaller), never the alias in the user's
+    # AppData\Local\Microsoft\WindowsApps, which the user can replace. The package must be signed by
+    # Microsoft through the Store or Windows, and the program and its folder may only be changeable by
+    # SYSTEM, TrustedInstaller or Administrators; if Windows does not let the tool read that ACL, the
+    # folder and the signature decide.
+    $windowsApps = Join-Path -Path ([Environment]::GetFolderPath('ProgramFiles')) -ChildPath 'WindowsApps'
+    $prefix = $windowsApps.TrimEnd('\') + '\'
+    $packages = @()
+    try { $packages = @(Get-TuneupAppInstallerPackage) } catch { $packages = @() }
+    # Elevated as another administrator, that account may not have App Installer itself.
+    if (-not $packages.Count -and (Test-TuneupAdmin)) {
+        try { $packages = @(Get-TuneupAppInstallerPackage -AllUsers) } catch { $packages = @() }
+    }
+    foreach ($package in @($packages | Sort-Object -Property { ConvertTo-TuneupVersion -Text ([string]$_.Version) } -Descending)) {
+        if ([string]$package.PublisherId -cne $script:MicrosoftPublisherId) { continue }
+        if (@('Store', 'System') -cnotcontains [string]$package.SignatureKind) { continue }
+        $location = [string]$package.InstallLocation
+        if (-not $location) { continue }
+        try { $location = [System.IO.Path]::GetFullPath($location).TrimEnd('\') } catch { continue }
+        if ($location.Length -le $prefix.Length -or -not $location.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $winget = Join-Path -Path $location -ChildPath 'winget.exe'
+        if (Test-TuneupTrustedExecutable -Path $winget -StopAt $windowsApps) { return $winget }
+        if ((Test-Path -LiteralPath $winget -PathType Leaf) -and (Test-TuneupAclDenied -Path $winget)) { return $winget }
+    }
+}
+
 function Get-TuneupWingetPath {
+    $trusted = Get-TuneupTrustedWingetPath
+    if ($trusted) { return $trusted }
+    # Elevated, a winget found on the PATH is never run: the first one is the user's alias.
+    if (Test-TuneupAdmin) {
+        $windowsApps = Join-Path -Path ([Environment]::GetFolderPath('ProgramFiles')) -ChildPath 'WindowsApps'
+        throw "winget was not found where Windows installs it (App Installer from Microsoft under $windowsApps). Install or repair App Installer from the Microsoft Store and run the undo again"
+    }
     $command = Get-Command -Name 'winget.exe' -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($null -ne $command) { $command.Source }
 }

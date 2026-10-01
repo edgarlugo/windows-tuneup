@@ -90,12 +90,12 @@ function Set-TestTrust([string]$Owner, [string[]]$Trusted, [string[]]$BaseTruste
 function Use-CurrentUserAsTrusted {
     $me = Get-TestCurrentSid
     Set-TestTrust -Owner $me -Trusted @('S-1-5-18', 'S-1-5-32-544', $me) `
-        -BaseTrusted @('S-1-5-18', 'S-1-5-80-956008885-3425145150-2718476148-1766412592', 'S-1-5-32-544', $me)
+        -BaseTrusted @('S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'S-1-5-32-544', $me)
 }
 
 function Reset-TestTrust {
     Set-TestTrust -Owner 'S-1-5-32-544' -Trusted @('S-1-5-18', 'S-1-5-32-544') `
-        -BaseTrusted @('S-1-5-18', 'S-1-5-80-956008885-3425145150-2718476148-1766412592', 'S-1-5-32-544')
+        -BaseTrusted @('S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464', 'S-1-5-32-544')
 }
 
 function Grant-EveryoneWrite([string]$Path) {

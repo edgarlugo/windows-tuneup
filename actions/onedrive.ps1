@@ -60,32 +60,83 @@ function Get-OnedriveActionHelperOnlineOnly {
     }
 }
 
+function Get-OnedriveActionHelperVersion {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    # File versions compared as versions (10.0 is newer than 9.0); one that cannot be read counts as 0.0.
+    $version = $null
+    if ([version]::TryParse(([string]$Text).Trim(), [ref]$version)) { return $version }
+    [version]'0.0'
+}
+
+function Get-OnedriveActionHelperNewest {
+    param([AllowEmptyCollection()][object[]]$File = @())
+    $File | Sort-Object -Property { Get-OnedriveActionHelperVersion -Text ([string]$_.VersionInfo.FileVersion) } -Descending | Select-Object -First 1
+}
+
+function Get-OnedriveActionHelperSystemSetup {
+    param()
+    # The OneDriveSetup.exe that comes with Windows (System32, or SysWOW64 on older 64-bit builds). It
+    # is owned by TrustedInstaller, unlike the copy in the user's AppData, which the user can replace.
+    foreach ($folder in [Environment]::GetFolderPath('System'), [Environment]::GetFolderPath('SystemX86')) {
+        if (-not $folder) { continue }
+        $setup = Join-Path -Path $folder -ChildPath 'OneDriveSetup.exe'
+        if (Test-Path -LiteralPath $setup -PathType Leaf) { return $setup }
+    }
+}
+
 function Get-OnedriveActionHelperInstall {
     param()
-    $local = Join-Path -Path $env:LOCALAPPDATA -ChildPath 'Microsoft\OneDrive'
-    $result = [ordered]@{ perUser = $false; perMachine = $false; userSetup = $null; machineSetup = $null; version = $null }
+    # Folders as Windows knows them: environment variables can be changed by the user.
+    $local = Join-Path -Path ([Environment]::GetFolderPath('LocalApplicationData')) -ChildPath 'Microsoft\OneDrive'
+    $result = [ordered]@{ perUser = $false; perMachine = $false; machineSetup = $null; version = $null }
     $userExe = Join-Path -Path $local -ChildPath 'OneDrive.exe'
     if (Test-Path -LiteralPath $userExe -PathType Leaf) {
         $result.perUser = $true
         $result.version = (Get-Item -LiteralPath $userExe).VersionInfo.FileVersion
-        $setup = Get-ChildItem -LiteralPath $local -Filter 'OneDriveSetup.exe' -Recurse -Depth 1 -File -ErrorAction SilentlyContinue |
-            Sort-Object { $_.VersionInfo.FileVersion } -Descending | Select-Object -First 1
-        if ($null -ne $setup) { $result.userSetup = $setup.FullName }
     }
     # Per-machine installs keep OneDrive.exe at the root of Microsoft OneDrive or one version folder down.
-    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }) {
+    $bases = @([Environment]::GetFolderPath('ProgramFiles'), [Environment]::GetFolderPath('ProgramFilesX86')) | Where-Object { $_ } | Select-Object -Unique
+    foreach ($base in $bases) {
         $root = Join-Path -Path $base -ChildPath 'Microsoft OneDrive'
         if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
         $exe = Get-ChildItem -LiteralPath $root -Filter 'OneDrive.exe' -Recurse -Depth 1 -File -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($null -eq $exe) { continue }
         $result.perMachine = $true
         if (-not $result.version) { $result.version = $exe.VersionInfo.FileVersion }
-        $setup = Get-ChildItem -LiteralPath $root -Filter 'OneDriveSetup.exe' -Recurse -Depth 1 -File -ErrorAction SilentlyContinue |
-            Sort-Object { $_.VersionInfo.FileVersion } -Descending | Select-Object -First 1
+        $setup = Get-OnedriveActionHelperNewest -File @(Get-ChildItem -LiteralPath $root -Filter 'OneDriveSetup.exe' -Recurse -Depth 1 -File -ErrorAction SilentlyContinue)
         if ($null -ne $setup) { $result.machineSetup = $setup.FullName }
         break
     }
     [pscustomobject]$result
+}
+
+function Get-OnedriveActionHelperStep {
+    param([Parameter(Mandatory)]$Install)
+    # The setups that remove each kind of install. Elevated, only a setup that no one but SYSTEM,
+    # TrustedInstaller or Administrators can change is run: the per-machine one next to the installed
+    # client, and for a per-user install the one of Windows (OneDriveSetup.exe /uninstall removes the
+    # OneDrive of the account that runs it), never the copy in the user's AppData.
+    $steps = @()
+    if ($Install.perMachine) {
+        $setup = [string]$Install.machineSetup
+        if (-not $setup -or -not (Test-Path -LiteralPath $setup -PathType Leaf)) {
+            throw 'OneDriveSetup.exe was not found next to the installed client; nothing was changed'
+        }
+        if (-not (Test-TuneupTrustedExecutable -Path $setup -StopAt ([Environment]::GetFolderPath('ProgramFiles'))) -and
+            -not (Test-TuneupTrustedExecutable -Path $setup -StopAt ([Environment]::GetFolderPath('ProgramFilesX86')))) {
+            throw "OneDriveSetup.exe next to the installed client is not trusted (someone other than administrators can change it); nothing was changed"
+        }
+        $steps += , [pscustomobject]@{ flavour = 'perMachine'; setup = $setup; arguments = @('/uninstall', '/allusers') }
+    }
+    if ($Install.perUser) {
+        $setup = Get-OnedriveActionHelperSystemSetup
+        if (-not $setup) { throw 'The OneDriveSetup.exe of Windows was not found in System32, so the per-user OneDrive cannot be removed safely; nothing was changed' }
+        if (-not (Test-TuneupTrustedExecutable -Path $setup -StopAt ([Environment]::GetFolderPath('Windows')))) {
+            throw "The OneDriveSetup.exe of Windows is not trusted (someone other than administrators can change it); nothing was changed"
+        }
+        $steps += , [pscustomobject]@{ flavour = 'perUser'; setup = $setup; arguments = @('/uninstall') }
+    }
+    $steps
 }
 
 function Get-OnedriveActionHelperOtherProfile {
@@ -143,15 +194,9 @@ function Set-OnedriveActionDesired {
     if ($placeholder) {
         return (New-TuneupOutcome -Refused -Reason 'onedrive-online-only-files' -Detail "$($Tweak.id): OneDrive holds files that are only in the cloud (for example $placeholder). Make them available offline or move them, then run again; nothing was changed")
     }
-    $steps = @()
-    if ($install.perMachine) { $steps += , [pscustomobject]@{ setup = $install.machineSetup; arguments = @('/uninstall', '/allusers') } }
-    if ($install.perUser) { $steps += , [pscustomobject]@{ setup = $install.userSetup; arguments = @('/uninstall') } }
+    $steps = @(Get-OnedriveActionHelperStep -Install $install)
     $problems = New-Object System.Collections.Generic.List[string]
     foreach ($step in $steps) {
-        if (-not $step.setup -or -not (Test-Path -LiteralPath $step.setup -PathType Leaf)) {
-            $problems.Add('OneDriveSetup.exe was not found next to the installed client')
-            continue
-        }
         $run = Invoke-TuneupNative -FilePath $step.setup -Arguments ([string[]]$step.arguments)
         if (-not (Wait-OnedriveActionHelperRemoval) -and $run.ExitCode -ne 0) {
             $problems.Add("OneDriveSetup.exe $($step.arguments -join ' ') ended with code $($run.ExitCode): $($run.Output)")
