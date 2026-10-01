@@ -3,8 +3,13 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Tweak = New-TestTweak -Id 'apps.onedrive' -Type 'action' -Scope 'machine' -Set ([pscustomobject]@{ script = 'onedrive' })
+    $script:MeSid = Get-TestCurrentSid
+    $script:OtherSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'
     function New-TestInstall([bool]$PerUser, [bool]$PerMachine, [string]$MachineSetup) {
         [pscustomobject]@{ perUser = $PerUser; perMachine = $PerMachine; machineSetup = $MachineSetup; version = '26.150.0804.0011' }
+    }
+    function New-TestScan([int]$Count = 0, [string]$First = $null, [int]$Errors = 0) {
+        [pscustomobject]@{ count = $Count; firstFolder = $First; errors = $Errors }
     }
 }
 
@@ -25,9 +30,14 @@ Describe 'onedrive action' {
         }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperSystemSetup { $script:SystemSetup }
         Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $true }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperSessionUser { $script:MeSid }
         Mock -ModuleName Tuneup Test-OnedriveActionHelperRedirected { $false }
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperRoot { }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileFolder { }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { New-TestScan }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileAtRisk { }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperOtherProfile { 0 }
+        Mock -ModuleName Tuneup Test-OnedriveActionHelperRunning { $false }
         Mock -ModuleName Tuneup Wait-OnedriveActionHelperRemoval { $true }
         Mock -ModuleName Tuneup Invoke-TuneupNative { [pscustomobject]@{ ExitCode = 0; Output = '' } }
         Mock -ModuleName Tuneup Invoke-TuneupWinget { [pscustomobject]@{ ExitCode = 0; Output = 'Successfully installed' } }
@@ -42,6 +52,11 @@ Describe 'onedrive action' {
         $script:Installs = @((New-TestInstall $false $false $null))
         Test-TuneupState -Tweak $Tweak | Should -Be 'applied'
         (Get-TuneupState -Tweak $Tweak).installed | Should -BeFalse
+        (Get-TuneupState -Tweak $Tweak).currentUserSid | Should -BeNullOrEmpty
+    }
+
+    It 'saves whose OneDrive it is, so the undo of another account leaves it for its owner' {
+        (Get-TuneupState -Tweak $Tweak).currentUserSid | Should -Be $MeSid
     }
 
     It 'uninstalls a per-machine OneDrive for all users with the setup next to it, once it is trusted' {
@@ -53,6 +68,7 @@ Describe 'onedrive action' {
         $outcome.refused | Should -BeFalse
         Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $FilePath -eq $Setup -and ($Arguments -join ' ') -eq '/uninstall /allusers' }
         Should -Invoke Test-TuneupTrustedExecutable -ModuleName Tuneup -ParameterFilter { $Path -eq $Setup -and $StopAt -eq [Environment]::GetFolderPath('ProgramFiles') }
+        Should -Invoke Wait-OnedriveActionHelperRemoval -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Flavour -eq 'perMachine' }
     }
 
     It 'uninstalls a per-user OneDrive with the setup of Windows, never one from the user''s folders' {
@@ -60,6 +76,17 @@ Describe 'onedrive action' {
         Set-TuneupDesired -Tweak $Tweak | Out-Null
         Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $FilePath -eq $SystemSetup -and ($Arguments -join ' ') -eq '/uninstall' }
         Should -Invoke Test-TuneupTrustedExecutable -ModuleName Tuneup -ParameterFilter { $Path -eq $SystemSetup -and $StopAt -eq [Environment]::GetFolderPath('Windows') }
+        Should -Invoke Wait-OnedriveActionHelperRemoval -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Flavour -eq 'perUser' }
+        # Only the current account loses it: the other profiles are not checked.
+        Should -Invoke Get-OnedriveActionHelperProfileAtRisk -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'removes both kinds of install, waiting for each one on its own' {
+        $script:Installs = @((New-TestInstall $true $true $Setup), (New-TestInstall $false $false $null))
+        Set-TuneupDesired -Tweak $Tweak | Out-Null
+        Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 2 -Exactly
+        Should -Invoke Wait-OnedriveActionHelperRemoval -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Flavour -eq 'perMachine' }
+        Should -Invoke Wait-OnedriveActionHelperRemoval -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Flavour -eq 'perUser' }
     }
 
     It 'fails, without running anything, when the <Name> setup is not trusted' -TestCases @(
@@ -81,15 +108,34 @@ Describe 'onedrive action' {
         Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 0 -Exactly
     }
 
+    It 'fails, without running anything, when the per-machine setup is missing' {
+        $script:Installs = @((New-TestInstall $false $true (Join-Path $TestDrive 'missing.exe')))
+        { Set-TuneupDesired -Tweak $Tweak } | Should -Throw '*OneDriveSetup.exe was not found*'
+        Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 0 -Exactly
+    }
+
     It 'refuses, without running anything, when <Name>' -TestCases @(
-        @{ Name = 'Known Folder Move is on'; Reason = 'onedrive-known-folders'; Redirected = $true; OnlineOnly = $null }
-        @{ Name = 'there are online-only files'; Reason = 'onedrive-online-only-files'; Redirected = $false; OnlineOnly = 'C:\Users\me\OneDrive\notes.docx' }
+        @{ Name = 'it runs as another account than the one at the desktop'; Reason = 'onedrive-session-user'; Session = @('S-1-5-21-1000000000-2000000000-3000000000-1001') }
+        @{ Name = 'there is no desktop to compare with'; Reason = 'onedrive-session-user'; Session = @() }
+        @{ Name = 'two accounts own the desktop'; Reason = 'onedrive-session-user'; Session = @('ME', 'S-1-5-21-1000000000-2000000000-3000000000-1001') }
+        @{ Name = 'the desktop cannot be read'; Reason = 'onedrive-session-user'; Session = 'throw' }
+        @{ Name = 'Known Folder Move is on'; Reason = 'onedrive-known-folders'; Redirected = $true }
+        @{ Name = 'some file could not be listed'; Reason = 'onedrive-scan-incomplete'; Errors = 2 }
+        @{ Name = 'the profile folder could not be listed'; Reason = 'onedrive-scan-incomplete'; FolderThrows = $true }
+        @{ Name = 'there are online-only files'; Reason = 'onedrive-online-only-files'; Count = 3 }
+        @{ Name = 'another account is at risk'; Reason = 'onedrive-other-accounts'; AtRisk = $true }
     ) {
-        param($Reason, $Redirected, $OnlineOnly)
+        param($Reason, $Session, [bool]$Redirected, [int]$Errors, [int]$Count, [bool]$AtRisk, [bool]$FolderThrows)
+        $script:Session = $(if ($null -eq $Session) { @($MeSid) } else { @($Session | ForEach-Object { $_ -replace '^ME$', $MeSid }) })
         $script:Redirected = $Redirected
-        $script:OnlineOnly = $OnlineOnly
+        $script:Scan = New-TestScan -Count $Count -First 'Projects' -Errors $Errors
+        $script:AtRisk = $AtRisk
+        $script:FolderThrows = $FolderThrows
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperSessionUser { if ($script:Session -contains 'throw') { throw 'no access' }; $script:Session }
         Mock -ModuleName Tuneup Test-OnedriveActionHelperRedirected { $script:Redirected }
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { $script:OnlineOnly }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileFolder { if ($script:FolderThrows) { throw 'Access denied' } }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { $script:Scan }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileAtRisk { if ($script:AtRisk) { [pscustomobject]@{ name = 'Ana'; why = 'signed-out' } } }
         $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $Tweak)
         $outcome.refused | Should -BeTrue
         $outcome.reason | Should -Be $Reason
@@ -97,14 +143,31 @@ Describe 'onedrive action' {
         Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 0 -Exactly
     }
 
-    It 'has a text for each refusal in both languages' {
+    It 'checks Known Folder Move and online-only files of the current account with its own roots' {
+        Set-TuneupDesired -Tweak $Tweak | Out-Null
+        Should -Invoke Test-OnedriveActionHelperRedirected -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
+            $SoftwareKey -eq 'HKCU:\Software' -and $Environment -and $ProfilePath -eq [Environment]::GetFolderPath('UserProfile')
+        }
+        Should -Invoke Get-OnedriveActionHelperRoot -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $SoftwareKey -eq 'HKCU:\Software' -and $Environment }
+    }
+
+    It 'names only how many online-only items there are and the folder of the first one, never a path' {
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperOnlineOnly { New-TestScan -Count 3 -First 'Projects' }
+        $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $Tweak)
+        $outcome.detail | Should -BeLike "*holds 3 file(s) or folder(s)*'Projects'*"
+        $outcome.detail | Should -Not -BeLike '*:\*'
+    }
+
+    It 'has a text for each refusal and for the reinstall in both languages' {
         foreach ($lang in 'es', 'en') {
             Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang $lang
-            foreach ($reason in 'onedrive-known-folders', 'onedrive-online-only-files') {
+            foreach ($reason in 'onedrive-known-folders', 'onedrive-online-only-files', 'onedrive-scan-incomplete', 'onedrive-other-accounts',
+                'onedrive-session-user', 'reinstalled-onedrive') {
                 Get-TuneupText -Key "reason.$reason" | Should -Not -Be "reason.$reason"
             }
         }
         Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+        Get-TuneupText -Key 'reason.reinstalled-onedrive' | Should -Not -BeLike '*Store*'
     }
 
     It 'is partial when OneDrive is gone here but other accounts keep their own' {
@@ -122,17 +185,34 @@ Describe 'onedrive action' {
         { Set-TuneupDesired -Tweak $Tweak } | Should -Throw '*ended with code 5*'
     }
 
-    It 'fails, without running anything, when the per-machine setup is missing' {
-        $script:Installs = @((New-TestInstall $false $true (Join-Path $TestDrive 'missing.exe')))
-        { Set-TuneupDesired -Tweak $Tweak } | Should -Throw '*OneDriveSetup.exe was not found*'
-        Should -Invoke Invoke-TuneupNative -ModuleName Tuneup -Times 0 -Exactly
+    It 'fails when the setup ends well but OneDrive is still there after waiting' {
+        $script:Installs = @((New-TestInstall $false $true $Setup))
+        Mock -ModuleName Tuneup Wait-OnedriveActionHelperRemoval { $false }
+        { Set-TuneupDesired -Tweak $Tweak } | Should -Throw '*ended with code 0 and the OneDrive for all users was still installed after waiting*'
+    }
+
+    It 'is partial when one kind of install is gone and the other is still there after waiting' {
+        $script:Installs = @((New-TestInstall $true $true $Setup), (New-TestInstall $true $false $null))
+        Mock -ModuleName Tuneup Wait-OnedriveActionHelperRemoval { $Flavour -eq 'perMachine' }
+        $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -BeLike '*the OneDrive of this account was still installed after waiting*'
+    }
+
+    It 'says that OneDrive was running and its setup closed it' {
+        $script:Installs = @((New-TestInstall $false $true $Setup), (New-TestInstall $false $false $null))
+        Mock -ModuleName Tuneup Test-OnedriveActionHelperRunning { $true }
+        $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeFalse
+        $outcome.detail | Should -BeLike '*was running*'
     }
 
     It 'reinstalls it for all users on undo when it was per-machine' {
-        $script:Installs = @((New-TestInstall $false $false $null))
+        $script:Installs = @((New-TestInstall $false $false $null), (New-TestInstall $false $true $Setup))
         $state = [pscustomobject]@{ installed = $true; perUser = $false; perMachine = $true; version = '26.1' }
         $outcome = Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State $state)
-        $outcome.reason | Should -Be 'reinstalled'
+        $outcome.reason | Should -Be 'reinstalled-onedrive'
+        $outcome.detail | Should -Not -BeLike '*could not be confirmed*'
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter {
             ($Arguments -join ' ') -eq 'install --id Microsoft.OneDrive --source winget --exact --no-upgrade --accept-package-agreements --accept-source-agreements --silent --disable-interactivity --override /silent /allusers'
         }
@@ -141,6 +221,23 @@ Describe 'onedrive action' {
     It 'reinstalls it for the current user on undo when it was per-user' {
         $script:Installs = @((New-TestInstall $false $false $null))
         Restore-TuneupState -Tweak $Tweak -State ([pscustomobject]@{ installed = $true; perUser = $true; perMachine = $false; version = '26.1' }) | Out-Null
+        Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -notlike '*--override*' }
+    }
+
+    It 'gives back both kinds of install on undo, and says which one it could not confirm' {
+        $script:Installs = @((New-TestInstall $false $false $null), (New-TestInstall $false $true $Setup))
+        $script:WingetCalls = New-Object System.Collections.Generic.List[string]
+        Mock -ModuleName Tuneup Invoke-TuneupWinget { $script:WingetCalls.Add(($Arguments -join ' ')); [pscustomobject]@{ ExitCode = 0; Output = '' } }
+        $outcome = Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $Tweak -State ([pscustomobject]@{ installed = $true; perUser = $true; perMachine = $true; version = '26.1' }))
+        $WingetCalls.Count | Should -Be 2
+        $WingetCalls[0] | Should -BeLike '*--override /silent /allusers'
+        $WingetCalls[1] | Should -Not -BeLike '*--override*'
+        $outcome.detail | Should -BeLike '*OneDrive for this account could not be confirmed*'
+    }
+
+    It 'gives back on undo only the kind of install that is missing' {
+        $script:Installs = @((New-TestInstall $false $true $Setup))
+        Restore-TuneupState -Tweak $Tweak -State ([pscustomobject]@{ installed = $true; perUser = $true; perMachine = $true; version = '26.1' }) | Out-Null
         Should -Invoke Invoke-TuneupWinget -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { ($Arguments -join ' ') -notlike '*--override*' }
     }
 
@@ -192,9 +289,38 @@ Describe 'onedrive install detection' {
             @((Join-Path ([Environment]::GetFolderPath('System')) 'OneDriveSetup.exe'), (Join-Path ([Environment]::GetFolderPath('SystemX86')) 'OneDriveSetup.exe')) | Should -Contain $setup
         }
     }
+
+    It 'reads the accounts of this PC and the desktop owner without changing anything' {
+        foreach ($account in @(& (Get-Module Tuneup) { Get-OnedriveActionHelperProfile })) {
+            $account.sid | Should -Not -Be $MeSid
+            $account.sid | Should -Match '^S-1-(5-21|12-1)-'
+            $account.path | Should -Not -BeNullOrEmpty
+        }
+        foreach ($sid in @(& (Get-Module Tuneup) { Get-OnedriveActionHelperSessionUser })) { $sid | Should -Match '^S-1-' }
+    }
 }
 
 Describe 'onedrive detection helpers' {
+    BeforeAll {
+        # Not $Root: a test that names a folder $root would replace it in AfterEach, which shares its scope.
+        $script:RegistryRoot = 'HKCU:\Software\windows-tuneup-test'
+        $script:Software = "$RegistryRoot\od"
+        $script:ShellFolders = "$Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+        $script:Account = "$Software\Microsoft\OneDrive\Accounts\Business1"
+        function Set-TestShellFolder([string]$Name, [string]$Value) {
+            if (-not (Test-Path -LiteralPath $ShellFolders)) { New-Item -Path $ShellFolders -Force | Out-Null }
+            New-ItemProperty -LiteralPath $ShellFolders -Name $Name -PropertyType ExpandString -Value $Value -Force | Out-Null
+        }
+    }
+
+    BeforeEach {
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperEnvironmentRoot { }
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $RegistryRoot) { Remove-Item -LiteralPath $RegistryRoot -Recurse -Force }
+    }
+
     It 'sees Known Folder Move under a OneDrive folder and not under the local profile' {
         Mock -ModuleName Tuneup Get-OnedriveActionHelperRoot { 'C:\Users\me\OneDrive - Contoso' }
         Mock -ModuleName Tuneup Get-OnedriveActionHelperKnownFolder { 'C:\Users\me\Desktop', 'C:\Users\me\OneDrive - Contoso\Documents' }
@@ -203,23 +329,162 @@ Describe 'onedrive detection helpers' {
         & (Get-Module Tuneup) { Test-OnedriveActionHelperRedirected } | Should -BeFalse
     }
 
-    It 'finds an online-only file by its attributes and ignores a normal one' {
+    It 'sees Known Folder Move by <Name> alone' -TestCases @(
+        @{ Name = 'a folder named OneDrive'; Folder = 'D:\Data\OneDrive\Music'; Kind = 'none' }
+        @{ Name = 'a OneDrive root announced to the account'; Folder = 'D:\Sync\Docs'; Kind = 'environment' }
+        @{ Name = 'the UserFolder of an account'; Folder = 'E:\Corp\Desk'; Kind = 'userfolder' }
+        @{ Name = 'a SharePoint library synced outside the root'; Folder = 'F:\Contoso\Site - Docs\Fav'; Kind = 'tenant' }
+    ) {
+        param($Folder, $Kind)
+        Set-TestShellFolder -Name 'My Music' -Value $Folder
+        if ($Kind -eq 'environment') { Mock -ModuleName Tuneup Get-OnedriveActionHelperEnvironmentRoot { 'D:\Sync' } }
+        if ($Kind -eq 'userfolder') {
+            New-Item -Path $Account -Force | Out-Null
+            New-ItemProperty -LiteralPath $Account -Name 'UserFolder' -Value 'E:\Corp' | Out-Null
+        }
+        if ($Kind -eq 'tenant') {
+            New-Item -Path "$Account\Tenants\Contoso" -Force | Out-Null
+            New-ItemProperty -LiteralPath "$Account\Tenants\Contoso" -Name 'F:\Contoso\Site - Docs' -Value '' | Out-Null
+        }
+        $test = { param($s, $e) Test-OnedriveActionHelperRedirected -SoftwareKey $s -ProfilePath 'C:\Users\me' -Environment:$e }
+        & (Get-Module Tuneup) $test $Software $true | Should -BeTrue
+        # Without the source that names the root, the same folder is a normal one.
+        if ($Kind -eq 'environment') { & (Get-Module Tuneup) $test $Software $false | Should -BeFalse }
+        if ($Kind -in 'userfolder', 'tenant') {
+            Remove-Item -LiteralPath "$Software\Microsoft\OneDrive" -Recurse -Force
+            & (Get-Module Tuneup) $test $Software $true | Should -BeFalse
+        }
+    }
+
+    It 'reads every shell folder, with %USERPROFILE% as the profile of that account' {
+        Set-TestShellFolder -Name 'Favorites' -Value '%USERPROFILE%\Favorites'
+        Set-TestShellFolder -Name '{374DE290-123F-4565-9164-39C4925E467B}' -Value '%USERPROFILE%\Downloads'
+        $folders = @(& (Get-Module Tuneup) { param($s) Get-OnedriveActionHelperKnownFolder -SoftwareKey $s -ProfilePath 'C:\Users\other' } $Software)
+        $folders | Should -Contain 'C:\Users\other\Favorites'
+        $folders | Should -Contain 'C:\Users\other\Downloads'
+    }
+
+    It 'treats <Name> as only in the cloud' -TestCases @(
+        @{ Name = 'RECALL_ON_DATA_ACCESS'; Attributes = 0x400000; Expected = $true }
+        @{ Name = 'RECALL_ON_OPEN'; Attributes = 0x40000; Expected = $true }
+        @{ Name = 'OFFLINE'; Attributes = 0x1000; Expected = $true }
+        @{ Name = 'a pinned file'; Attributes = 0x80020; Expected = $false }
+        @{ Name = 'a reparse point'; Attributes = 0x420; Expected = $false }
+    ) {
+        param($Attributes, $Expected)
+        & (Get-Module Tuneup) { param($a) Test-OnedriveActionHelperCloudAttribute -Attributes $a } $Attributes | Should -Be $Expected
+    }
+
+    It 'finds an online-only file and a folder placeholder, and names only the folder that holds it' {
         $root = Join-Path $TestDrive 'OneDrive'
         New-Item -ItemType Directory -Path (Join-Path $root 'sub') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $root 'local.txt') -Value 'x'
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperRoot { $root }
-        & (Get-Module Tuneup) { Get-OnedriveActionHelperOnlineOnly } | Should -BeNullOrEmpty
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+        "$($scan.count)/$($scan.errors)" | Should -Be '0/0'
         $cloud = Join-Path $root 'sub\cloud.txt'
         Set-Content -LiteralPath $cloud -Value 'x'
         # OFFLINE (0x1000) is one of the attributes of an online-only placeholder.
         (Get-Item -LiteralPath $cloud).Attributes = [System.IO.FileAttributes]::Offline
-        & (Get-Module Tuneup) { Get-OnedriveActionHelperOnlineOnly } | Should -Be $cloud
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+        "$($scan.count)/$($scan.firstFolder)/$($scan.errors)" | Should -Be '1/sub/0'
+        $folder = Join-Path $root 'Shared'
+        New-Item -ItemType Directory -Path $folder | Out-Null
+        (Get-Item -LiteralPath $folder).Attributes = 'Directory, Offline'
+        (& (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root).count | Should -Be 2
     }
 
-    It 'stops waiting as soon as OneDrive.exe is gone' {
-        Mock -ModuleName Tuneup Get-OnedriveActionHelperInstall { New-TestInstall $false $false $null }
+    It 'reaches paths longer than 260 characters' {
+        $root = Join-Path $TestDrive 'Deep'
+        $deep = "\\?\$root\" + ('a' * 120) + '\' + ('b' * 120)
+        [System.IO.Directory]::CreateDirectory($deep) | Out-Null
+        try {
+            [System.IO.File]::WriteAllText("$deep\cloud.txt", 'x')
+            (Get-Item -LiteralPath "$deep\cloud.txt").Attributes = [System.IO.FileAttributes]::Offline
+            $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root
+            "$($scan.count)/$($scan.firstFolder)/$($scan.errors)" | Should -Be "1/$('a' * 120)/0"
+        } finally {
+            # The test drive is removed without \\?\, which cannot reach this folder.
+            [System.IO.Directory]::Delete("\\?\$root", $true)
+        }
+    }
+
+    It 'counts what it could not list, so the check fails closed' {
+        $root = Join-Path $TestDrive 'Locked'
+        $locked = Join-Path $root 'Private'
+        New-Item -ItemType Directory -Path $locked -Force | Out-Null
+        # A folder that the account cannot list: what is inside is never seen, so it cannot be cleared.
+        $acl = Get-Acl -LiteralPath $locked
+        $deny = New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @(
+            (New-Object System.Security.Principal.SecurityIdentifier -ArgumentList $MeSid), 'ListDirectory', 'None', 'None', 'Deny')
+        $acl.AddAccessRule($deny)
+        $acl.SetAuditRuleProtection($acl.AreAccessRulesProtected, $true)
+        Set-Acl -LiteralPath $locked -AclObject $acl
+        try {
+            (& (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root).errors | Should -Be 1
+        } finally {
+            $acl = Get-Acl -LiteralPath $locked
+            [void]$acl.RemoveAccessRule($deny)
+            $acl.SetAuditRuleProtection($acl.AreAccessRulesProtected, $true)
+            Set-Acl -LiteralPath $locked -AclObject $acl
+        }
+        Mock -ModuleName Tuneup Get-Item { throw 'Access to the path is denied.' }
+        (& (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } $root).errors | Should -Be 1
+    }
+
+    It 'skips a root that does not exist' {
+        $scan = & (Get-Module Tuneup) { param($r) Get-OnedriveActionHelperOnlineOnly -Root $r } (Join-Path $TestDrive 'missing')
+        "$($scan.count)/$($scan.errors)" | Should -Be '0/0'
+    }
+
+    It 'names the root for an item right at the root' {
+        & (Get-Module Tuneup) { Get-OnedriveActionHelperTopFolder -Root 'C:\Users\me\OneDrive' -Path 'C:\Users\me\OneDrive\a.txt' } | Should -Be 'OneDrive'
+        & (Get-Module Tuneup) { Get-OnedriveActionHelperTopFolder -Root 'C:\Users\me\OneDrive' -Path 'C:\Users\me\OneDrive\Fotos' -Folder } | Should -Be 'Fotos'
+    }
+
+    It 'stops waiting as soon as the kind of install it waits for is gone' {
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperInstall { New-TestInstall $true $false $null }
         Mock -ModuleName Tuneup Start-Sleep { }
-        & (Get-Module Tuneup) { Wait-OnedriveActionHelperRemoval -Seconds 5 } | Should -BeTrue
+        & (Get-Module Tuneup) { Wait-OnedriveActionHelperRemoval -Flavour 'perMachine' -Seconds 5 } | Should -BeTrue
         Should -Invoke Start-Sleep -ModuleName Tuneup -Times 0 -Exactly
+        & (Get-Module Tuneup) { Wait-OnedriveActionHelperRemoval -Flavour 'perUser' -Seconds 0 } | Should -BeFalse
+    }
+
+    It 'sees the risk of another account: <Name>' -TestCases @(
+        @{ Name = 'signed out with files in OneDrive'; Loaded = $false; File = $true; Expected = 'signed-out' }
+        @{ Name = 'signed out with an empty OneDrive folder'; Loaded = $false; File = $false; Expected = $null }
+        @{ Name = 'signed in with Known Folder Move'; Loaded = $true; Kfm = $true; Expected = 'known-folders' }
+        @{ Name = 'signed in with an online-only file'; Loaded = $true; Offline = $true; File = $true; Expected = 'online-only' }
+        @{ Name = 'signed in with local files only'; Loaded = $true; File = $true; Expected = $null }
+    ) {
+        param([bool]$Loaded, [bool]$File, [bool]$Kfm, [bool]$Offline, $Expected)
+        $profilePath = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $oneDrive = Join-Path $profilePath 'OneDrive - Contoso'
+        New-Item -ItemType Directory -Path $oneDrive -Force | Out-Null
+        if ($File) {
+            Set-Content -LiteralPath (Join-Path $oneDrive 'a.txt') -Value 'x'
+            if ($Offline) { (Get-Item -LiteralPath (Join-Path $oneDrive 'a.txt')).Attributes = [System.IO.FileAttributes]::Offline }
+        }
+        if ($Kfm) { Set-TestShellFolder -Name 'Personal' -Value '%USERPROFILE%\OneDrive - Contoso\Documents' }
+        if (-not (Test-Path -LiteralPath $Software)) { New-Item -Path $Software -Force | Out-Null }
+        $account = [pscustomobject]@{ sid = $OtherSid; name = 'Ana'; path = $profilePath; software = $(if ($Loaded) { $Software } else { $null }) }
+        & (Get-Module Tuneup) { param($a) Get-OnedriveActionHelperProfileRisk -Account $a } $account | Should -Be $Expected
+    }
+
+    It 'treats a profile it cannot read as a risk' {
+        $profilePath = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $profilePath | Out-Null
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileFolder { throw 'Access denied' }
+        & (Get-Module Tuneup) { param($p) Get-OnedriveActionHelperProfileRisk -Account ([pscustomobject]@{ sid = 'x'; name = 'Ana'; path = $p; software = $null }) } $profilePath |
+            Should -Be 'unreadable'
+    }
+
+    It 'lists every other account at risk' {
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfile {
+            [pscustomobject]@{ sid = 'a'; name = 'Ana'; path = 'C:\Users\Ana'; software = $null }
+            [pscustomobject]@{ sid = 'b'; name = 'Beto'; path = 'C:\Users\Beto'; software = $null }
+        }
+        Mock -ModuleName Tuneup Get-OnedriveActionHelperProfileRisk { if ($Account.name -eq 'Beto') { 'signed-out' } }
+        $risk = @(& (Get-Module Tuneup) { Get-OnedriveActionHelperProfileAtRisk })
+        ($risk | ForEach-Object { "$($_.name):$($_.why)" }) -join ',' | Should -Be 'Beto:signed-out'
     }
 }

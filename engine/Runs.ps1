@@ -72,10 +72,13 @@ function Test-TuneupRunMarker {
     $false
 }
 
-function Test-TuneupAppxEntryOfOtherUser {
+function Test-TuneupEntryOfOtherUser {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][AllowEmptyString()][string]$CurrentSid)
-    if ([string]$Entry.tweak.type -cne 'appx' -or $null -eq $Entry.state) { return $false }
-    # No SID saved means that nobody had the app for themselves (or the state is older than the field).
+    # Any state that saves currentUserSid belongs to that account: a Store app that the user had, or an
+    # action that changed something of the user (OneDrive, the DirectX preferences in HKCU).
+    if ($null -eq $Entry.state -or $Entry.state -is [string] -or $Entry.state -is [ValueType]) { return $false }
+    # No SID saved means that the change was nobody's own (an app that nobody had for themselves) or the
+    # state is older than the field.
     $sid = $Entry.state.PSObject.Properties['currentUserSid']
     $null -ne $sid -and [bool]$sid.Value -and [string]$sid.Value -ne $CurrentSid
 }
@@ -93,9 +96,10 @@ function Get-TuneupRunJournal {
         $kind = $null
         if ([string]$entry.tweak.scope -ne 'machine' -and $Run.UserSid -ne $currentSid) {
             $kind = 'user-scope entry'
-        } elseif (Test-TuneupAppxEntryOfOtherUser -Entry $entry -CurrentSid $currentSid) {
-            # The copy of a Store app belongs to the account that had it: only that account can get it back.
-            $kind = 'appx entry'
+        } elseif (Test-TuneupEntryOfOtherUser -Entry $entry -CurrentSid $currentSid) {
+            # The copy of a Store app, or what an action changed for an account, belongs to that account:
+            # only that account can get it back.
+            $kind = "$([string]$entry.tweak.type) entry"
         }
         if ($null -ne $kind) {
             Write-Warning "Ignoring $kind '$($entry.id)' of run $($Run.Id): it belongs to another user"
