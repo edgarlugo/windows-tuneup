@@ -34,6 +34,8 @@
   "reason.journal-error": "no se pudo guardar el respaldo, así que no se aplicó",
   "reason.already-undone": "ya se había deshecho",
   "reason.other-user": "pertenece a otro usuario",
+  "reason.reinstalled": "reinstalada desde Microsoft Store para el usuario actual; no se volvió a provisionar para usuarios nuevos",
+  "reason.not-reprovisioned": "solo estaba provisionada para usuarios nuevos y no se puede volver a provisionar desde la Store",
   "status.applied": "aplicado",
   "status.partial": "parcial",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",

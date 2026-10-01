@@ -196,13 +196,15 @@ function Write-TuneupUndoReport {
     $restored = @($Results | Where-Object { $_.status -eq 'restored' }).Count
     $failed = @($Results | Where-Object { $_.status -eq 'failed' }).Count
     $skipped = @($Results | Where-Object { $_.status -eq 'skipped' }).Count
+    $rebootRequired = @($Results | Where-Object { $_.rebootRequired }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
-            schemaVersion = 1
-            command       = 'undo'
-            runId         = $RunId
-            results       = $Results
-            summary       = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
+            schemaVersion  = 1
+            command        = 'undo'
+            runId          = $RunId
+            rebootRequired = $rebootRequired
+            results        = $Results
+            summary        = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
         }))
         return
     }
@@ -212,9 +214,11 @@ function Write-TuneupUndoReport {
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
         Write-Host $line -ForegroundColor $colors[$result.status]
+        if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor DarkGray }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
     }
     Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed, $skipped)
+    if ($rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
 }
 
 function Write-TuneupErrorReport {

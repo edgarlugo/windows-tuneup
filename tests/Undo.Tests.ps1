@@ -25,6 +25,30 @@ Describe 'Undo and status' {
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
+    It 'passes the note, detail and restart request of the restore into the result' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { New-TuneupOutcome -Reason 'reinstalled' -Detail 'for the current user only' -RebootRequired } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].id | Should -Be 'test.two'
+        $results[0].status | Should -Be 'restored'
+        $results[0].reason | Should -Be 'reinstalled'
+        $results[0].detail | Should -Be 'for the current user only'
+        $results[0].rebootRequired | Should -BeTrue
+        $results[1].reason | Should -BeNullOrEmpty
+        $results[1].rebootRequired | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeTrue
+        Get-TuneupUndoExitCode -Results $results | Should -Be 0
+    }
+
+    It 'does not let stray output of a restore leak into the results' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { 'noise'; 42; New-TuneupOutcome -Reason 'reinstalled'; [pscustomobject]@{ id = 'fake'; status = 'restored' } } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results.Count | Should -Be 2
+        ($results | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.two,test.one'
+        $results[0].reason | Should -Be 'reinstalled'
+    }
+
     It 'restores the exact previous state' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'Two' -PropertyType String -Value 'old' | Out-Null

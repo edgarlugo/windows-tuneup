@@ -175,6 +175,15 @@ Describe 'Write-TuneupPlanReport' {
 }
 
 Describe 'Write-TuneupUndoReport' {
+    It 'shows the restore note and asks for a restart' {
+        $restored = [pscustomobject]@{ id = 'apps.news'; title = 'News'; status = 'restored'; reason = 'reinstalled'; error = $null; detail = 'Reinstalled for the current user'; rebootRequired = $true }
+        $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) 6>&1 | Out-String)
+        $text | Should -Match 'News: reinstalled from the Microsoft Store'
+        $text | Should -Match 'Reinstalled for the current user'
+        $text | Should -Match 'Restart the computer'
+        (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) -Json | ConvertFrom-Json).rebootRequired | Should -BeTrue
+    }
+
     It 'shows skipped tweaks with their reason and counts them' {
         $results = @((New-TestResult -Status 'restored'), (New-TestResult -Status 'skipped' -Reason 'other-user'))
         $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results $results 6>&1 | Out-String)
