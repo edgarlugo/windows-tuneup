@@ -197,3 +197,35 @@ Describe 'Write-TuneupUndoReport' {
         $text | Should -Match 'Restored: 1 . Failed: 0 . Skipped: 1'
     }
 }
+
+Describe 'Write-TuneupHealthReport' {
+    BeforeAll {
+        $fixtures = Join-Path $PSScriptRoot 'fixtures\cbs'
+        $lines = @(Get-Content -LiteralPath (Join-Path $fixtures 'sfc-repaired.log') -Encoding UTF8) +
+            @(Get-Content -LiteralPath (Join-Path $fixtures 'scanhealth-corrupt.log') -Encoding UTF8)
+        $ok = [pscustomobject]@{ ExitCode = 0; Output = '' }
+        $script:Scan = New-TuneupHealthScan -Lines $lines -SfcRun $ok -DismRun $ok
+        $script:HealthReport = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = '2026-09-30T10:00:00'; finishedAt = '2026-09-30T10:20:00'
+            repairRequested = $false; repairRan = $false; before = $Scan; after = $null
+            recommendation = 'run-repair'; rebootRecommended = $true
+        }
+    }
+
+    It 'explains the scan to people' {
+        $text = (Write-TuneupHealthReport -Report $HealthReport 6>&1 | Out-String)
+        $text | Should -Match 'SFC: found damaged files and repaired them'
+        $text | Should -Match 'repaired: C:\\WINDOWS\\System32\\drivers\\BthA2dp.sys'
+        $text | Should -Match 'Component store: 6 corruptions found, repairable with -Health -Repair'
+        $text | Should -Match 'microsoft-windows-b\.\.ore-bootmanager-efi: 3 files'
+        $text | Should -Match 'run \.\\tuneup\.ps1 -Health -Repair'
+        $text | Should -Match 'Restart the computer'
+    }
+
+    It 'writes one JSON document with the warnings' {
+        $json = Write-TuneupHealthReport -Report $HealthReport -Warnings @('careful') -Json | ConvertFrom-Json
+        $json.command | Should -Be 'health'
+        $json.before.componentStore.detected | Should -Be 6
+        @($json.warnings) -join ',' | Should -Be 'careful'
+    }
+}

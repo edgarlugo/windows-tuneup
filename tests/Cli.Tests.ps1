@@ -298,12 +298,22 @@ Describe 'tuneup.ps1' {
         @{ Arguments = @('-Undo', 'last', '-Profile', 'extra') }
         @{ Arguments = @('-Undo', 'last', '-Yes') }
         @{ Arguments = @('-Undo', 'last', '-Exclude', 'test.one') }
+        @{ Arguments = @('-Repair') }
+        @{ Arguments = @('-Health', '-Status') }
+        @{ Arguments = @('-Health', '-Profile', 'extra') }
+        @{ Arguments = @('-Health', '-Undo', 'last') }
     ) {
         param($Arguments)
         $result = Invoke-Tuneup (@($Arguments) + '-Json')
         $result.ExitCode | Should -Be 1
         (ConvertFrom-PureJson $result.Output).message | Should -Match 'Invalid parameter combination'
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'refuses -Health without elevation' -Skip:$Elevated {
+        $result = Invoke-Tuneup @('-Health', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-Health needs PowerShell as administrator.'
     }
 
     It 'refuses to apply with -Json but without -Yes' {

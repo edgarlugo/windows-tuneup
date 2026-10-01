@@ -242,3 +242,37 @@ function Write-TuneupErrorReport {
     Write-Host $Message -ForegroundColor Red
     foreach ($detail in $Details) { Write-Host "  - $detail" -ForegroundColor Red }
 }
+
+function Write-TuneupHealthScan {
+    param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Scan)
+    Write-Host $Title
+    $sfcColor = $(if ($Scan.sfc.status -eq 'unrepaired' -or $Scan.sfc.status -eq 'unknown') { 'Yellow' } else { 'Gray' })
+    Write-Host (Get-TuneupText -Key "health.sfc.$($Scan.sfc.status)") -ForegroundColor $sfcColor
+    foreach ($file in @($Scan.sfc.repairedFiles)) { Write-Host (Get-TuneupText -Key 'health.repairedFile' -Format $file) }
+    foreach ($file in @($Scan.sfc.unrepairedFiles)) { Write-Host (Get-TuneupText -Key 'health.unrepairedFile' -Format $file) -ForegroundColor Red }
+    if ($Scan.sfc.output) { Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'SFC', $Scan.sfc.exitCode, $Scan.sfc.output) -ForegroundColor DarkGray }
+    $store = $Scan.componentStore
+    $storeColor = $(if ($store.state -eq 'healthy' -or $store.state -eq 'repaired') { 'Gray' } else { 'Yellow' })
+    Write-Host (Get-TuneupText -Key "health.store.$($store.state)" -Format $store.detected, $store.repaired) -ForegroundColor $storeColor
+    foreach ($group in @($Scan.corruptComponents)) { Write-Host (Get-TuneupText -Key 'health.group' -Format $group.name, $group.files) }
+    if ($store.output) { Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'DISM', $store.exitCode, $store.output) -ForegroundColor Red }
+}
+
+function Write-TuneupHealthReport {
+    param(
+        [Parameter(Mandatory)]$Report,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
+    if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
+    Write-TuneupHealthScan -Title (Get-TuneupText -Key 'health.before') -Scan $Report.before
+    if ($Report.repairRan) {
+        Write-TuneupHealthScan -Title (Get-TuneupText -Key 'health.after') -Scan $Report.after
+    } elseif ($Report.repairRequested) {
+        Write-Host (Get-TuneupText -Key 'health.nothingToRepair')
+    }
+    Write-Host ''
+    $color = $(if ($Report.recommendation -eq 'none') { 'Green' } else { 'Yellow' })
+    Write-Host (Get-TuneupText -Key "health.recommendation.$($Report.recommendation)") -ForegroundColor $color
+    if ($Report.rebootRecommended) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+}

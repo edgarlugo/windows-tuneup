@@ -27,7 +27,9 @@ param(
     [string]$StateRoot,
     [string]$CatalogPath,
     [string]$ProfilesPath,
-    [string]$ActionsPath
+    [string]$ActionsPath,
+    [switch]$Health,
+    [switch]$Repair
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,6 +87,8 @@ if ($PSBoundParameters.ContainsKey('Yes') -and $Yes) { $present += 'Yes' }
 if ($PSBoundParameters.ContainsKey('Status') -and $Status) { $present += 'Status' }
 if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
 if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
+if ($PSBoundParameters.ContainsKey('Health') -and $Health) { $present += 'Health' }
+if ($PSBoundParameters.ContainsKey('Repair') -and $Repair) { $present += 'Repair' }
 $conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
@@ -131,6 +135,13 @@ try {
         exit (Get-TuneupUndoExitCode -Results $undoResults)
     }
 
+    if ($Health) {
+        if (-not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.healthNeedsAdmin') }
+        if (-not $Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+        $healthReport = Invoke-TuneupStep { Invoke-TuneupHealth -Repair:$Repair }
+        Write-TuneupHealthReport -Report $healthReport -Warnings $script:Warnings.ToArray() -Json:$Json
+        exit (Get-TuneupHealthExitCode -Report $healthReport)
+    }
     if ($environment.IsServer -and -not $Force) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.server') }
     if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Force) {
         Stop-Tuneup -Message (Get-TuneupText -Key 'err.unsupported')
