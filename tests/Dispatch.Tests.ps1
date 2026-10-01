@@ -53,8 +53,11 @@ Describe 'Handler registry' {
     }
 
     It 'says whether reading a type needs elevation' {
-        (Get-TuneupHandler -Type 'registry').ReadNeedsAdmin | Should -BeFalse
+        foreach ($type in 'registry', 'service', 'task') {
+            (Get-TuneupHandler -Type $type).ReadNeedsAdmin | Should -BeFalse -Because $type
+        }
         Get-TuneupHandler -Type 'magic' | Should -BeNullOrEmpty
         Get-TuneupHandler -Type $null | Should -BeNullOrEmpty
+        Get-TuneupHandler -Type @('registry') | Should -BeNullOrEmpty
     }
 }

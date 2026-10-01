@@ -53,6 +53,14 @@ Describe 'Test-TuneupTweak' {
             (Test-TuneupTweak -Tweak (New-TestTweak -Type 'task' -Scope 'machine' -Set $set)) -join '; ' | Should -Match 'cannot contain wildcard characters'
         }
     }
+    It 'rejects a service tweak that does not use scope machine' {
+        $set = [pscustomobject]@{ name = 'RetailDemo'; startType = 'Disabled'; stop = $false }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'service' -Scope 'user' -Set $set)) -join '; ' | Should -Match 'must use scope machine'
+    }
+    It 'rejects a task tweak that does not use scope machine' {
+        $set = [pscustomobject]@{ path = '\Microsoft\Windows\'; name = 'X'; state = 'Disabled' }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'task' -Scope 'user' -Set $set)) -join '; ' | Should -Match 'must use scope machine'
+    }
     It 'rejects an unsupported type' {
         (Test-TuneupTweak -Tweak (New-TestTweak -Type 'magic')) -join '; ' | Should -Match "unsupported type 'magic'"
     }
