@@ -6087,6 +6087,1480 @@ git commit -m "feat: optimizar desde el menú, con preguntas y riesgo alto a ped
 
 ---
 
+### Task 10b: Correcciones de la revisión de las Tasks 9 y 10
+
+La revisión de las Tasks 9 y 10 pidió los cambios de esta tarea; el código de abajo **reemplaza** el de esos pasos donde se contradigan (`engine/Menu.ps1` y `tests/Menu.Tests.ps1` se vuelven a escribir completos, `engine/Prompts.ps1` es nuevo). Se hizo con TDD: las pruebas nuevas se escribieron primero y fallaron contra el código de la Task 10.
+
+**Files:**
+- Create: `engine/Prompts.ps1`
+- Modify: `engine/Menu.ps1` (completo), `engine/Commands.ps1`, `engine/Output.ps1`, `i18n/es.json`, `i18n/en.json`
+- Test: `tests/Menu.Tests.ps1` (completo), `tests/Commands.Tests.ps1`, `tests/Output.Tests.ps1`, `tests/Preflight.Tests.ps1`, `tests/I18n.Tests.ps1`
+
+Qué cambia:
+
+1. **Deshacer desde el menú.** El número de la corrida, la letra (`w`/`t`, `c`/`a`) y el número del ajuste se piden de nuevo con "Esa no es una de las opciones" cuando no valen (Enter solo vuelve). Una corrida o un ajuste ya deshechos se dicen directamente, sin pedir confirmación. La lista trae las 15 corridas más nuevas y avisa, si hay más, que las anteriores se deshacen con `-Undo <corrida>`.
+2. **Plurales neutros.** Ningún texto lleva "{0} <sustantivo en plural>": `Ajustes revertidos por Windows: {0}.`, `Cambios por aplicar: {0}. ¿Aplicar? (s/n)`, `ajustes: {0}`, etc. (`confirm`, `interrupted.summary`, `reapply.noneUnverified`, `measure.waiting`, `menu.status.reapply`, `menu.undo.tweaks`, `menu.high.offer`, `menu.ask.header`). `aborted.saved` tenía un `\t` sin escapar (un tabulador entre `.` y `uneup.ps1`): se corrige, y `tests/I18n.Tests.ps1` exige que ningún texto lleve caracteres de control.
+3. **La palabra de riesgo alto** se acepta como `sí`, `si` o `SÍ` en español (`menu.high.pattern`) y como `yes` en inglés, al optimizar y al reaplicar.
+4. **Marcas** `(administrador)`/`(siempre)` justo después del título del perfil.
+5. **El menú.** "Presiona Enter para volver" solo si la opción imprimió algo (`$Context.Pause`); una opción inválida o un Enter solo pide de nuevo sin repetir el encabezado; en Estado, una respuesta que no es `r` ni Enter es inválida y se pide de nuevo; textos propios del menú para salud sin administrador, rango de segundos y para deshacer lo recién aplicado (`run.saved.menu`, `interrupted.*.menu`, `aborted.saved.menu`, por `$Context.Menu`); `$Context.ExitCode = 0` en cada vuelta y los códigos de salida documentados en el comentario de `Invoke-TuneupMenu` (Ctrl+C en una pregunta detiene PowerShell mismo: el código es el de la última opción; no se puede capturar para despedirse); aviso claro si PowerShell se abrió con `-NonInteractive` sin entrada redirigida (`Get-TuneupMenuBlockMessage`, código 1).
+6. **Optimizar.** El administrador se comprueba **antes** de las preguntas (solo los ajustes que no preguntan cuentan antes; después de las respuestas se comprueba de nuevo); teclear el número de `base` avisa que queda fijo; cada número cuenta una vez (`2,2`); a/t y x dicen "este y todos los que quedan".
+7. **Orden del código.** `Confirm-TuneupMenuReappliedHighRisk`, `Request-TuneupMenuAskedTweak` y las preguntas genéricas pasan a `engine/Prompts.ps1` (las usa `Commands.ps1`); `Get-TuneupPlanningDefinition` junta lo que repetían `Invoke-TuneupApplyCommand`, `Invoke-TuneupReapply` y la opción Optimizar (rechazo de Windows no soportado y revisión del catálogo; devuelve el mensaje y el que llama escribe el error).
+8. **Pruebas que matan mutantes:** a/x, base fijo, números fuera de lista y repetidos, orden y tope de las corridas, no confirmar, ya deshecho, fin de la entrada en cada selector, sesión en español (con `SÍ`), administrador antes de las preguntas.
+
+- [ ] **Step 1: Pruebas (primero fallan)**
+
+Reemplazar `tests/Menu.Tests.ps1` completo por:
+
+```powershell
+BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
+    . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+    $script:Fixtures = Join-Path $PSScriptRoot 'fixtures'
+    Import-TuneupActionLibrary -Path (Join-Path $Fixtures 'actions')
+    $script:Key = 'HKCU:\Software\windows-tuneup-test'
+
+    # The fixture catalog and profiles, plus a tweak that asks first, a high-risk one and a profile
+    # with the one that asks.
+    $script:Definitions = Join-Path $TestDrive 'definitions'
+    $catalogDir = Join-Path $Definitions 'catalog'
+    $profilesDir = Join-Path $Definitions 'profiles'
+    New-Item -ItemType Directory -Path $catalogDir, $profilesDir -Force | Out-Null
+    Copy-Item -Path (Join-Path $Fixtures 'catalog\*.json') -Destination $catalogDir
+    Copy-Item -Path (Join-Path $Fixtures 'profiles\*.json') -Destination $profilesDir
+    # menu.askadmin asks first and needs administrator (it is declined or never applied: no test runs elevated).
+    $extra = @(
+        (New-TestTweak -Id 'menu.ask' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask'; kind = 'DWord'; value = 1 })),
+        (New-TestTweak -Id 'menu.ask2' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask2'; kind = 'DWord'; value = 1 })),
+        (New-TestTweak -Id 'menu.ask3' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask3'; kind = 'DWord'; value = 1 })),
+        (New-TestTweak -Id 'menu.askadmin' -Ask $true -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\Software\windows-tuneup-test'; name = 'AskAdmin'; kind = 'DWord'; value = 1 })),
+        (New-TestTweak -Id 'menu.high' -Risk 'high' -Set ([pscustomobject]@{ path = $Key; name = 'High'; kind = 'DWord'; value = 1 }))
+    )
+    [System.IO.File]::WriteAllText((Join-Path $catalogDir 'menu.json'), (ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = $extra }) -Depth 10))
+    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'asking.json'),
+        (ConvertTo-Json -InputObject (New-TestProfile -Id 'asking' -Include @('menu.ask')) -Depth 10))
+    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zadmin.json'),
+        (ConvertTo-Json -InputObject (New-TestProfile -Id 'zadmin' -Include @('menu.askadmin')) -Depth 10))
+    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zmany.json'),
+        (ConvertTo-Json -InputObject (New-TestProfile -Id 'zmany' -Include @('menu.ask', 'menu.ask2', 'menu.ask3')) -Depth 10))
+
+    # The profiles in the order of the menu: base first, then by file name.
+    # 1 base, 2 asking, 3 extra, 4 nested, 5 system, 6 zadmin, 7 zmany.
+    function New-MenuContext([object[]]$Answers, [switch]$Admin) {
+        $context = New-TuneupContext -Io (New-TestIo -Answers $Answers)
+        $context.StateRoot = $script:Root
+        $context.CatalogPath = $catalogDir
+        $context.ProfilesPath = $profilesDir
+        $context.Environment = New-TestEnvironment -IsAdmin ([bool]$Admin)
+        $context
+    }
+    function Invoke-Menu($Context) { Invoke-TuneupMenu -Context $Context 3>$null 6>$null }
+    function Get-Output($Context) { $Context.Io.Output -join "`n" }
+    function Get-Count($Context, [string]$Pattern) { [regex]::Matches((Get-Output $Context), $Pattern).Count }
+    function Get-Value([string]$Name) {
+        if (-not (Test-Path -LiteralPath $Key)) { return $null }
+        (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).$Name
+    }
+}
+
+Describe 'Invoke-TuneupMenu' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'shows the options and exits with 0, or at the end of the input' {
+        $context = New-MenuContext @('0')
+        Invoke-Menu $context
+        $context.ExitCode | Should -Be 0
+        Get-Output $context | Should -Match ' 1\. Optimize: choose profiles and apply them'
+        Get-Output $context | Should -Match 'Not running as administrator'
+        $context = New-MenuContext @($null)
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'says when an option does not exist and asks again' {
+        $context = New-MenuContext @('9', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'That is not one of the options'
+    }
+
+    It 'applies the chosen profiles after one question per tweak that asks first' {
+        # Optimize, select "asking", go on, no to the high-risk list, yes to its tweak, apply, back to the menu, exit.
+        $context = New-MenuContext @('1', '2', '', 'n', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match '\[x\]  1\. Base \(always\) \(base\): Test'
+        $text | Should -Match '\[x\]  2\. asking \(asking\)'
+        $text | Should -Match '\[ \]  5\. System \(administrator\) \(system\): Test'
+        $text | Should -Match '1/1 Title menu\.ask \[low risk\]: Reason'
+        Get-Value 'One' | Should -Be 1
+        Get-Value 'Ask' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'leaves out a tweak that asks first when the answer is no, with the reason declined' {
+        $context = New-MenuContext @('1', '2', '', 'n', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Value 'Ask' | Should -BeNullOrEmpty
+        $result = Get-Content -LiteralPath (Join-Path @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName 'result.json') -Raw | ConvertFrom-Json
+        ($result.results | Where-Object { $_.id -eq 'menu.ask' }).reason | Should -Be 'declined'
+    }
+
+    It 'adds a high-risk tweak only when it is asked for and the word is typed in full' {
+        $context = New-MenuContext @('1', '', 'y', '1', '', 'no', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'Nothing was added\.'
+        Get-Value 'High' | Should -BeNullOrEmpty
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        $context = New-MenuContext @('1', '', 'y', '1', '', 'YES', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match '\[high risk\] Title menu\.high \(menu\.high\): Reason'
+        Get-Value 'High' | Should -Be 1
+    }
+
+    It 'shows the plan and changes nothing when it needs administrator' {
+        $context = New-MenuContext @('1', '5', '', 'n', '', '0')
+        $text = (Invoke-TuneupMenu -Context $context 3>$null 6>&1 | Out-String)
+        $text | Should -Match 'System test'
+        Get-Output $context | Should -Match 'This plan has system changes: open PowerShell as administrator'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'goes back without applying when the input ends in the middle' {
+        $context = New-MenuContext @('1', '2', '', 'y', $null)
+        { Invoke-Menu $context } | Should -Not -Throw
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'asks about a drifted tweak that asks first and one of high risk before applying them again' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Include 'menu.ask', 'menu.high' -Yes 6>$null
+        foreach ($name in 'One', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        # Status, apply again, the word for the high-risk one, no to the one that asks, confirm, back, exit.
+        $context = New-MenuContext @('2', 'r', 'YES', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match '\[high risk\] Title menu\.high \(menu\.high\): Reason'
+        $text | Should -Match '1/1 Title menu\.ask \[low risk\]: Reason'
+        Get-Value 'One' | Should -Be 1
+        Get-Value 'High' | Should -Be 1
+        Get-Value 'Ask' | Should -Be 5
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'leaves a drifted high-risk tweak alone unless its word is typed in full' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Include 'menu.ask', 'menu.high' -Yes 6>$null
+        foreach ($name in 'One', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        $context = New-MenuContext @('2', 'r', 'y', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'Not applied again: Title menu\.high\.'
+        Get-Value 'High' | Should -Be 5
+        Get-Value 'Ask' | Should -Be 1
+        Get-Value 'One' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'shows the status and applies again what Windows reverted' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $context = New-MenuContext @('2', 'r', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'Tweaks reverted by Windows: 1\.'
+        Get-Value 'One' | Should -Be 1
+        @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory).Count | Should -Be 2
+    }
+
+    It 'undoes a whole run picked from the list' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '1', 'w', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match ' 1\. \d{8}-\d{6}  tweaks: 2  \[pending\]  \(test folder\)'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'undoes one tweak of a run' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '1', 't', '2', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match ' 2\. Test two \(test\.two\)'
+        Get-Value 'One' | Should -Be 1
+        Get-Value 'Two' | Should -BeNullOrEmpty
+    }
+
+    It 'refuses the health check without administrator' {
+        $context = New-MenuContext @('4', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'The health check needs PowerShell as administrator'
+    }
+
+    It 'offers to repair right after a check that found damage, reusing that check' {
+        $found = [pscustomobject]@{ schemaVersion = 1; command = 'health'; startedAt = '2026-10-01T10:00:00'; finishedAt = '2026-10-01T10:20:00'
+            repairRequested = $false; repairRan = $false; before = $null; after = $null; recommendation = 'run-repair'; rebootRecommended = $false }
+        Mock -ModuleName Tuneup Invoke-TuneupHealth { $found }
+        Mock -ModuleName Tuneup Write-TuneupHealthReport { }
+        $context = New-MenuContext @('4', 'y', 'y', '', '0') -Admin
+        Invoke-Menu $context
+        Should -Invoke Invoke-TuneupHealth -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { -not $Repair -and $null -eq $Previous }
+        Should -Invoke Invoke-TuneupHealth -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Repair -and $Previous.startedAt -eq '2026-10-01T10:00:00' }
+    }
+
+    It 'measures and then compares with the last measurement' {
+        $context = New-MenuContext @('5', '', '', '5', 'x', '0', 'y', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match 'Type a number between 0 and 3600\.'
+        $text | Should -Not -Match '-IdleSeconds'
+        $text | Should -Match 'Compare with the last measurement \(\d{8}-\d{6}\)'
+        $context.Result.comparison | Should -Not -BeNullOrEmpty
+    }
+
+    It 'asks again, without showing the menu again, when the option does not exist or nothing was typed' {
+        $context = New-MenuContext @('9', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'windows-tuneup 0\.' | Should -Be 1
+        Get-Count $context 'That is not one of the options' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'asks for Enter before the menu comes back only when the option printed something' {
+        $context = New-MenuContext @('1', '0', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Not -Match 'Press Enter to go back'
+        $context.Io.Pending.Count | Should -Be 0
+        $context = New-MenuContext @('2', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'Press Enter to go back' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'says an answer that is not r is invalid when Windows reverted something, and Enter goes back at once' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $context = New-MenuContext @('2', 'x', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'That is not one of the options' | Should -Be 1
+        Get-Output $context | Should -Not -Match 'Press Enter to go back'
+        Get-Value 'One' | Should -Be 5
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'keeps base chosen and says so when its number is typed' {
+        $context = New-MenuContext @('1', '1', '', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match 'Option 1 always stays selected'
+        ([regex]::Matches($text, '\[x\]  1\. Base')).Count | Should -Be 2
+        Get-Value 'One' | Should -Be 1
+    }
+
+    It 'says a number out of the list is not valid and changes nothing of the selection' {
+        $context = New-MenuContext @('1', '2,9', '', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'That is not one of the options' | Should -Be 1
+        Get-Output $context | Should -Not -Match '1/1 Title menu\.ask'
+        Get-Value 'Ask' | Should -BeNullOrEmpty
+        Get-Value 'One' | Should -Be 1
+    }
+
+    It 'counts a number typed twice once' {
+        $context = New-MenuContext @('1', '2,2', '', 'n', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match '1/1 Title menu\.ask'
+        Get-Value 'Ask' | Should -Be 1
+    }
+
+    It 'answers yes to the tweak asked and to all the rest with the first answer a' {
+        $context = New-MenuContext @('1', '7', '', 'n', 'a', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Count $context '\d/3 Title menu\.ask\d? ' | Should -Be 1
+        foreach ($name in 'Ask', 'Ask2', 'Ask3') { Get-Value $name | Should -Be 1 }
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'answers no to the rest, but not to what was already said yes to, with x' {
+        $context = New-MenuContext @('1', '7', '', 'n', 'y', 'x', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Value 'Ask' | Should -Be 1
+        Get-Value 'Ask2' | Should -BeNullOrEmpty
+        Get-Value 'Ask3' | Should -BeNullOrEmpty
+        $result = Get-Content -LiteralPath (Join-Path @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName 'result.json') -Raw | ConvertFrom-Json
+        @($result.results | Where-Object { $_.reason -eq 'declined' } | ForEach-Object { $_.id }) -join ',' | Should -Be 'menu.ask2,menu.ask3'
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'keeps asking after a no, and a later a applies the rest' {
+        $context = New-MenuContext @('1', '7', '', 'n', 'n', 'a', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Value 'Ask' | Should -BeNullOrEmpty
+        Get-Value 'Ask2' | Should -Be 1
+        Get-Value 'Ask3' | Should -Be 1
+    }
+
+    It 'says x on the first question and applies none of the tweaks that ask' {
+        $context = New-MenuContext @('1', '7', '', 'n', 'x', 'y', '', '0')
+        Invoke-Menu $context
+        foreach ($name in 'Ask', 'Ask2', 'Ask3') { Get-Value $name | Should -BeNullOrEmpty }
+        Get-Value 'One' | Should -Be 1
+    }
+
+    It 'asks again when the answer to a question is not one of the letters' {
+        $context = New-MenuContext @('1', '2', '', 'n', 'q', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'That is not one of the options' | Should -Be 1
+        Get-Value 'Ask' | Should -Be 1
+    }
+
+    It 'stops a plan that needs administrator before asking anything' {
+        $context = New-MenuContext @('1', '2,5', '', 'n', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match 'This plan has system changes'
+        $text | Should -Not -Match 'Apply it\?'
+        Get-Value 'Ask' | Should -BeNullOrEmpty
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'asks about a tweak that needs administrator, and goes on when the answer is no' {
+        $context = New-MenuContext @('1', '6', '', 'n', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match '1/1 Title menu\.askadmin'
+        Get-Output $context | Should -Not -Match 'This plan has system changes'
+        Get-Value 'One' | Should -Be 1
+    }
+
+    It 'says it needs administrator when the answer to a tweak that needs it is yes' {
+        $context = New-MenuContext @('1', '6', '', 'n', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'This plan has system changes'
+        Get-Value 'One' | Should -BeNullOrEmpty
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'talks about the menu, not about a parameter, when it says how to undo what it applied' {
+        $context = New-MenuContext @('1', '', 'n', 'y', '', '0')
+        $text = (Invoke-TuneupMenu -Context $context 3>$null 6>&1 | Out-String)
+        $text | Should -Match 'To undo it, choose option 3 in the menu'
+        $text | Should -Not -Match '-Undo'
+    }
+
+    It 'lists the 15 newest runs, newest first, and says that there are older ones' {
+        foreach ($n in 1..17) { New-RunFolder -Root $Root -Id ('20260101-{0:D6}' -f $n) | Out-Null }
+        $context = New-MenuContext @('3', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match ' 1\. 20260101-000017 '
+        $text | Should -Match '15\. 20260101-000003 '
+        $text | Should -Not -Match '20260101-000002'
+        $text | Should -Match 'Only the 15 newest runs are listed'
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'does not mention older runs when all of them are listed' {
+        New-RunFolder -Root $Root -Id '20260101-000001' | Out-Null
+        $context = New-MenuContext @('3', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Not -Match 'newest runs are listed'
+    }
+
+    It 'asks again when the run, the way or the tweak is not valid' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '9', '1', 'z', 't', '0', '2', 'y', '', '0')
+        Invoke-Menu $context
+        Get-Count $context 'That is not one of the options' | Should -Be 3
+        Get-Value 'Two' | Should -BeNullOrEmpty
+        Get-Value 'One' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'changes nothing when the undo is not confirmed, and asks for no Enter' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '1', 'w', 'n', '0')
+        Invoke-Menu $context
+        Get-Value 'One' | Should -Be 1
+        Get-Value 'Two' | Should -Be 'x'
+        Get-Output $context | Should -Not -Match 'Press Enter to go back'
+        $context.Io.Pending.Count | Should -Be 0
+        $context = New-MenuContext @('3', '1', 't', '1', 'n', '0')
+        Invoke-Menu $context
+        Get-Value 'One' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'says that a run or a tweak is already undone instead of asking to undo it' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '1', 't', '1', 'y', '', '3', '1', 't', '1', '', '3', '1', 'w', 'y', '', '3', '1', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match 'The tweak "Test one" was already undone'
+        $text | Should -Match 'Run \d{8}-\d{6} was already undone'
+        Get-Value 'One' | Should -BeNullOrEmpty
+        Get-Value 'Two' | Should -BeNullOrEmpty
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'goes back when the input ends in the middle of any picker' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        foreach ($answers in @(@('3', $null), @('3', '1', $null), @('3', '1', 't', $null), @('3', '1', 'w', $null), @('1', $null), @('1', '', $null), @('2', $null), @('5', $null))) {
+            $context = New-MenuContext $answers
+            { Invoke-Menu $context } | Should -Not -Throw -Because ($answers -join ',')
+            $context.Io.Pending.Count | Should -Be 0 -Because ($answers -join ',')
+        }
+        Get-Value 'One' | Should -Be 1
+    }
+
+    It 'shows the error of an option that fails, goes back to the menu and leaves the exit code at 0' {
+        $context = New-MenuContext @('1', '', '0')
+        $context.CatalogPath = Join-Path $TestDrive 'no-such-catalog'
+        Invoke-Menu $context
+        $context.ExitCode | Should -Be 0
+        $context.Io.Pending.Count | Should -Be 0
+    }
+}
+
+Describe 'Invoke-TuneupMenu in Spanish' {
+    BeforeAll {
+        Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'es'
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+    }
+
+    It 'goes through optimize with a question and a high-risk tweak, with plurals that fit any count' {
+        # Optimize, asking, go on, see the high-risk ones, the first, go on, the word with a capital and an accent, yes to its question, apply.
+        $siWord = "S$([char]0x00CD)"
+        $context = New-MenuContext @('1', '2', '', 's', '1', '', $siWord, 's', 's', '', '0')
+        Invoke-Menu $context
+        $text = Get-Output $context
+        $text | Should -Match '\[x\]  1\. Base \(siempre\) \(base\): Prueba'
+        $text | Should -Match '\[ \]  5\. Sistema \(administrador\) \(system\): Prueba'
+        $text | Should -Match 'Ajustes de riesgo alto que ning.n perfil aplica: 1\. .Quieres verlos\? \(s/n\)'
+        $text | Should -Match 'Ajustes que preguntan antes de aplicarse: 1'
+        $text | Should -Match 'Cambios por aplicar: 4\. .Aplicar\? \(s/n\)'
+        Get-Value 'Ask' | Should -Be 1
+        Get-Value 'High' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'accepts the word of a high-risk tweak with or without the accent, and not part of it' {
+        foreach ($case in @(@("s$([char]0x00ED)", $true), @('si', $true), @('s', $false))) {
+            if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+            $context = New-MenuContext @('1', '', 's', '1', '', $case[0], 's', '', '0')
+            Invoke-Menu $context
+            ((Get-Value 'High') -eq 1) | Should -Be $case[1] -Because $case[0]
+        }
+    }
+
+    It 'applies again a high-risk tweak that Windows reverted when the word is typed with the accent' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Include 'menu.ask', 'menu.high' -Yes 6>$null
+        foreach ($name in 'One', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        $context = New-MenuContext @('2', 'r', "s$([char]0x00ED)", 'n', 's', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match 'Ajustes revertidos por Windows: 3\.'
+        Get-Value 'High' | Should -Be 1
+        Get-Value 'Ask' | Should -Be 5
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'lists the runs with a count that reads well for one tweak and for several' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        $context = New-MenuContext @('3', '', '0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match ' 1\. \d{8}-\d{6}  ajustes: 2  \[pendiente\]'
+    }
+}
+
+Describe 'Get-TuneupMenuBlockMessage' {
+    BeforeAll {
+        Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
+    }
+
+    It 'says the menu cannot ask when PowerShell is not interactive and the input is not redirected' {
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-NonInteractive', '-File', 'tuneup.ps1') -InputRedirected $false |
+            Should -Match '-NonInteractive'
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-noni', '-File', 'tuneup.ps1') -InputRedirected $false | Should -Not -BeNullOrEmpty
+    }
+
+    It 'lets the menu run with a redirected input, or in an interactive PowerShell' {
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NonInteractive', '-File', 'tuneup.ps1') -InputRedirected $true | Should -BeNullOrEmpty
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-File', 'tuneup.ps1') -InputRedirected $false | Should -BeNullOrEmpty
+    }
+}
+```
+
+Los cambios de texto en las pruebas de otros archivos:
+
+```diff
+diff --git a/tests/Commands.Tests.ps1 b/tests/Commands.Tests.ps1
+index ef3ab4f..6cd2e6c 100644
+--- a/tests/Commands.Tests.ps1
++++ b/tests/Commands.Tests.ps1
+@@ -55,7 +55,7 @@ Describe 'Commands' {
+         $context = New-TestContext -Answers @('n')
+         Invoke-TuneupApplyCommand -Context $context 6>$null
+         $context.ExitCode | Should -Be 1
+-        $context.Io.Output -join "`n" | Should -Match 'Apply 2 changes\? \(y/n\)'
++        $context.Io.Output -join "`n" | Should -Match 'Changes to apply: 2\. Apply\? \(y/n\)'
+         $context.Io.Output -join "`n" | Should -Match 'Cancelled'
+         Test-Path -LiteralPath $Key | Should -BeFalse
+     }
+@@ -162,7 +162,7 @@ Describe 'Commands' {
+         Mock -ModuleName Tuneup New-TuneupMeasureReport { [pscustomobject]@{ schemaVersion = 1; command = 'measure' } }
+         Mock -ModuleName Tuneup Write-TuneupMeasureReport { }
+         Invoke-TuneupMeasureCommand -Context $context -IdleSeconds 5
+-        $context.Io.Output -join "`n" | Should -Match 'Waiting 5 seconds idle'
++        $context.Io.Output -join "`n" | Should -Match 'Waiting idle before measuring \(5 s\)'
+         $context.ExitCode | Should -Be 0
+     }
+ 
+@@ -272,7 +272,7 @@ Describe 'Re-applying what drifted' {
+         $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 3>&1 6>&1 | Out-String)
+         $text | Should -Match 'Tweak test.three was reverted but is no longer in the catalog'
+         $text | Should -Match 'Plan: 1 to apply'
+-        $human.Io.Output -join "`n" | Should -Match 'Apply 1 changes\? \(y/n\)'
++        $human.Io.Output -join "`n" | Should -Match 'Changes to apply: 1\. Apply\? \(y/n\)'
+         $human.ExitCode | Should -Be 0
+         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+         (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 5
+@@ -323,7 +323,7 @@ Describe 'Re-applying what drifted' {
+         $human = New-TestContext
+         Invoke-TuneupStatusCommand -Context $human -Reapply 6>$null
+         $text = $human.Io.Output -join "`n"
+-        $text | Should -Match 'Nothing to apply again among what could be checked, but 1 tweaks need administrator'
++        $text | Should -Match 'Nothing to apply again among what could be checked\. Tweaks that need administrator to be checked: 1'
+         $text | Should -Not -Match 'Windows reverted no tweak'
+         $human.ExitCode | Should -Be 0
+     }
+@@ -342,6 +342,19 @@ Describe 'Invoke-TuneupCli' {
+         Test-Path -LiteralPath $Root | Should -BeFalse
+     }
+ 
++    It 'opens the menu when no command is given and says why when it cannot ask' {
++        Mock -ModuleName Tuneup Invoke-TuneupMenu { }
++        Mock -ModuleName Tuneup Get-TuneupMenuBlockMessage { $null }
++        $context = New-TuneupContext
++        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -StateRoot $Root 6>$null
++        Should -Invoke Invoke-TuneupMenu -ModuleName Tuneup -Times 1 -Exactly
++        Mock -ModuleName Tuneup Get-TuneupMenuBlockMessage { 'The menu cannot ask here' }
++        $context = New-TuneupContext
++        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -StateRoot $Root 6>$null
++        Should -Invoke Invoke-TuneupMenu -ModuleName Tuneup -Times 1 -Exactly
++        $context.ExitCode | Should -Be 1
++    }
++
+     It 'resolves the folders into the context and runs the command they name' {
+         $context = New-TuneupContext -Json
+         $documents = @(Get-JsonOutput {
+diff --git a/tests/I18n.Tests.ps1 b/tests/I18n.Tests.ps1
+index 7432a9c..5c9bd08 100644
+--- a/tests/I18n.Tests.ps1
++++ b/tests/I18n.Tests.ps1
+@@ -31,6 +31,16 @@ Describe 'i18n' {
+         $offenders -join ', ' | Should -BeNullOrEmpty
+     }
+ 
++    It 'has no control characters in any text, such as the tab of an unescaped path separator' {
++        foreach ($lang in 'es', 'en') {
++            $texts = Get-Content -LiteralPath (Join-Path $I18nRoot "$lang.json") -Raw -Encoding UTF8 | ConvertFrom-Json
++            $offenders = foreach ($property in $texts.PSObject.Properties) {
++                if ([string]$property.Value -match '\p{Cc}') { $property.Name }
++            }
++            $offenders -join ', ' | Should -BeNullOrEmpty -Because $lang
++        }
++    }
++
+     It 'formats texts with arguments' {
+         Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
+         Get-TuneupText -Key 'plan.header' -Format 3, 1 | Should -Be 'Plan: 3 to apply, 1 skipped'
+diff --git a/tests/Output.Tests.ps1 b/tests/Output.Tests.ps1
+index 69c5647..08433fe 100644
+--- a/tests/Output.Tests.ps1
++++ b/tests/Output.Tests.ps1
+@@ -122,7 +122,7 @@ Describe 'Reports of a run stopped with Ctrl+C' {
+         $report.summary.skipped | Should -Be 1
+         Get-TuneupApplyExitCode -Report $report | Should -Be 2
+         $text = (Write-TuneupApplyReport -Report $report 6>&1 | Out-String)
+-        $text | Should -Match 'Stopped with Ctrl\+C: 1 tweaks were not applied'
++        $text | Should -Match 'Stopped with Ctrl\+C\. Tweaks not applied: 1'
+     }
+ 
+     It 'exits with 1 when it stopped before the first tweak' {
+diff --git a/tests/Preflight.Tests.ps1 b/tests/Preflight.Tests.ps1
+index e573d38..a2905c6 100644
+--- a/tests/Preflight.Tests.ps1
++++ b/tests/Preflight.Tests.ps1
+@@ -126,7 +126,7 @@ Describe 'Preflight when applying' {
+         Invoke-TuneupApplyCommand -Context $context 6>$null
+         Should -Invoke Enable-TuneupSystemRestore -ModuleName Tuneup -Times 1 -Exactly
+         $output = $context.Io.Output -join "`n"
+-        $output | Should -Match 'Apply 2 changes\? \(y/n\)[\s\S]*Turn on System Restore on .* before applying\? \(y/n\)'
++        $output | Should -Match 'Changes to apply: 2\. Apply\? \(y/n\)[\s\S]*Turn on System Restore on .* before applying\? \(y/n\)'
+         @($context.Result.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
+         $saved = Get-Content -LiteralPath (Join-Path $context.Result.runDir 'result.json') -Raw | ConvertFrom-Json
+         @($saved.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
+```
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
+Expected: FAIL en 24 pruebas (textos, avisos y comportamiento nuevos).
+
+- [ ] **Step 2: `engine/Prompts.ps1` (nuevo)**
+
+```powershell
+# Questions shared by the menu (Menu.ps1) and the commands it drives (Commands.ps1). They read and
+# write through $Context.Io (Io.ps1), so they never touch the console directly and the end of the
+# input ($null) is handled in one place: it marks the context and every caller goes back.
+
+# The text of a { es, en } object in the language of the session.
+function Get-TuneupLocalizedText {
+    param([AllowNull()]$Text)
+    if ($null -eq $Text) { return '' }
+    $value = $Text.((Get-TuneupLang))
+    if (-not $value) { $value = $Text.en }
+    [string]$value
+}
+
+# An answer of the menu; $null, and the context marked, when the input ended.
+function Read-TuneupMenuAnswer {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Prompt)
+    $answer = Read-TuneupIoAnswer -Io $Context.Io -Prompt $Prompt
+    if ($null -eq $answer) { $Context.InputEnded = $true }
+    $answer
+}
+
+function Read-TuneupMenuConfirmation {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Prompt)
+    $answer = Read-TuneupMenuAnswer -Context $Context -Prompt $Prompt
+    ($null -ne $answer) -and ($answer -match (Get-TuneupText -Key 'confirm.pattern'))
+}
+
+function Write-TuneupMenuLine {
+    param([Parameter(Mandatory)]$Context, [AllowEmptyString()][string]$Text = '')
+    Write-TuneupIoLine -Io $Context.Io -Text $Text
+}
+
+# The word that adds a tweak of high risk: typed in full, with or without the accent in Spanish.
+function Test-TuneupHighRiskWord {
+    param([AllowNull()][string]$Answer)
+    ($null -ne $Answer) -and ($Answer -match (Get-TuneupText -Key 'menu.high.pattern'))
+}
+
+# A tweak of high risk that Windows reverted does not come back on its own either: each one is shown
+# and applied again only after typing the confirmation word in full. Gives the ids confirmed (none is
+# an empty list), or $null when the input ended.
+function Confirm-TuneupMenuReappliedHighRisk {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][object[]]$Catalog, [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Ids)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $high = @($Ids | ForEach-Object { $id = $_; $Catalog | Where-Object { $_.id -eq $id } } |
+        Where-Object { $_.risk -eq 'high' -and (Test-TuneupCompatible -Tweak $_ -Environment $environment) })
+    $confirmed = New-Object System.Collections.Generic.List[string]
+    if (-not $high.Count) { return , @() }
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.high.warning')
+    foreach ($tweak in $high) {
+        Write-TuneupMenuLine -Context $Context -Text ('{0} {1} ({2}): {3}' -f (Get-TuneupText -Key 'menu.high.mark'), (Get-TuneupTitle -Tweak $tweak), $tweak.id, (Get-TuneupLocalizedText $tweak.why))
+        $word = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.reapply.highConfirm' -Format (Get-TuneupText -Key 'menu.high.word'))
+        if ($null -eq $word) { return $null }
+        if (Test-TuneupHighRiskWord -Answer $word) { $confirmed.Add([string]$tweak.id) }
+        else { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.reapply.highSkipped' -Format (Get-TuneupTitle -Tweak $tweak)) }
+    }
+    , @($confirmed.ToArray())
+}
+
+# One question for each tweak of the plan that asks first (ask: true) and was not asked for by name:
+# yes, no, yes to this one and all the rest, or no to this one and all the rest. A no turns the item
+# into a skip with the reason declined. Gives the ids said no to, or $null when the input ended.
+function Request-TuneupMenuAskedTweak {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan, [AllowEmptyCollection()][string[]]$Requested = @())
+    $asked = @($Plan | Where-Object { $_.Action -eq 'apply' -and $_.Tweak.ask -and $Requested -notcontains $_.Id })
+    $declined = New-Object System.Collections.Generic.List[string]
+    if (-not $asked.Count) { return , @() }
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.ask.header' -Format $asked.Count)
+    $rest = $null
+    for ($i = 0; $i -lt $asked.Count; $i++) {
+        $item = $asked[$i]
+        $answer = $rest
+        if ($null -eq $answer) {
+            Write-TuneupMenuLine -Context $Context -Text ('{0}/{1} {2} [{3}]: {4}' -f ($i + 1), $asked.Count, (Get-TuneupTitle -Tweak $item.Tweak),
+                (Get-TuneupText -Key "risk.$($item.Tweak.risk)"), (Get-TuneupLocalizedText $item.Tweak.why))
+            while ($null -eq $answer) {
+                $typed = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.ask.prompt')
+                if ($null -eq $typed) { return $null }
+                $answer = switch ($typed.ToLowerInvariant()) {
+                    (Get-TuneupText -Key 'menu.ask.yes') { 'yes' }
+                    (Get-TuneupText -Key 'menu.ask.no') { 'no' }
+                    (Get-TuneupText -Key 'menu.ask.all') { 'all' }
+                    (Get-TuneupText -Key 'menu.ask.none') { 'none' }
+                    default { $null }
+                }
+                if ($null -eq $answer) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid') }
+            }
+            if ($answer -eq 'all') { $rest = 'yes'; $answer = 'yes' }
+            if ($answer -eq 'none') { $rest = 'no'; $answer = 'no' }
+        }
+        if ($answer -eq 'no') {
+            $item.Action = 'skip'
+            $item.Reason = 'declined'
+            $declined.Add($item.Id)
+        }
+    }
+    , @($declined.ToArray())
+}
+```
+
+- [ ] **Step 3: `engine/Menu.ps1` (completo)**
+
+```powershell
+# The interactive menu: tuneup.ps1 without a command. Questions and answers go through $Context.Io
+# (Io.ps1, Prompts.ps1) and the work through the same commands as the command line (Commands.ps1).
+# Every answer is a line of text (a number, a letter, or Enter alone), so it works the same in the
+# Windows PowerShell console, Windows Terminal and a redirected input. The end of the input means
+# back, all the way out. Marks are text ([x], (administrator), [high risk]), never a color alone.
+
+# Numbers typed to pick items from a list of Count: "2,4" or "2 4"; each one counts once. $null when
+# something else was typed.
+function ConvertFrom-TuneupMenuNumberList {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Text, [Parameter(Mandatory)][int]$Count)
+    $numbers = @()
+    foreach ($part in @($Text -split '[,\s]+' | Where-Object { $_ })) {
+        $number = 0
+        if (-not [int]::TryParse($part, [ref]$number) -or $number -lt 1 -or $number -gt $Count) { return $null }
+        if ($numbers -notcontains $number) { $numbers += $number }
+    }
+    , @($numbers)
+}
+
+# One number of a list of Count items; anything else is said to be invalid and asked again. $null for
+# Enter alone (back) and for the end of the input.
+function Read-TuneupMenuNumber {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Prompt, [Parameter(Mandatory)][int]$Count)
+    while ($true) {
+        $answer = Read-TuneupMenuAnswer -Context $Context -Prompt $Prompt
+        if ($null -eq $answer -or $answer -eq '') { return $null }
+        $numbers = ConvertFrom-TuneupMenuNumberList -Text $answer -Count $Count
+        if ($null -ne $numbers -and @($numbers).Count -eq 1) { return [int]@($numbers)[0] }
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid')
+    }
+}
+
+# One of the given letters (any case); anything else is said to be invalid and asked again. $null for
+# Enter alone (back) and for the end of the input.
+function Read-TuneupMenuKey {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Prompt, [Parameter(Mandatory)][string[]]$Keys)
+    while ($true) {
+        $answer = Read-TuneupMenuAnswer -Context $Context -Prompt $Prompt
+        if ($null -eq $answer -or $answer -eq '') { return $null }
+        foreach ($key in $Keys) { if ($answer -ieq $key) { return $key } }
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid')
+    }
+}
+
+# Lets the person turn items on and off by number until Enter alone. Gives the chosen indexes, or
+# $null to go back (0, or the end of the input). Locked indexes stay chosen.
+function Select-TuneupMenuItem {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][string[]]$Lines,
+        [Parameter(Mandatory)][string]$Prompt,
+        [int[]]$Chosen = @(),
+        [int[]]$Locked = @()
+    )
+    $selected = New-Object System.Collections.Generic.List[int]
+    foreach ($index in @($Chosen) + @($Locked)) { if (-not $selected.Contains($index)) { $selected.Add($index) } }
+    while ($true) {
+        for ($i = 0; $i -lt $Lines.Count; $i++) {
+            $mark = $(if ($selected.Contains($i)) { '[x]' } else { '[ ]' })
+            Write-TuneupMenuLine -Context $Context -Text ('  {0} {1,2}. {2}' -f $mark, ($i + 1), $Lines[$i])
+        }
+        $answer = Read-TuneupMenuAnswer -Context $Context -Prompt $Prompt
+        if ($null -eq $answer -or $answer -eq '0') { return $null }
+        if ($answer -eq '') { return , @($selected | Sort-Object) }
+        $numbers = ConvertFrom-TuneupMenuNumberList -Text $answer -Count $Lines.Count
+        if ($null -eq $numbers) {
+            Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid')
+            continue
+        }
+        foreach ($number in $numbers) {
+            $index = $number - 1
+            if ($Locked -contains $index) {
+                Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.select.locked' -Format $number)
+                continue
+            }
+            if ($selected.Contains($index)) { [void]$selected.Remove($index) } else { $selected.Add($index) }
+        }
+    }
+}
+
+# Why the menu cannot ask anything, or nothing when it can: PowerShell started with -NonInteractive
+# and an input that is not redirected has nobody to answer, and Read-Host would fail with a PowerShell
+# error. Gives the text for the person.
+function Get-TuneupMenuBlockMessage {
+    param(
+        [string[]]$CommandLineArgument = [Environment]::GetCommandLineArgs(),
+        [bool]$InputRedirected = [Console]::IsInputRedirected
+    )
+    $nonInteractive = @($CommandLineArgument | Where-Object { $_ -match '^[-/]noni' }).Count -gt 0
+    if ($nonInteractive -and -not $InputRedirected) { Get-TuneupText -Key 'menu.nonInteractive' }
+}
+
+function Write-TuneupMenuHeader {
+    param([Parameter(Mandatory)]$Context)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.title' -Format (Get-TuneupVersion), $environment.Family, $environment.Edition, $environment.Build)
+    $adminKey = $(if ($environment.IsAdmin) { 'menu.admin.yes' } else { 'menu.admin.no' })
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $adminKey)
+    if ($environment.IsManaged) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.managed') }
+    Write-TuneupMenuLine -Context $Context
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.exit') {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $key)
+    }
+}
+
+# The options come back to the menu when they finish; an option that printed something asks for Enter
+# first ($Context.Pause), so the screen is not wiped before it is read. The exit code is 0 when the
+# menu is left with 0 or at the end of the input: an option that fails shows its error and the menu
+# goes on, so the failure is not the code of the session. Ctrl+C at a prompt stops PowerShell itself:
+# the code is then the one of the last option (0 at the main prompt).
+function Invoke-TuneupMenu {
+    param([Parameter(Mandatory)]$Context)
+    $Context.InputEnded = $false
+    $Context.Menu = $true
+    while (-not $Context.InputEnded) {
+        $Context.ExitCode = 0
+        Write-TuneupMenuHeader -Context $Context
+        $action = $null
+        $leave = $false
+        while ($null -eq $action) {
+            $choice = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.choose')
+            if ($null -eq $choice -or $choice -eq '0') { $leave = $true; break }
+            $action = switch ($choice) {
+                '1' { 'Optimize' }
+                '2' { 'Status' }
+                '3' { 'Undo' }
+                '4' { 'Health' }
+                '5' { 'Measure' }
+                default { $null }
+            }
+            if ($null -eq $action -and $choice -ne '') { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid') }
+        }
+        if ($leave) { break }
+        $Context.Pause = $false
+        # A failure ends that option, not the menu: it is shown and the menu comes back.
+        try {
+            & "Invoke-TuneupMenu$action" -Context $Context
+        } catch {
+            Write-TuneupErrorReport -Message $_.Exception.Message
+            $Context.Pause = $true
+        }
+        if ($Context.InputEnded) { break }
+        if ($Context.Pause -and $null -eq (Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.back'))) { break }
+    }
+    $Context.Menu = $false
+    $Context.ExitCode = 0
+}
+
+# The profiles to apply (base is always on). $null to go back.
+function Select-TuneupMenuProfile {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Definition)
+    $byId = @{}
+    foreach ($tweak in $Definition.Catalog) { $byId[[string]$tweak.id] = $tweak }
+    $profiles = @(@($Definition.Profiles | Where-Object { $_.id -eq 'base' }) + @($Definition.Profiles | Where-Object { $_.id -ne 'base' }))
+    $lines = @(foreach ($profileData in $profiles) {
+        $marks = @()
+        if (@($profileData.include | Where-Object { $byId.ContainsKey([string]$_) -and (Test-TuneupTweakNeedsAdmin -Tweak $byId[[string]$_]) }).Count) {
+            $marks += Get-TuneupText -Key 'menu.profile.admin'
+        }
+        if ($profileData.id -eq 'base') { $marks += Get-TuneupText -Key 'menu.profile.always' }
+        # The marks go right after the title, where they are read first.
+        '{0}{1} ({2}): {3}' -f (Get-TuneupLocalizedText $profileData.title), $(if ($marks.Count) { ' ' + ($marks -join ' ') }),
+            $profileData.id, (Get-TuneupLocalizedText $profileData.description)
+    })
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.profiles.header')
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Locked @(0) -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen) { return $null }
+    , @($chosen | Where-Object { $_ -ne 0 } | ForEach-Object { [string]$profiles[$_].id })
+}
+
+# High-risk tweaks are never in a profile: they are offered only when asked for, and added only after
+# typing the confirmation word in full. Gives their ids (none is an empty list), or $null to go back.
+function Select-TuneupMenuHighRisk {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Definition)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $candidates = @($Definition.Catalog | Where-Object { $_.risk -eq 'high' -and (Test-TuneupCompatible -Tweak $_ -Environment $environment) })
+    if (-not $candidates.Count) { return , @() }
+    Write-TuneupMenuLine -Context $Context
+    $wanted = Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.high.offer' -Format $candidates.Count)
+    if ($Context.InputEnded) { return $null }
+    if (-not $wanted) { return , @() }
+    $lines = @(foreach ($tweak in $candidates) {
+        '{0} {1} ({2}): {3}' -f (Get-TuneupText -Key 'menu.high.mark'), (Get-TuneupTitle -Tweak $tweak), $tweak.id, (Get-TuneupLocalizedText $tweak.why)
+    })
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen) { return $null }
+    if (-not @($chosen).Count) { return , @() }
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.high.warning')
+    $word = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.high.confirm' -Format (Get-TuneupText -Key 'menu.high.word'))
+    if ($null -eq $word) { return $null }
+    if (-not (Test-TuneupHighRiskWord -Answer $word)) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.high.notAdded')
+        return , @()
+    }
+    , @($chosen | ForEach-Object { [string]$candidates[$_].id })
+}
+
+# When the plan has system changes and PowerShell is not elevated, shows the plan anyway (so the
+# person sees what needs administrator) and says so; $true when it did, and the option ends there.
+# -Ignore: tweaks that are still to be asked about, which may yet be declined.
+function Test-TuneupMenuBlockedByAdministrator {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan, [AllowEmptyCollection()][string[]]$Ignore = @())
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    if ($environment.IsAdmin) { return $false }
+    $needsAdmin = @($Plan | Where-Object { $_.Action -eq 'apply' -and $Ignore -notcontains $_.Id -and (Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak) }).Count
+    if (-not $needsAdmin) { return $false }
+    Write-TuneupPlanReport -Plan $Plan -Environment $environment
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.optimize.needsAdmin')
+    $Context.Pause = $true
+    $true
+}
+
+# Profiles, then the high-risk tweaks (only on request), then one question per tweak that asks first,
+# then the plan with its warnings and the confirmation (Invoke-TuneupPlannedApply). A plan that needs
+# administrator is stopped before any question is asked, unless a tweak that asks could still be the
+# only one that needs it.
+function Invoke-TuneupMenuOptimize {
+    param([Parameter(Mandatory)]$Context)
+    $ready = Get-TuneupPlanningDefinition -Context $Context
+    if ($ready.Message) {
+        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
+        $Context.Pause = $true
+        return
+    }
+    $definition = $ready.Definition
+    $profileIds = Select-TuneupMenuProfile -Context $Context -Definition $definition
+    if ($null -eq $profileIds) { return }
+    $highRisk = Select-TuneupMenuHighRisk -Context $Context -Definition $definition
+    if ($null -eq $highRisk) { return }
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $profileIds -Include $highRisk -Interactive)
+    $toAsk = @($plan | Where-Object { $_.Action -eq 'apply' -and $_.Tweak.ask -and $highRisk -notcontains $_.Id } | ForEach-Object { [string]$_.Id })
+    if (Test-TuneupMenuBlockedByAdministrator -Context $Context -Plan $plan -Ignore $toAsk) { return }
+    $declined = Request-TuneupMenuAskedTweak -Context $Context -Plan $plan -Requested $highRisk
+    if ($null -eq $declined) { return }
+    if (Test-TuneupMenuBlockedByAdministrator -Context $Context -Plan $plan) { return }
+    $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $profileIds -Include $highRisk -Exclude $declined
+    $Context.Pause = $true
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request
+}
+
+# The status, and when Windows reverted something, the offer to apply it again.
+function Invoke-TuneupMenuStatus {
+    param([Parameter(Mandatory)]$Context)
+    Invoke-TuneupStatusCommand -Context $Context
+    $Context.Pause = $true
+    $items = @($Context.Result)
+    $drifted = @($items | Where-Object { $_.status -eq 'drift' }).Count
+    if (-not $drifted) { return }
+    while ($true) {
+        $answer = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.status.reapply' -Format $drifted)
+        if ($null -eq $answer) { return }
+        # Enter was the answer to the question: the menu comes back at once.
+        if ($answer -eq '') { $Context.Pause = $false; return }
+        if ($answer -ieq (Get-TuneupText -Key 'menu.status.reapplyKey')) {
+            Invoke-TuneupReapply -Context $Context -Items $items -Interactive
+            return
+        }
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid')
+    }
+}
+
+# The runs that can be undone, newest first (the 15 newest; older ones by command line); then the
+# whole run or one of its tweaks. What is already undone is said, not asked about.
+function Invoke-TuneupMenuUndo {
+    param([Parameter(Mandatory)]$Context)
+    $maxRuns = 15
+    $all = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupRunList -StateRoot $Context.StateRoot } |
+        Where-Object { Test-TuneupRunHasJournal -Dir $_.Dir })
+    [array]::Reverse($all)
+    $runs = @($all | Select-Object -First $maxRuns)
+    if (-not $runs.Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'undo.none')
+        $Context.Pause = $true
+        return
+    }
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.undo.header')
+    for ($i = 0; $i -lt $runs.Count; $i++) {
+        $run = $runs[$i]
+        $count = @(Invoke-TuneupContextStep -Context $Context -Step { Read-TuneupJournal -Path (Join-Path $run.Dir 'snapshot.jsonl') -Root $run.Root }).Count
+        $state = $(if ($run.Undone -or (Test-TuneupRunAllNotedUndone -Run $run)) { 'menu.undo.state.undone' }
+            elseif (@(Get-TuneupUndoneTweakId -Run $run).Count) { 'menu.undo.state.partly' } else { 'menu.undo.state.pending' })
+        $where = switch ($run.Root) { 'machine' { 'menu.undo.root.machine' } 'user' { 'menu.undo.root.user' } default { 'menu.undo.root.custom' } }
+        Write-TuneupMenuLine -Context $Context -Text ('  {0,2}. {1}  {2}  {3}  {4}' -f ($i + 1), $run.Id, (Get-TuneupText -Key 'menu.undo.tweaks' -Format $count),
+            (Get-TuneupText -Key $state), (Get-TuneupText -Key $where))
+    }
+    if ($all.Count -gt $maxRuns) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.undo.more' -Format $maxRuns) }
+    $number = Read-TuneupMenuNumber -Context $Context -Prompt (Get-TuneupText -Key 'menu.undo.pickRun') -Count $runs.Count
+    if ($null -eq $number) { return }
+    $run = $runs[$number - 1]
+    if ($run.Undone -or (Test-TuneupRunAllNotedUndone -Run $run)) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'err.runAlreadyUndone' -Format $run.Id)
+        $Context.Pause = $true
+        return
+    }
+    $wholeKey = Get-TuneupText -Key 'menu.undo.wholeKey'
+    $tweakKey = Get-TuneupText -Key 'menu.undo.tweakKey'
+    $how = Read-TuneupMenuKey -Context $Context -Prompt (Get-TuneupText -Key 'menu.undo.how') -Keys @($wholeKey, $tweakKey)
+    if ($null -eq $how) { return }
+    if ($how -eq $wholeKey) {
+        if (Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.undo.confirmRun' -Format $run.Id)) {
+            $Context.Pause = $true
+            Invoke-TuneupUndoCommand -Context $Context -RunId $run.Id
+        }
+        return
+    }
+    $entries = @(Invoke-TuneupContextStep -Context $Context -Step { Read-TuneupRunJournal -Run $run })
+    $done = @(Get-TuneupUndoneTweakId -Run $run)
+    for ($i = 0; $i -lt $entries.Count; $i++) {
+        $mark = $(if ($done -contains $entries[$i].id) { ' ' + (Get-TuneupText -Key 'menu.undo.state.undone') } else { '' })
+        Write-TuneupMenuLine -Context $Context -Text ('  {0,2}. {1} ({2}){3}' -f ($i + 1), (Get-TuneupTitle -Tweak $entries[$i].tweak), $entries[$i].id, $mark)
+    }
+    $number = Read-TuneupMenuNumber -Context $Context -Prompt (Get-TuneupText -Key 'menu.undo.pickTweak') -Count $entries.Count
+    if ($null -eq $number) { return }
+    $entry = $entries[$number - 1]
+    $title = Get-TuneupTitle -Tweak $entry.tweak
+    if ($done -contains $entry.id) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.undo.tweakAlreadyUndone' -Format $title)
+        $Context.Pause = $true
+        return
+    }
+    if (Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.undo.confirmTweak' -Format $title)) {
+        $Context.Pause = $true
+        Invoke-TuneupUndoCommand -Context $Context -RunId $run.Id -TweakId ([string]$entry.id)
+    }
+}
+
+# SFC and DISM, and when they find damage that can be repaired, the offer to repair it now (without
+# checking again: the check that was just made is reused).
+function Invoke-TuneupMenuHealth {
+    param([Parameter(Mandatory)]$Context)
+    if (-not (Get-TuneupContextEnvironment -Context $Context).IsAdmin) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.health.needsAdmin')
+        $Context.Pause = $true
+        return
+    }
+    if (-not (Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.health.confirm'))) { return }
+    $Context.Pause = $true
+    Invoke-TuneupHealthCommand -Context $Context
+    $report = $Context.Result
+    if ($null -eq $report -or $report.recommendation -ne 'run-repair') { return }
+    if (Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.health.repair')) {
+        Invoke-TuneupHealthCommand -Context $Context -Repair -Previous $report
+    }
+}
+
+# A measurement after some seconds idle, compared with the last one if there is one and the person wants.
+function Invoke-TuneupMenuMeasure {
+    param([Parameter(Mandatory)]$Context)
+    $seconds = $null
+    while ($null -eq $seconds) {
+        $answer = Read-TuneupMenuAnswer -Context $Context -Prompt (Get-TuneupText -Key 'menu.measure.idle')
+        if ($null -eq $answer) { return }
+        if ($answer -eq '') { $seconds = 0; break }
+        $number = 0
+        if ([int]::TryParse($answer, [ref]$number) -and $number -ge 0 -and $number -le 3600) { $seconds = $number }
+        else { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.measure.range' -Format 0, 3600) }
+    }
+    $compare = $null
+    $earlier = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupMeasurementList -StateRoot $Context.StateRoot })
+    if ($earlier.Count) {
+        if (Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.measure.compare' -Format $earlier[-1].Id)) { $compare = 'last' }
+        if ($Context.InputEnded) { return }
+    }
+    $Context.Pause = $true
+    Invoke-TuneupMeasureCommand -Context $Context -IdleSeconds $seconds -Compare $compare
+}
+```
+
+- [ ] **Step 4: Comandos, informe y textos**
+
+```diff
+diff --git a/engine/Commands.ps1 b/engine/Commands.ps1
+index 6dc5858..b74a321 100644
+--- a/engine/Commands.ps1
++++ b/engine/Commands.ps1
+@@ -6,6 +6,8 @@
+ # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
+ # collected so far, the questions and answers (Io), the exit code and the last result. The exit code
+ # starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
++# Menu is on while the menu runs, so what a command says about undoing names the menu and not a
++# parameter; Pause is set by a menu option that printed something to be read before the menu returns.
+ function New-TuneupContext {
+     param([switch]$Json, $Io)
+     [pscustomobject]@{
+@@ -20,6 +22,8 @@ function New-TuneupContext {
+         ScriptRoot   = $null
+         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
+         InputEnded   = $false
++        Menu         = $false
++        Pause        = $false
+         ExitCode     = 1
+         Result       = $null
+     }
+@@ -97,16 +101,12 @@ function Invoke-TuneupReapply {
+         $Context.ExitCode = 0
+         return
+     }
+-    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+-    if ($unsupported) {
+-        Write-TuneupCommandError -Context $Context -Message $unsupported
+-        return
+-    }
+-    $definition = Import-TuneupContextDefinition -Context $Context
+-    if ($definition.Problems.Count) {
+-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
++    $ready = Get-TuneupPlanningDefinition -Context $Context
++    if ($ready.Message) {
++        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
+         return
+     }
++    $definition = $ready.Definition
+     $known = @{}
+     foreach ($tweak in $definition.Catalog) { $known[[string]$tweak.id] = $true }
+     $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
+@@ -227,6 +227,21 @@ function Get-TuneupUnsupportedMessage {
+     if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
+ }
+ 
++# The start of every command that plans: the refusal of an unsupported Windows and the catalog with
++# its profiles. Gives { Definition, Message, Details }; Message is set when the command cannot go on
++# and its caller writes the error (with -Json the report is output, and written here it would be
++# mixed into what this returns).
++function Get-TuneupPlanningDefinition {
++    param([Parameter(Mandatory)]$Context)
++    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
++    if ($unsupported) { return [pscustomobject]@{ Definition = $null; Message = $unsupported; Details = [string[]]@() } }
++    $definition = Import-TuneupContextDefinition -Context $Context
++    if ($definition.Problems.Count) {
++        return [pscustomobject]@{ Definition = $null; Message = (Get-TuneupText -Key 'err.catalog'); Details = $definition.Problems }
++    }
++    [pscustomobject]@{ Definition = $definition; Message = $null; Details = [string[]]@() }
++}
++
+ # The catalog and the profiles, with the problems that the checks found (none when they are valid).
+ function Import-TuneupContextDefinition {
+     param([Parameter(Mandatory)]$Context)
+@@ -271,16 +286,12 @@ function Invoke-TuneupApplyCommand {
+         [switch]$PlanOnly,
+         [switch]$Yes
+     )
+-    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+-    if ($unsupported) {
+-        Write-TuneupCommandError -Context $Context -Message $unsupported
+-        return
+-    }
+-    $definition = Import-TuneupContextDefinition -Context $Context
+-    if ($definition.Problems.Count) {
+-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
++    $ready = Get-TuneupPlanningDefinition -Context $Context
++    if ($ready.Message) {
++        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
+         return
+     }
++    $definition = $ready.Definition
+     $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
+     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $ProfileIds -Include $Include -Exclude $Exclude
+     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+@@ -382,7 +393,7 @@ function Invoke-TuneupPlannedApply {
+     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
+     Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
+     $Context.Result = $report
+-    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
++    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json -FromMenu:$Context.Menu
+     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+ }
+ 
+@@ -459,7 +470,9 @@ function Save-TuneupStoppedApply {
+     $Context.Result = $report
+     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+     if (-not $Context.Json) {
+-        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' }) -Format $Run.Id)
++        $savedKey = $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' })
++        if ($Context.Menu) { $savedKey += '.menu' }
++        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $savedKey -Format $Run.Id)
+     }
+ }
+ 
+@@ -547,7 +560,12 @@ function Invoke-TuneupCli {
+     Get-TuneupContextEnvironment -Context $Context | Out-Null
+ 
+     # No command and no option of applying: the menu (with -Json there is nobody to ask).
+-    if (-not $present.Count -and -not $Context.Json) { Invoke-TuneupMenu -Context $Context; return }
++    if (-not $present.Count -and -not $Context.Json) {
++        $blocked = Get-TuneupMenuBlockMessage
++        if ($blocked) { Write-TuneupCommandError -Context $Context -Message $blocked; return }
++        Invoke-TuneupMenu -Context $Context
++        return
++    }
+     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
+     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
+     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }
+diff --git a/engine/Output.ps1 b/engine/Output.ps1
+index 69f436d..d60d918 100644
+--- a/engine/Output.ps1
++++ b/engine/Output.ps1
+@@ -179,9 +179,12 @@ function Write-TuneupApplyReport {
+     param(
+         [Parameter(Mandatory)]$Report,
+         [AllowEmptyCollection()][string[]]$Warnings = @(),
+-        [switch]$Json
++        [switch]$Json,
++        # Shown from the menu: what it says about undoing names the menu, not a parameter.
++        [switch]$FromMenu
+     )
+     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
++    $suffix = $(if ($FromMenu) { '.menu' } else { '' })
+     $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red'; 'skipped' = 'Yellow' }
+     foreach ($result in $Report.results) {
+         if ($result.reason -eq 'journal-error') {
+@@ -202,10 +205,10 @@ function Write-TuneupApplyReport {
+     Write-Host ''
+     Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped, $summary.refused)
+     if ($summary.PSObject.Properties['interrupted'] -and $summary.interrupted) {
+-        Write-Host (Get-TuneupText -Key 'interrupted.summary' -Format $summary.interrupted) -ForegroundColor Yellow
++        Write-Host (Get-TuneupText -Key "interrupted.summary$suffix" -Format $summary.interrupted) -ForegroundColor Yellow
+     }
+     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
+-    Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
++    Write-Host (Get-TuneupText -Key "run.saved$suffix" -Format $Report.runId, $Report.runDir)
+     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+     # A restart also signs the user out, so the sign-out line is only needed without one.
+     elseif ($Report.signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
+```
+
+```diff
+diff --git a/i18n/en.json b/i18n/en.json
+index e84cd30..400564b 100644
+--- a/i18n/en.json
++++ b/i18n/en.json
+@@ -18,7 +18,7 @@
+   "plan.skip": "  - {0}: {1}",
+   "plan.needsAdmin": "To apply the system changes, open PowerShell as administrator.",
+   "nothing": "Nothing to change.",
+-  "confirm": "Apply {0} changes? (y/n)",
++  "confirm": "Changes to apply: {0}. Apply? (y/n)",
+   "confirm.pattern": "^(y|yes)$",
+   "aborted": "Cancelled. Nothing was changed.",
+   "risk.low": "low risk",
+@@ -109,7 +109,7 @@
+   "err.measurementNotFound": "Measurement {0} does not exist.",
+   "err.noMeasurements": "There are no saved measurements to compare against.",
+   "err.idleSecondsRange": "-IdleSeconds must be between {0} and {1}.",
+-  "measure.waiting": "Waiting {0} seconds idle before measuring...",
++  "measure.waiting": "Waiting idle before measuring ({0} s)...",
+   "measure.header": "Measurement {0}:",
+   "measure.line": "  {0}: {1}",
+   "measure.saved": "Saved in {0}.",
+@@ -131,7 +131,7 @@
+   "undo.manual": "To restore it by hand, run this in PowerShell as administrator (a user tweak does not need it):",
+   "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes.",
+   "reason.interrupted": "not applied: the run was stopped with Ctrl+C",
+-  "interrupted.summary": "Stopped with Ctrl+C: {0} tweaks were not applied. What was applied can be undone with -Undo.",
++  "interrupted.summary": "Stopped with Ctrl+C. Tweaks not applied: {0}. What was applied can be undone with -Undo.",
+   "interrupted.saved": "Stopped with Ctrl+C. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}",
+   "transcript.header": "windows-tuneup {0} - run {1} - {2}",
+   "transcript.request.profiles": "Asked for: profiles {0}; included {1}; excluded {2}",
+@@ -151,9 +151,9 @@
+   "preflight.restoreEnableFailed": "System Restore could not be turned on: {0}",
+   "reapply.none": "Nothing to apply again: Windows reverted no tweak.",
+   "interrupted.hint": "Ctrl+C stops after the tweak in progress; Ctrl+Break interrupts at once",
+-  "aborted.saved": "The run stopped because of an error. The result of run {0} was saved; to undo it: .\tuneup.ps1 -Undo {0}",
++  "aborted.saved": "The run stopped because of an error. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}",
+   "reason.aborted": "not applied: the run stopped because of an error",
+-  "reapply.noneUnverified": "Nothing to apply again among what could be checked, but {0} tweaks need administrator to be checked: run it again as administrator.",
++  "reapply.noneUnverified": "Nothing to apply again among what could be checked. Tweaks that need administrator to be checked: {0}; run it again as administrator.",
+   "reapply.leftOut": "Not applied again, {0}: {1}",
+   "menu.title": "windows-tuneup {0} - Windows {1} {2} (build {3})",
+   "menu.admin.yes": "Running as administrator.",
+@@ -168,10 +168,10 @@
+   "menu.choose": "Choose an option:",
+   "menu.invalid": "That is not one of the options. Try again.",
+   "menu.back": "Press Enter to go back to the menu.",
+-  "menu.status.reapply": "Windows reverted {0} tweaks. Type r and Enter to apply them again, or Enter alone to go back:",
++  "menu.status.reapply": "Tweaks reverted by Windows: {0}. Type r and Enter to apply them again, or Enter alone to go back:",
+   "menu.status.reapplyKey": "r",
+   "menu.undo.header": "Runs, newest first:",
+-  "menu.undo.tweaks": "{0} tweaks",
++  "menu.undo.tweaks": "tweaks: {0}",
+   "menu.undo.state.undone": "[undone]",
+   "menu.undo.state.partly": "[partly undone]",
+   "menu.undo.state.pending": "[pending]",
+@@ -194,19 +194,30 @@
+   "menu.profile.admin": "(administrator)",
+   "menu.profile.always": "(always)",
+   "menu.select.prompt": "Type numbers to select or clear them (for example 2,4), Enter to go on, 0 to go back:",
+-  "menu.high.offer": "There are {0} high-risk tweaks that no profile applies. Look at them? (y/n)",
++  "menu.high.offer": "High-risk tweaks that no profile applies: {0}. Look at them? (y/n)",
+   "menu.high.mark": "[high risk]",
+   "menu.high.warning": "High-risk tweaks lower the protection of Windows or remove data that undo cannot bring back (docs/en/profiles.md explains each one).",
+   "menu.high.word": "yes",
+-  "menu.high.confirm": "To add them, type {0} in full:",
+-  "menu.high.notAdded": "They were not added.",
+-  "menu.ask.header": "{0} tweaks ask before being applied:",
+-  "menu.ask.prompt": "Apply it? y = yes, n = no, a = yes to all the rest, x = no to all the rest:",
++  "menu.high.confirm": "To add what you chose, type {0} in full:",
++  "menu.high.notAdded": "Nothing was added.",
++  "menu.ask.header": "Tweaks that ask before being applied: {0}",
++  "menu.ask.prompt": "Apply it? y = yes, n = no, a = yes to this one and all the rest, x = no to this one and all the rest:",
+   "menu.ask.yes": "y",
+   "menu.ask.no": "n",
+   "menu.ask.all": "a",
+   "menu.ask.none": "x",
+   "menu.optimize.needsAdmin": "This plan has system changes: open PowerShell as administrator and run tuneup.ps1 again, or choose only profiles without (administrator).",
+   "menu.reapply.highConfirm": "Windows reverted it. To apply it again, type {0} in full:",
+-  "menu.reapply.highSkipped": "Not applied again: {0}."
++  "menu.reapply.highSkipped": "Not applied again: {0}.",
++  "run.saved.menu": "Run {0} saved in {1}. To undo it, choose option 3 in the menu.",
++  "interrupted.summary.menu": "Stopped with Ctrl+C. Tweaks not applied: {0}. What was applied can be undone with option 3 in the menu.",
++  "interrupted.saved.menu": "Stopped with Ctrl+C. The result of run {0} was saved; to undo it, choose option 3 in the menu.",
++  "aborted.saved.menu": "The run stopped because of an error. The result of run {0} was saved; to undo it, choose option 3 in the menu.",
++  "menu.high.pattern": "^yes$",
++  "menu.select.locked": "Option {0} always stays selected: it cannot be changed.",
++  "menu.undo.more": "Only the {0} newest runs are listed; to undo an older one use -Undo <run> from the command line.",
++  "menu.undo.tweakAlreadyUndone": "The tweak \"{0}\" was already undone.",
++  "menu.health.needsAdmin": "The health check needs PowerShell as administrator: open it that way and run tuneup.ps1 again.",
++  "menu.measure.range": "Type a number between {0} and {1}.",
++  "menu.nonInteractive": "The menu needs to be able to ask questions, and PowerShell was started with -NonInteractive. Open it without that option, redirect the input, or use a command (for example -WhatIf or -Status)."
+ }
+diff --git a/i18n/es.json b/i18n/es.json
+index 5c5172c..0f034ff 100644
+--- a/i18n/es.json
++++ b/i18n/es.json
+@@ -18,7 +18,7 @@
+   "plan.skip": "  - {0}: {1}",
+   "plan.needsAdmin": "Para aplicar los cambios de sistema, abre PowerShell como administrador.",
+   "nothing": "No hay cambios pendientes.",
+-  "confirm": "¿Aplicar {0} cambios? (s/n)",
++  "confirm": "Cambios por aplicar: {0}. ¿Aplicar? (s/n)",
+   "confirm.pattern": "^(s|si|sí|y|yes)$",
+   "aborted": "Cancelado. No se cambió nada.",
+   "risk.low": "riesgo bajo",
+@@ -109,7 +109,7 @@
+   "err.measurementNotFound": "No existe la medición {0}.",
+   "err.noMeasurements": "No hay mediciones guardadas para comparar.",
+   "err.idleSecondsRange": "-IdleSeconds debe estar entre {0} y {1}.",
+-  "measure.waiting": "Esperando {0} segundos en reposo antes de medir...",
++  "measure.waiting": "Esperando en reposo antes de medir ({0} s)...",
+   "measure.header": "Medición {0}:",
+   "measure.line": "  {0}: {1}",
+   "measure.saved": "Guardada en {0}.",
+@@ -131,7 +131,7 @@
+   "undo.manual": "Para restaurarlo a mano, ejecuta esto en PowerShell como administrador (un ajuste del usuario no lo necesita):",
+   "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'.",
+   "reason.interrupted": "no se aplicó: la corrida se detuvo con Ctrl+C",
+-  "interrupted.summary": "Detenido con Ctrl+C: {0} ajustes no se aplicaron. Lo aplicado se puede deshacer con -Undo.",
++  "interrupted.summary": "Detenido con Ctrl+C. Ajustes sin aplicar: {0}. Lo aplicado se puede deshacer con -Undo.",
+   "interrupted.saved": "Detenido con Ctrl+C. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}",
+   "transcript.header": "windows-tuneup {0} - corrida {1} - {2}",
+   "transcript.request.profiles": "Pedido: perfiles {0}; incluidos {1}; excluidos {2}",
+@@ -151,9 +151,9 @@
+   "preflight.restoreEnableFailed": "No se pudo activar Restaurar sistema: {0}",
+   "reapply.none": "Nada que volver a aplicar: Windows no revirtió ningún ajuste.",
+   "interrupted.hint": "Ctrl+C se detiene después del ajuste en curso; Ctrl+Pausa interrumpe de inmediato",
+-  "aborted.saved": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla: .\tuneup.ps1 -Undo {0}",
++  "aborted.saved": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}",
+   "reason.aborted": "no se aplicó: la corrida se detuvo por un error",
+-  "reapply.noneUnverified": "Nada que volver a aplicar entre lo que se pudo comprobar, pero {0} ajustes necesitan administrador para comprobarse: ejecútalo de nuevo como administrador.",
++  "reapply.noneUnverified": "Nada que volver a aplicar entre lo que se pudo comprobar. Ajustes que necesitan administrador para comprobarse: {0}; ejecútalo de nuevo como administrador.",
+   "reapply.leftOut": "No se vuelve a aplicar {0}: {1}",
+   "menu.title": "windows-tuneup {0} - Windows {1} {2} (compilación {3})",
+   "menu.admin.yes": "Corre como administrador.",
+@@ -168,10 +168,10 @@
+   "menu.choose": "Elige una opción:",
+   "menu.invalid": "Esa no es una de las opciones. Prueba otra vez.",
+   "menu.back": "Presiona Enter para volver al menú.",
+-  "menu.status.reapply": "Windows revirtió {0} ajustes. Escribe r y Enter para volver a aplicarlos, o solo Enter para volver:",
++  "menu.status.reapply": "Ajustes revertidos por Windows: {0}. Escribe r y Enter para volver a aplicarlos, o solo Enter para volver:",
+   "menu.status.reapplyKey": "r",
+   "menu.undo.header": "Corridas, de la más nueva a la más vieja:",
+-  "menu.undo.tweaks": "{0} ajustes",
++  "menu.undo.tweaks": "ajustes: {0}",
+   "menu.undo.state.undone": "[deshecha]",
+   "menu.undo.state.partly": "[deshecha en parte]",
+   "menu.undo.state.pending": "[pendiente]",
+@@ -194,19 +194,30 @@
+   "menu.profile.admin": "(administrador)",
+   "menu.profile.always": "(siempre)",
+   "menu.select.prompt": "Escribe números para marcar o desmarcar (por ejemplo 2,4), Enter para seguir, 0 para volver:",
+-  "menu.high.offer": "Hay {0} ajustes de riesgo alto que ningún perfil aplica. ¿Quieres verlos? (s/n)",
++  "menu.high.offer": "Ajustes de riesgo alto que ningún perfil aplica: {0}. ¿Quieres verlos? (s/n)",
+   "menu.high.mark": "[riesgo alto]",
+   "menu.high.warning": "Los ajustes de riesgo alto bajan la protección de Windows o borran datos que deshacer no puede devolver (docs/es/profiles.md explica cada uno).",
+-  "menu.high.word": "si",
+-  "menu.high.confirm": "Para agregarlos, escribe {0} completo:",
+-  "menu.high.notAdded": "No se agregaron.",
+-  "menu.ask.header": "{0} ajustes preguntan antes de aplicarse:",
+-  "menu.ask.prompt": "¿Aplicarlo? s = sí, n = no, t = sí a todos los que quedan, x = no a todos los que quedan:",
++  "menu.high.word": "sí",
++  "menu.high.confirm": "Para agregar lo que elegiste, escribe {0} completo:",
++  "menu.high.notAdded": "No se agregó nada.",
++  "menu.ask.header": "Ajustes que preguntan antes de aplicarse: {0}",
++  "menu.ask.prompt": "¿Aplicarlo? s = sí, n = no, t = sí a este y a todos los que quedan, x = no a este y a todos los que quedan:",
+   "menu.ask.yes": "s",
+   "menu.ask.no": "n",
+   "menu.ask.all": "t",
+   "menu.ask.none": "x",
+   "menu.optimize.needsAdmin": "Este plan tiene cambios de sistema: abre PowerShell como administrador y vuelve a correr tuneup.ps1, o elige solo perfiles sin (administrador).",
+   "menu.reapply.highConfirm": "Windows lo revirtió. Para volver a aplicarlo, escribe {0} completo:",
+-  "menu.reapply.highSkipped": "No se vuelve a aplicar {0}."
++  "menu.reapply.highSkipped": "No se vuelve a aplicar {0}.",
++  "run.saved.menu": "Corrida {0} guardada en {1}. Para deshacerla, elige la opción 3 del menú.",
++  "interrupted.summary.menu": "Detenido con Ctrl+C. Ajustes sin aplicar: {0}. Lo aplicado se puede deshacer con la opción 3 del menú.",
++  "interrupted.saved.menu": "Detenido con Ctrl+C. El resultado de la corrida {0} quedó guardado; para deshacerla, elige la opción 3 del menú.",
++  "aborted.saved.menu": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla, elige la opción 3 del menú.",
++  "menu.high.pattern": "^(sí|si)$",
++  "menu.select.locked": "La opción {0} queda siempre marcada: no se puede cambiar.",
++  "menu.undo.more": "Solo se listan las {0} corridas más nuevas; para deshacer una anterior usa -Undo <corrida> desde la línea de comandos.",
++  "menu.undo.tweakAlreadyUndone": "El ajuste \"{0}\" ya estaba deshecho.",
++  "menu.health.needsAdmin": "La salud de Windows necesita PowerShell como administrador: ábrelo así y vuelve a correr tuneup.ps1.",
++  "menu.measure.range": "Escribe un número entre {0} y {1}.",
++  "menu.nonInteractive": "El menú necesita poder preguntar, y PowerShell se abrió con -NonInteractive. Ábrelo sin esa opción, redirige la entrada, o usa un comando (por ejemplo -WhatIf o -Status)."
+ }
+```
+
+- [ ] **Step 5: Verificar**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
+Expected: PASS (`Tests Passed: 43, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1`
+Expected: PASS (`Tests Passed: 1212, Failed: 0, Skipped: 1`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/lint.ps1`
+Expected: `PSScriptAnalyzer: no findings`.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add engine/Prompts.ps1 engine/Menu.ps1 engine/Commands.ps1 engine/Output.ps1 i18n/es.json i18n/en.json tests/Menu.Tests.ps1 tests/Commands.Tests.ps1 tests/Output.Tests.ps1 tests/Preflight.Tests.ps1 tests/I18n.Tests.ps1
+git commit -m "fix: menú con plurales, sí con tilde y entradas inválidas"
+```
+
+---
+
 ### Task 11: Instalador y paquete de la release
 
 **Files:**
