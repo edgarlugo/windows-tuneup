@@ -1,3 +1,15 @@
+$script:TaskStates = @('Enabled', 'Disabled')
+
+function Test-TaskTweakDefinition {
+    param([Parameter(Mandatory)]$Tweak)
+    $set = $Tweak.set
+    if ([string]$set.path -notmatch '^\\(.*\\)?$') { 'task path must start and end with a backslash' }
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    if (([string]$set.name + [string]$set.path) -match '[*?\[\]]') { 'task name and path cannot contain wildcard characters' }
+    if ($script:TaskStates -notcontains $set.state) { "has an invalid task state '$($set.state)'" }
+    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+}
+
 function Get-TuneupScheduledTask {
     param([Parameter(Mandatory)]$Tweak)
     # Get-ScheduledTask treats names and paths as wildcards, so keep only the exact match.

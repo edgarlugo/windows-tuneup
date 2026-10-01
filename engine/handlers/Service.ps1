@@ -1,3 +1,14 @@
+$script:ServiceStartTypes = @('Automatic', 'AutomaticDelayed', 'Manual', 'Disabled')
+
+function Test-ServiceTweakDefinition {
+    param([Parameter(Mandatory)]$Tweak)
+    $set = $Tweak.set
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    if ($script:ServiceStartTypes -notcontains $set.startType) { "has an invalid startType '$($set.startType)'" }
+    if ($set.stop -isnot [bool]) { 'set.stop must be true or false' }
+    if ($Tweak.scope -ne 'machine') { 'must use scope machine' }
+}
+
 $script:ScStartArguments = @{
     Automatic        = 'auto'
     AutomaticDelayed = 'delayed-auto'

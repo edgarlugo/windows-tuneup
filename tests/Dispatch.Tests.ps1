@@ -28,3 +28,33 @@ Describe 'Dispatch' {
         { Get-TuneupState -Tweak (New-TestTweak -Type 'magic') } | Should -Throw "*Unsupported tweak type 'magic'*"
     }
 }
+
+Describe 'Handler registry' {
+    It 'has the contract functions for every dispatched type' {
+        $missing = foreach ($type in @(Get-TuneupHandlerType)) {
+            $name = Get-TuneupHandlerName -Tweak ([pscustomobject]@{ type = $type })
+            foreach ($function in "Get-${name}TweakState", "Test-${name}TweakState", "Set-${name}TweakDesired", "Restore-${name}TweakState", "Test-${name}TweakDefinition") {
+                if (-not (Get-Command -Name $function -Module Tuneup -ErrorAction SilentlyContinue)) { "${type}: $function" }
+            }
+        }
+        $missing -join ', ' | Should -BeNullOrEmpty
+    }
+
+    It 'lets the catalog accept exactly the dispatched types' {
+        foreach ($type in @(Get-TuneupHandlerType)) {
+            (Test-TuneupTweak -Tweak (New-TestTweak -Type $type)) -join '; ' | Should -Not -Match 'unsupported type' -Because $type
+        }
+        (Test-TuneupTweak -Tweak (New-TestTweak -Type 'Registry')) -join '; ' | Should -Match "unsupported type 'Registry'"
+        { Get-TuneupHandlerName -Tweak (New-TestTweak -Type 'Registry') } | Should -Throw "*Unsupported tweak type 'Registry'*"
+    }
+
+    It 'starts with the types of the first plan' {
+        @(Get-TuneupHandlerType)[0..2] -join ',' | Should -Be 'registry,service,task'
+    }
+
+    It 'says whether reading a type needs elevation' {
+        (Get-TuneupHandler -Type 'registry').ReadNeedsAdmin | Should -BeFalse
+        Get-TuneupHandler -Type 'magic' | Should -BeNullOrEmpty
+        Get-TuneupHandler -Type $null | Should -BeNullOrEmpty
+    }
+}
