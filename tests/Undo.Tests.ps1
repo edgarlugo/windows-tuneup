@@ -154,6 +154,26 @@ Describe 'Undo and status' {
         @($plan | Where-Object { $_.Action -eq 'apply' }).Count | Should -Be 0
     }
 
+    It 'tells how to restore by hand a tweak whose restore failed, and nothing for a restored one' {
+        $run = Invoke-TestApply $Root
+        Mock -ModuleName Tuneup Restore-TuneupState { throw 'access denied' } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].status | Should -Be 'failed'
+        @($results[0].manual) | Should -Be @('reg.exe delete "HKCU\Software\windows-tuneup-test" /v "Two" /f')
+        @($results[1].manual).Count | Should -Be 0
+    }
+
+    It 'says when a restored tweak shows only after signing in again' {
+        $signOut = New-TestTweak -Id 'test.signout' -Set ([pscustomobject]@{ path = $Key; name = 'SignOut'; kind = 'DWord'; value = 1 })
+        $signOut | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $run = New-TuneupRun -StateRoot $Root
+        $plan = @(New-TuneupPlan -Catalog @($signOut) -Profiles @(New-TestProfile -Id 'base' -Include @('test.signout')) `
+            -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+        Invoke-TuneupPlan -Plan $plan -RunDir $run.Dir | Out-Null
+        $results = @(Invoke-TuneupUndo -Run $run)
+        $results[0].signOutRequired | Should -BeTrue
+    }
+
     It 'keeps the run pending when a restore fails and finishes it on retry' {
         $run = Invoke-TestApply $Root
         Mock -ModuleName Tuneup Restore-TuneupState { throw 'restore broke' } -ParameterFilter { $Tweak.id -eq 'test.two' }

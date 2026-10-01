@@ -213,14 +213,16 @@ function Write-TuneupUndoReport {
     $failed = @($Results | Where-Object { $_.status -eq 'failed' }).Count
     $skipped = @($Results | Where-Object { $_.status -eq 'skipped' }).Count
     $rebootRequired = @($Results | Where-Object { $_.rebootRequired }).Count -gt 0
+    $signOutRequired = @($Results | Where-Object { $_.PSObject.Properties['signOutRequired'] -and $_.signOutRequired }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
-            schemaVersion  = 1
-            command        = 'undo'
-            runId          = $RunId
-            rebootRequired = $rebootRequired
-            results        = $Results
-            summary        = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
+            schemaVersion   = 1
+            command         = 'undo'
+            runId           = $RunId
+            rebootRequired  = $rebootRequired
+            signOutRequired = $signOutRequired
+            results         = $Results
+            summary         = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
         }))
         return
     }
@@ -232,9 +234,15 @@ function Write-TuneupUndoReport {
         Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor DarkGray }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
+        $manual = @($(if ($result.PSObject.Properties['manual']) { $result.manual }) | Where-Object { $_ })
+        if ($manual.Count) {
+            Write-Host "    $(Get-TuneupText -Key 'undo.manual')"
+            foreach ($line in $manual) { Write-Host "      $line" }
+        }
     }
     Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed, $skipped)
     if ($rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+    elseif ($signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
 }
 
 function Write-TuneupErrorReport {

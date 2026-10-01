@@ -263,6 +263,18 @@ Describe 'Write-TuneupUndoReport' {
         (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) -Json | ConvertFrom-Json).rebootRequired | Should -BeTrue
     }
 
+    It 'shows how to restore a failed tweak by hand and asks to sign out again' {
+        $failed = [pscustomobject]@{ id = 'test.one'; title = 'One'; status = 'failed'; reason = $null; error = 'denied'; detail = $null; rebootRequired = $false; signOutRequired = $false; manual = @('reg.exe delete "HKCU\X" /v "One" /f') }
+        $restored = [pscustomobject]@{ id = 'test.two'; title = 'Two'; status = 'restored'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true; manual = @() }
+        $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) 6>&1 | Out-String)
+        $text | Should -Match 'To restore it by hand, run'
+        $text | Should -Match ([regex]::Escape('reg.exe delete "HKCU\X" /v "One" /f'))
+        $text | Should -Match 'Sign out and sign in again'
+        $json = Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) -Json | ConvertFrom-Json
+        $json.signOutRequired | Should -BeTrue
+        @($json.results[0].manual).Count | Should -Be 1
+    }
+
     It 'shows skipped tweaks with their reason and counts them' {
         $results = @((New-TestResult -Status 'restored'), (New-TestResult -Status 'skipped' -Reason 'other-user'))
         $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results $results 6>&1 | Out-String)

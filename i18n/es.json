@@ -127,5 +127,7 @@
   "metric.enabledTasks": "Tareas programadas habilitadas",
   "metric.systemDriveFreeGB": "Espacio libre en el disco del sistema (GB)",
   "metric.bootDurationMs": "Duración del último arranque (ms)",
-  "metric.uptimeMinutes": "Minutos desde el arranque"
+  "metric.uptimeMinutes": "Minutos desde el arranque",
+  "undo.manual": "Para restaurarlo a mano, ejecuta (como administrador si es un ajuste de sistema):",
+  "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'."
 }
