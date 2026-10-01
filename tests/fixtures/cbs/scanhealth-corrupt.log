@@ -1,0 +1,20 @@
+2026-09-30 10:01:57, Info                  CBS    Checking System Update Readiness.
+2026-09-30 10:01:57, Info                  CBS    
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			amd64_microsoft-windows-codeintegrity_31bf3856ad364e35_10.0.26100.1591_none_3c37ec64b4c6bb8a\r\ci.dll
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			amd64_microsoft-windows-b..ore-bootmanager-efi_31bf3856ad364e35_10.0.26100.1455_none_234757a24c629793\r\bootmgfw.efi
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			amd64_microsoft-windows-b..ore-bootmanager-efi_31bf3856ad364e35_10.0.26100.1455_none_234757a24c629793\r\bootmgr.efi
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			amd64_microsoft.ink_31bf3856ad364e35_10.0.26100.1455_none_22be944b505ac37e\r\Microsoft.Ink.dll
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			wow64_microsoft.ink_31bf3856ad364e35_10.0.26100.1455_none_2d133e9d84bb8579\r\Microsoft.Ink.dll
+2026-09-30 10:01:57, Info                  CBS    (p)	CSI Payload Corrupt	(n)			amd64_microsoft-windows-b..ore-bootmanager-efi_31bf3856ad364e35_10.0.26100.1455_none_234757a24c629793\r\SecureBootRecovery.efi
+2026-09-30 10:01:57, Info                  CBS    
+2026-09-30 10:01:57, Info                  CBS    Summary:
+2026-09-30 10:01:57, Info                  CBS    Operation: Detect only 
+2026-09-30 10:01:57, Info                  CBS    Operation result: 0x0
+2026-09-30 10:01:57, Info                  CBS    Last Successful Step: Stage package detection completes.
+2026-09-30 10:01:57, Info                  CBS    Total Detected Corruption:	6
+2026-09-30 10:01:57, Info                  CBS    	CBS Manifest Corruption:	0
+2026-09-30 10:01:57, Info                  CBS    	CSI Payload Corruption:	6
+2026-09-30 10:01:57, Info                  CBS    Total Repaired Corruption:	0
+2026-09-30 10:01:57, Info                  CBS    	CSI Payload Repaired:	0
+2026-09-30 10:01:57, Info                  CBS    
+2026-09-30 10:01:57, Info                  CBS    Total Operation Time: 113 seconds.

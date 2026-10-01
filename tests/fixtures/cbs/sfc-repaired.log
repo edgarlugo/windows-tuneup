@@ -1,0 +1,14 @@
+2026-09-30 09:40:00, Info                  CSI    00000001 [SR] Repairing 3 components
+2026-09-30 09:47:00, Info                  CSI    00000007 [SR] Verifying 100 components
+2026-09-30 09:47:00, Info                  CSI    00000008 [SR] Beginning Verify and Repair transaction
+2026-09-30 09:47:00, Info                  CSI    00000009 [SR] Verify complete
+2026-09-30 09:48:37, Info                  CSI    0000021f [SR] Verifying 32 components
+2026-09-30 09:48:37, Info                  CSI    00000220 [SR] Beginning Verify and Repair transaction
+2026-09-30 09:48:37, Info                  CSI    00000221 [SR] Verify complete
+2026-09-30 09:48:37, Info                  CSI    00000222 [SR] Repairing 0 components
+2026-09-30 09:48:37, Info                  CSI    00000223 [SR] Beginning Verify and Repair transaction
+2026-09-30 09:48:37, Info                  CSI    00000224 [SR] Repair complete
+2026-09-30 09:48:37, Info                  DEPLOY [Pnp] Corrupt file: C:\WINDOWS\System32\drivers\BthA2dp.sys
+2026-09-30 09:48:37, Info                  DEPLOY [Pnp] Repaired file: C:\WINDOWS\System32\drivers\BthA2dp.sys
+2026-09-30 09:48:37, Info                  DEPLOY [Pnp] Corrupt file: C:\WINDOWS\System32\drivers\BthHfEnum.sys
+2026-09-30 09:48:37, Info                  DEPLOY [Pnp] Repaired file: C:\WINDOWS\System32\drivers\BthHfEnum.sys

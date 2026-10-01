@@ -4108,6 +4108,7 @@ git commit -m "feat: reglas de argumentos en una función y acciones con -Action
 **Files:**
 - Create: `engine/Health.ps1`
 - Create: `tests/fixtures/cbs/sfc-repaired.log`, `tests/fixtures/cbs/sfc-unrepaired.log`, `tests/fixtures/cbs/scanhealth-corrupt.log`, `tests/fixtures/cbs/restorehealth-fixed.log`, `tests/fixtures/cbs/restorehealth-partial.log`
+- Modify: `.gitignore` (agregar `!tests/fixtures/cbs/*.log`: la regla `*.log` ignoraba los extractos)
 - Test: `tests/Health.Tests.ps1`
 
 Los extractos copian el formato de las líneas reales de `C:\Windows\Logs\CBS\CbsPersist_20260930163350.log` de este equipo (corrida de SFC de las 09:47 y de DISM `/ScanHealth` y `/RestoreHealth` del 30-09), recortados a pocas líneas y sin datos personales. Entre los campos de las líneas `(p)` y de los totales hay **tabulaciones** reales, como en CBS.log; el resto son espacios. Las líneas `[SR] Cannot repair member file` (que este equipo no tiene) siguen el formato que documenta Microsoft para SFC, y `restorehealth-partial.log` combina líneas reales para el caso de una reparación incompleta.
@@ -4475,7 +4476,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add engine/Health.ps1 tests/Health.Tests.ps1 tests/fixtures/cbs/sfc-repaired.log tests/fixtures/cbs/sfc-unrepaired.log tests/fixtures/cbs/scanhealth-corrupt.log tests/fixtures/cbs/restorehealth-fixed.log tests/fixtures/cbs/restorehealth-partial.log
+git add .gitignore engine/Health.ps1 tests/Health.Tests.ps1 tests/fixtures/cbs/sfc-repaired.log tests/fixtures/cbs/sfc-unrepaired.log tests/fixtures/cbs/scanhealth-corrupt.log tests/fixtures/cbs/restorehealth-fixed.log tests/fixtures/cbs/restorehealth-partial.log
 git commit -m "feat: lectura de SFC y DISM desde CBS.log con extractos reales"
 ```
 
