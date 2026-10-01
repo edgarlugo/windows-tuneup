@@ -18,10 +18,9 @@ $script:ScStartArguments = @{
 
 function Invoke-TuneupSc {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][string]$Start)
-    $sc = Join-Path $env:SystemRoot 'System32\sc.exe'
-    $output = & $sc config $Name start= $Start 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "sc.exe config $Name start= $Start failed with exit code ${LASTEXITCODE}: $output"
+    $result = Invoke-TuneupNative -FilePath (Join-Path $env:SystemRoot 'System32\sc.exe') -Arguments @('config', $Name, 'start=', $Start)
+    if ($result.ExitCode -ne 0) {
+        throw "sc.exe config $Name start= $Start failed with exit code $($result.ExitCode): $($result.Output)"
     }
 }
 
