@@ -222,6 +222,50 @@ Describe 'Write-TuneupHealthReport' {
         $text | Should -Match 'Restart the computer'
     }
 
+    It 'does not promise a later repair when the repair is part of this run' {
+        $report = $HealthReport | Select-Object -Property *
+        $report.repairRequested = $true
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'Component store: 6 corruptions found; a repair will be attempted'
+        $text | Should -Not -Match 'repairable with -Health -Repair'
+    }
+
+    It 'shows what the repair left and asks for a manual repair of the component store' {
+        $ok = [pscustomobject]@{ ExitCode = -2146498529; Output = 'Error: 0x800f081f' }
+        $partial = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\cbs\restorehealth-partial.log') -Encoding UTF8)
+        $after = New-TuneupHealthScan -Lines $partial -SfcRun $ok -DismRun $ok
+        $report = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = 'a'; finishedAt = 'b'; repairRequested = $true; repairRan = $true
+            before = $Scan; after = $after; recommendation = 'manual-repair'; rebootRecommended = $false
+        }
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'After the repair:'
+        $text | Should -Match 'DISM could not complete the repair \(result 0x800f081f\)'
+        $text | Should -Not -Match 'repaired 5 of 6'
+        $text | Should -Match 'microsoft-windows-codeintegrity: 1 file\b'
+        $text | Should -Match 'DISM ended with exit code -2146498529 \(0x800f081f\)'
+        $text | Should -Match 'DISM could not repair everything'
+    }
+
+    It 'asks to review SFC when the component store is fine and SFC could not repair a file' {
+        $lines = @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures\cbs\sfc-modern-unrepaired.log') -Encoding UTF8)
+        $ok = [pscustomobject]@{ ExitCode = 0; Output = '' }
+        $after = New-TuneupHealthScan -Lines $lines -SfcRun $ok -DismRun $ok
+        $report = [pscustomobject]@{
+            schemaVersion = 1; command = 'health'; startedAt = 'a'; finishedAt = 'b'; repairRequested = $true; repairRan = $true
+            before = $Scan; after = $after; recommendation = 'manual-repair'; rebootRecommended = $false
+        }
+        $text = (Write-TuneupHealthReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'not repaired: pbrpwbt.exe'
+        $text | Should -Match 'SFC still cannot repair some files'
+        $text | Should -Not -Match 'DISM could not repair everything'
+    }
+
+    It 'keeps the DISM result and the hexadecimal exit codes in the JSON' {
+        $json = Write-TuneupHealthReport -Report $HealthReport -Json | ConvertFrom-Json
+        $json.before.componentStore.operationResult | Should -Be '0x0'
+        $json.before.componentStore.exitCodeHex | Should -Be '0x0'
+    }
     It 'writes one JSON document with the warnings' {
         $json = Write-TuneupHealthReport -Report $HealthReport -Warnings @('careful') -Json | ConvertFrom-Json
         $json.command | Should -Be 'health'

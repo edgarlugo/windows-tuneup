@@ -17,34 +17,76 @@ function Select-TuneupCbsWindow {
     }
 }
 
+# CSI writes a file as [l:11]'name' (newer builds), [l:7]"name" (older ones) or as a bare path.
+function ConvertTo-TuneupCbsFilePath {
+    param([Parameter(Mandatory)][string]$Text)
+    $path = $Text.Trim() -replace '^\[[^\]]*\]', ''
+    if ($path -match '^[''"](?<quoted>[^''"]+)[''"]') { $path = $Matches['quoted'] }
+    else { $path = $path -replace '\s+from store\s*$', '' }
+    # \??\ is the NT prefix of a drive path.
+    $path -replace '^\\\?\?\\', ''
+}
+
 function Get-TuneupSfcSummary {
     param([Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines)
-    $ran = $false
+    $all = @($Lines)
+    # Only the latest SFC run counts. It checks the components in many "Verifying" batches and ends
+    # with "Repair complete" (the driver lines follow it); [SR] lines before its first "Verifying"
+    # belong to other servicing work.
+    $done = @(for ($i = 0; $i -lt $all.Count; $i++) { if ($all[$i] -match '\[SR\] Repair complete') { $i } })
+    $from = 0
+    if ($done.Count) {
+        $from = $done[-1] + 1
+        $started = @(for ($i = $from; $i -lt $all.Count; $i++) { if ($all[$i] -match '\[SR\] Verifying \d+ components') { $i } })
+        # Nothing new began after the last run ended, so the last run is the latest.
+        if (-not $started.Count) { $from = $(if ($done.Count -ge 2) { $done[-2] + 1 } else { 0 }) }
+    }
+    $start = -1
+    for ($i = $from; $i -lt $all.Count -and $start -lt 0; $i++) {
+        if ($all[$i] -match '\[SR\] Verifying \d+ components') { $start = $i }
+    }
+    if ($start -lt 0) {
+        return [pscustomobject]@{ status = 'unknown'; repairedFiles = [string[]]@(); unrepairedFiles = [string[]]@() }
+    }
     $repairing = 0
     $repaired = New-Object System.Collections.Generic.List[string]
-    $unrepaired = New-Object System.Collections.Generic.List[string]
+    $cannot = New-Object System.Collections.Generic.List[object]
+    $reprojected = New-Object System.Collections.Generic.List[string]
     $corrupt = New-Object System.Collections.Generic.List[string]
-    foreach ($line in $Lines) {
-        if ($line -match '\[SR\] ') { $ran = $true }
+    for ($i = $start; $i -lt $all.Count; $i++) {
+        $line = $all[$i]
         if ($line -match '\[SR\] Repairing (?<count>\d+) components') {
-            $repairing += [int]$Matches['count']
-        } elseif ($line -match '\[SR\] Cannot repair member file \[[^\]]*\]"(?<file>[^"]+)"') {
-            if (-not $unrepaired.Contains($Matches['file'])) { $unrepaired.Add($Matches['file']) }
-        } elseif ($line -match '\[SR\] Repairing corrupted file \[[^\]]*\]"(?<file>[^"]+)"') {
-            if (-not $repaired.Contains($Matches['file'])) { $repaired.Add($Matches['file']) }
+            $repairing = [int]$Matches['count']
+        } elseif ($line -match '\[SR\] Cannot repair member file \[[^\]]*\][''"](?<file>[^''"]+)[''"](?: of (?<component>[^,]+),(?: version [^,]+,)? arch (?<arch>[^,]+),)?') {
+            $entry = [pscustomobject]@{ file = $Matches['file']; component = $Matches['component']; arch = $Matches['arch'] }
+            $entry | Add-Member -NotePropertyName key -NotePropertyValue "$($entry.file)|$($entry.component)|$($entry.arch)"
+            if (-not @($cannot | Where-Object { $_.key -eq $entry.key }).Count) { $cannot.Add($entry) }
+        } elseif ($line -match '\[SR\] Could not reproject corrupted file (?<raw>[^;]+?)\s*(?:;|$)') {
+            $path = ConvertTo-TuneupCbsFilePath -Text $Matches['raw']
+            if (-not $reprojected.Contains($path)) { $reprojected.Add($path) }
+        } elseif ($line -match '\[SR\] Repairing corrupted file (?<raw>.+?)\s*$') {
+            $path = ConvertTo-TuneupCbsFilePath -Text $Matches['raw']
+            if (-not $repaired.Contains($path)) { $repaired.Add($path) }
         } elseif ($line -match '\[Pnp\] Corrupt file: (?<file>.+?)\s*$') {
             if (-not $corrupt.Contains($Matches['file'])) { $corrupt.Add($Matches['file']) }
         } elseif ($line -match '\[Pnp\] Repaired file: (?<file>.+?)\s*$') {
             if (-not $repaired.Contains($Matches['file'])) { $repaired.Add($Matches['file']) }
         }
     }
+    $unrepaired = New-Object System.Collections.Generic.List[string]
+    # "Cannot repair" gives the file name and its component; when SFC also gives the full path, that is used.
+    foreach ($entry in $cannot) {
+        $leaf = $entry.file
+        if (@($reprojected | Where-Object { [System.IO.Path]::GetFileName($_) -eq $leaf }).Count) { continue }
+        $label = $(if ($entry.component) { "$($entry.file) ($($entry.component), $($entry.arch))" } else { $entry.file })
+        if (-not $unrepaired.Contains($label)) { $unrepaired.Add($label) }
+    }
     # A driver reported corrupt and never repaired is still damaged.
-    foreach ($file in $corrupt) {
+    foreach ($file in (@($reprojected) + @($corrupt))) {
         if (-not $repaired.Contains($file) -and -not $unrepaired.Contains($file)) { $unrepaired.Add($file) }
     }
     $status = 'clean'
-    if (-not $ran) { $status = 'unknown' }
-    elseif ($unrepaired.Count) { $status = 'unrepaired' }
+    if ($unrepaired.Count) { $status = 'unrepaired' }
     elseif ($repaired.Count -or $repairing) { $status = 'repaired' }
     [pscustomobject]@{
         status          = $status
@@ -72,7 +114,10 @@ function Get-TuneupComponentStoreSummary {
         return [pscustomobject]@{ state = 'unknown'; operation = $null; result = $null; detected = $null; repaired = $null }
     }
     $repairMode = ([string]$found.operation -match 'Repair')
-    if ($repairMode -and $found.result -and $found.result -ne '0x0') { $state = 'unrepairable' }
+    $failed = ($found.result -and $found.result -ne '0x0')
+    if ($repairMode -and $failed) { $state = 'unrepairable' }
+    # A scan that failed and counted nothing did not look at anything.
+    elseif ($failed -and $found.detected -eq 0) { $state = 'unknown' }
     elseif ($found.detected -eq 0) { $state = 'healthy' }
     elseif (-not $repairMode) { $state = 'repairable' }
     elseif ([int]$found.repaired -ge $found.detected) { $state = 'repaired' }
@@ -112,13 +157,23 @@ function Get-TuneupCorruptComponentGroup {
         ForEach-Object { [pscustomobject]@{ name = $_.Key; files = $_.Value } }
 }
 
+# Compressed CbsPersist_*.cab logs are not read: Windows only compresses logs that are older than a scan.
 function Get-TuneupCbsLogFile {
     param([Parameter(Mandatory)][datetime]$Since, [string]$Folder = (Join-Path $env:SystemRoot 'Logs\CBS'))
     # Windows moves CBS.log to CbsPersist_<time>.log when it grows, so a long scan can span both.
-    Get-ChildItem -LiteralPath $Folder -Filter 'CbsPersist_*.log' -File -ErrorAction SilentlyContinue |
+    if (-not (Test-Path -LiteralPath $Folder -PathType Container)) { return }
+    Get-ChildItem -LiteralPath $Folder -Filter 'CbsPersist_*.log' -File |
         Where-Object { $_.LastWriteTime -ge $Since } | Sort-Object LastWriteTime | ForEach-Object { $_.FullName }
     $current = Join-Path $Folder 'CBS.log'
     if (Test-Path -LiteralPath $current -PathType Leaf) { $current }
+}
+
+function Read-TuneupCbsLogFile {
+    param([Parameter(Mandatory)][string]$Path)
+    # TrustedInstaller keeps CBS.log open for writing, so it is read sharing read and write.
+    $stream = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]'ReadWrite, Delete')
+    $reader = New-Object System.IO.StreamReader -ArgumentList $stream, ([System.Text.Encoding]::UTF8), $true
+    try { $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
 function Read-TuneupCbsLog {
@@ -127,21 +182,31 @@ function Read-TuneupCbsLog {
         [datetime]$Until = [datetime]::MaxValue,
         [string]$Folder = (Join-Path $env:SystemRoot 'Logs\CBS')
     )
-    foreach ($path in @(Get-TuneupCbsLogFile -Since $Since -Folder $Folder)) {
-        # TrustedInstaller keeps CBS.log open for writing, so it is read sharing read and write.
-        $stream = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]'ReadWrite, Delete')
-        $reader = New-Object System.IO.StreamReader -ArgumentList $stream, ([System.Text.Encoding]::UTF8), $true
-        try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $texts = $null
+    # A log can rotate between listing and opening it: the listing is made again once.
+    for ($attempt = 1; $attempt -le 2 -and $null -eq $texts; $attempt++) {
+        try {
+            $texts = @(foreach ($path in @(Get-TuneupCbsLogFile -Since $Since -Folder $Folder)) { Read-TuneupCbsLogFile -Path $path })
+        } catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
+            if ($attempt -eq 2) { throw }
+        }
+    }
+    foreach ($text in $texts) {
         Select-TuneupCbsWindow -Lines @($text -split "`r?`n" | Where-Object { $_ }) -Since $Since -Until $Until
     }
 }
 
 function ConvertFrom-TuneupToolOutput {
-    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes,
+        [ValidateSet('Auto', 'Unicode', 'Oem')][string]$Encoding = 'Auto'
+    )
     if (-not $Bytes.Length) { return '' }
-    # sfc writes UTF-16 when its output is redirected; DISM writes in the OEM code page.
-    $zeros = @($Bytes | Where-Object { $_ -eq 0 }).Count
-    if ($zeros * 4 -ge $Bytes.Length) {
+    # sfc writes UTF-16 when its output is redirected; DISM writes in the OEM code page. Auto guesses
+    # from the zero bytes of UTF-16 text, for a tool whose encoding is not known.
+    $unicode = ($Encoding -eq 'Unicode')
+    if ($Encoding -eq 'Auto') { $unicode = (@($Bytes | Where-Object { $_ -eq 0 }).Count * 4 -ge $Bytes.Length) }
+    if ($unicode) {
         $text = [System.Text.Encoding]::Unicode.GetString($Bytes)
     } else {
         $text = [System.Text.Encoding]::GetEncoding([System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).GetString($Bytes)
@@ -151,7 +216,11 @@ function ConvertFrom-TuneupToolOutput {
 }
 
 function Invoke-TuneupHealthTool {
-    param([Parameter(Mandatory)][string]$FilePath, [Parameter(Mandatory)][string[]]$Arguments)
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [ValidateSet('Auto', 'Unicode', 'Oem')][string]$Encoding = 'Auto'
+    )
     $info = New-Object System.Diagnostics.ProcessStartInfo
     $info.FileName = $FilePath
     $info.Arguments = $Arguments -join ' '
@@ -164,26 +233,42 @@ function Invoke-TuneupHealthTool {
     try {
         $process.StandardOutput.BaseStream.CopyTo($buffer)
         $process.WaitForExit()
-        [pscustomobject]@{ ExitCode = $process.ExitCode; Output = (ConvertFrom-TuneupToolOutput -Bytes $buffer.ToArray()) }
+        [pscustomobject]@{ ExitCode = $process.ExitCode; Output = (ConvertFrom-TuneupToolOutput -Bytes $buffer.ToArray() -Encoding $Encoding) }
     } finally {
         $process.Dispose()
         $buffer.Dispose()
     }
 }
 
+# A 32-bit PowerShell on 64-bit Windows would be sent to the 32-bit sfc and DISM, which refuse to run.
+function Get-TuneupSystemToolPath {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [bool]$Is64BitOperatingSystem = [Environment]::Is64BitOperatingSystem,
+        [bool]$Is64BitProcess = [Environment]::Is64BitProcess
+    )
+    $folder = $(if ($Is64BitOperatingSystem -and -not $Is64BitProcess) { 'Sysnative' } else { 'System32' })
+    Join-Path $env:SystemRoot "$folder\$Name"
+}
+
 function Invoke-TuneupSfc {
-    Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\sfc.exe') -Arguments @('/scannow')
+    Invoke-TuneupHealthTool -FilePath (Get-TuneupSystemToolPath -Name 'sfc.exe') -Arguments @('/scannow') -Encoding Unicode
 }
 
 function Invoke-TuneupDism {
     param([Parameter(Mandatory)][ValidateSet('ScanHealth', 'RestoreHealth')][string]$Operation)
-    Invoke-TuneupHealthTool -FilePath (Join-Path $env:SystemRoot 'System32\Dism.exe') -Arguments @('/Online', '/Cleanup-Image', "/$Operation", '/English')
+    Invoke-TuneupHealthTool -FilePath (Get-TuneupSystemToolPath -Name 'Dism.exe') -Arguments @('/Online', '/Cleanup-Image', "/$Operation", '/English') -Encoding Oem
 }
 
 function Get-TuneupLogTime {
     # CBS.log has one-second resolution.
     $now = Get-Date
     $now.AddTicks(-($now.Ticks % [TimeSpan]::TicksPerSecond))
+}
+
+function Format-TuneupExitCodeHex {
+    param([Parameter(Mandatory)][int]$ExitCode)
+    '0x{0:x}' -f $ExitCode
 }
 
 function New-TuneupHealthScan {
@@ -197,26 +282,30 @@ function New-TuneupHealthScan {
     [pscustomobject]@{
         sfc               = [pscustomobject]@{
             exitCode        = $SfcRun.ExitCode
+            exitCodeHex     = Format-TuneupExitCodeHex -ExitCode $SfcRun.ExitCode
             status          = $sfc.status
             repairedFiles   = $sfc.repairedFiles
             unrepairedFiles = $sfc.unrepairedFiles
             output          = $(if ($SfcRun.ExitCode) { $SfcRun.Output } else { $null })
         }
         componentStore    = [pscustomobject]@{
-            exitCode  = $DismRun.ExitCode
-            state     = $store.state
-            operation = $store.operation
-            detected  = $store.detected
-            repaired  = $store.repaired
-            output    = $(if ($DismRun.ExitCode) { $DismRun.Output } else { $null })
+            exitCode        = $DismRun.ExitCode
+            exitCodeHex     = Format-TuneupExitCodeHex -ExitCode $DismRun.ExitCode
+            state           = $store.state
+            operation       = $store.operation
+            operationResult = $store.result
+            detected        = $store.detected
+            repaired        = $store.repaired
+            output          = $(if ($DismRun.ExitCode) { $DismRun.Output } else { $null })
         }
         corruptComponents = @(Get-TuneupCorruptComponentGroup -Lines $Lines)
     }
 }
 
+# An unknown result is not repaired blindly: the logs have to be checked first.
 function Test-TuneupHealthNeedsRepair {
     param([Parameter(Mandatory)]$Scan)
-    ($Scan.componentStore.state -ne 'healthy') -or ($Scan.sfc.status -eq 'unrepaired')
+    ($Scan.componentStore.state -eq 'repairable') -or ($Scan.componentStore.state -eq 'unrepairable') -or ($Scan.sfc.status -eq 'unrepaired')
 }
 
 function Get-TuneupHealthRecommendation {
@@ -224,25 +313,30 @@ function Get-TuneupHealthRecommendation {
     $store = $Scan.componentStore.state
     $sfc = $Scan.sfc.status
     if ($store -eq 'unrepairable') { return 'manual-repair' }
-    # SFC exit codes are not documented, so only DISM's decides; SFC's result comes from CBS.log.
-    if ($store -eq 'unknown' -or $sfc -eq 'unknown' -or $Scan.componentStore.exitCode) { return 'check-logs' }
+    # Known damage comes before an unreadable result of the other tool.
     if ($store -eq 'repairable' -or $sfc -eq 'unrepaired') {
         if ($RepairRan) { return 'manual-repair' }
         return 'run-repair'
     }
+    # SFC exit codes are not documented, so only DISM's decides; SFC's result comes from CBS.log.
+    if ($store -eq 'unknown' -or $sfc -eq 'unknown' -or $Scan.componentStore.exitCode) { return 'check-logs' }
     'none'
 }
 
 function Invoke-TuneupHealth {
-    param([switch]$Repair)
+    param([switch]$Repair, [scriptblock]$OnPhase)
     $started = Get-TuneupLogTime
+    if ($OnPhase) { & $OnPhase 'sfc' }
     $sfcRun = Invoke-TuneupSfc
+    if ($OnPhase) { & $OnPhase 'dismScan' }
     $dismRun = Invoke-TuneupDism -Operation 'ScanHealth'
     $scanned = Get-TuneupLogTime
     $before = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $started -Until $scanned) -SfcRun $sfcRun -DismRun $dismRun
     $after = $null
     if ($Repair -and (Test-TuneupHealthNeedsRepair -Scan $before)) {
+        if ($OnPhase) { & $OnPhase 'dismRestore' }
         $restoreRun = Invoke-TuneupDism -Operation 'RestoreHealth'
+        if ($OnPhase) { & $OnPhase 'sfcAgain' }
         $sfcAgain = Invoke-TuneupSfc
         $after = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $scanned) -SfcRun $sfcAgain -DismRun $restoreRun
     }

@@ -243,19 +243,49 @@ function Write-TuneupErrorReport {
     foreach ($detail in $Details) { Write-Host "  - $detail" -ForegroundColor Red }
 }
 
+# The message that has a singular form is chosen by the count it talks about.
+function Get-TuneupCountKey {
+    param([Parameter(Mandatory)][string]$Key, $Count)
+    $(if ($null -ne $Count -and [int]$Count -eq 1) { "$Key.one" } else { $Key })
+}
+
+function Get-TuneupStoreTextKey {
+    param([Parameter(Mandatory)]$Store, [bool]$RepairRequested)
+    switch ($Store.state) {
+        'repairable' { Get-TuneupCountKey -Key $(if ($RepairRequested) { 'health.store.repairableNow' } else { 'health.store.repairable' }) -Count $Store.detected }
+        'repaired' { Get-TuneupCountKey -Key 'health.store.repaired' -Count $Store.detected }
+        'unrepairable' { if ($Store.operationResult -and $Store.operationResult -ne '0x0') { 'health.store.failed' } else { 'health.store.unrepairable' } }
+        default { "health.store.$($Store.state)" }
+    }
+}
+
+function Format-TuneupToolCode {
+    param([Parameter(Mandatory)]$Code, $Hex)
+    $(if ($Hex) { "$Code ($Hex)" } else { "$Code" })
+}
+
 function Write-TuneupHealthScan {
-    param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Scan)
+    param([Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)]$Scan, [switch]$RepairRequested)
     Write-Host $Title
     $sfcColor = $(if ($Scan.sfc.status -eq 'unrepaired' -or $Scan.sfc.status -eq 'unknown') { 'Yellow' } else { 'Gray' })
     Write-Host (Get-TuneupText -Key "health.sfc.$($Scan.sfc.status)") -ForegroundColor $sfcColor
     foreach ($file in @($Scan.sfc.repairedFiles)) { Write-Host (Get-TuneupText -Key 'health.repairedFile' -Format $file) }
     foreach ($file in @($Scan.sfc.unrepairedFiles)) { Write-Host (Get-TuneupText -Key 'health.unrepairedFile' -Format $file) -ForegroundColor Red }
-    if ($Scan.sfc.output) { Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'SFC', $Scan.sfc.exitCode, $Scan.sfc.output) -ForegroundColor DarkGray }
+    if ($Scan.sfc.output) {
+        $code = Format-TuneupToolCode -Code $Scan.sfc.exitCode -Hex $Scan.sfc.exitCodeHex
+        Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'SFC', $code, $Scan.sfc.output) -ForegroundColor DarkGray
+    }
     $store = $Scan.componentStore
     $storeColor = $(if ($store.state -eq 'healthy' -or $store.state -eq 'repaired') { 'Gray' } else { 'Yellow' })
-    Write-Host (Get-TuneupText -Key "health.store.$($store.state)" -Format $store.detected, $store.repaired) -ForegroundColor $storeColor
-    foreach ($group in @($Scan.corruptComponents)) { Write-Host (Get-TuneupText -Key 'health.group' -Format $group.name, $group.files) }
-    if ($store.output) { Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'DISM', $store.exitCode, $store.output) -ForegroundColor Red }
+    $storeKey = Get-TuneupStoreTextKey -Store $store -RepairRequested:$RepairRequested
+    Write-Host (Get-TuneupText -Key $storeKey -Format $store.detected, $store.repaired, $store.operationResult) -ForegroundColor $storeColor
+    foreach ($group in @($Scan.corruptComponents)) {
+        Write-Host (Get-TuneupText -Key (Get-TuneupCountKey -Key 'health.group' -Count $group.files) -Format $group.name, $group.files)
+    }
+    if ($store.output) {
+        $code = Format-TuneupToolCode -Code $store.exitCode -Hex $store.exitCodeHex
+        Write-Host (Get-TuneupText -Key 'health.toolError' -Format 'DISM', $code, $store.output) -ForegroundColor Red
+    }
 }
 
 function Write-TuneupHealthReport {
@@ -265,7 +295,7 @@ function Write-TuneupHealthReport {
         [switch]$Json
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
-    Write-TuneupHealthScan -Title (Get-TuneupText -Key 'health.before') -Scan $Report.before
+    Write-TuneupHealthScan -Title (Get-TuneupText -Key 'health.before') -Scan $Report.before -RepairRequested:$Report.repairRequested
     if ($Report.repairRan) {
         Write-TuneupHealthScan -Title (Get-TuneupText -Key 'health.after') -Scan $Report.after
     } elseif ($Report.repairRequested) {
@@ -273,6 +303,10 @@ function Write-TuneupHealthReport {
     }
     Write-Host ''
     $color = $(if ($Report.recommendation -eq 'none') { 'Green' } else { 'Yellow' })
-    Write-Host (Get-TuneupText -Key "health.recommendation.$($Report.recommendation)") -ForegroundColor $color
+    $final = $(if ($Report.repairRan) { $Report.after } else { $Report.before })
+    $key = "health.recommendation.$($Report.recommendation)"
+    # A manual repair is about DISM unless the store is fine and only SFC could not repair something.
+    if ($Report.recommendation -eq 'manual-repair' -and $final.componentStore.state -ne 'unrepairable') { $key = 'health.recommendation.manual-repair-sfc' }
+    Write-Host (Get-TuneupText -Key $key) -ForegroundColor $color
     if ($Report.rebootRecommended) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
 }

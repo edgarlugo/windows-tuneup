@@ -1,0 +1,9 @@
+2026-09-30 11:16:19, Info                  CSI    00000216 [SR] Verifying 100 components
+2026-09-30 11:16:19, Info                  CSI    00000217 [SR] Beginning Verify and Repair transaction
+2026-09-30 11:16:19, Info                  CSI    00000218 [SR] Cannot repair member file [l:11]'pbrpwbt.exe' of Microsoft-Windows-PbrpWBT, version 10.0.19041.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch
+2026-09-30 11:16:19, Info                  CSI    00000219 [SR] Verify complete
+2026-09-30 11:16:19, Info                  CSI    0000021a [SR] Repairing 1 components
+2026-09-30 11:16:19, Info                  CSI    0000021b [SR] Beginning Verify and Repair transaction
+2026-09-30 11:16:19, Info                  CSI    0000021c [SR] Cannot repair member file [l:11]'pbrpwbt.exe' of Microsoft-Windows-PbrpWBT, version 10.0.19041.1, arch amd64, nonSxS, pkt {l:8 b:31bf3856ad364e35} in the store, hash mismatch
+2026-09-30 11:16:19, Info                  CSI    0000021d [SR] Repairing corrupted file \??\C:\WINDOWS\System32\opencl.dll from store
+2026-09-30 11:16:19, Info                  CSI    0000021e [SR] Repair complete

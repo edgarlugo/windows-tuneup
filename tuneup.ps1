@@ -138,7 +138,10 @@ try {
     if ($Health) {
         if (-not $environment.IsAdmin) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.healthNeedsAdmin') }
         if (-not $Json) { Write-Host (Get-TuneupText -Key 'health.running') }
-        $healthReport = Invoke-TuneupStep { Invoke-TuneupHealth -Repair:$Repair }
+        # One line per phase for people; with -Json nothing but the document goes to the output.
+        $phaseArguments = @{}
+        if (-not $Json) { $phaseArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+        $healthReport = Invoke-TuneupStep { Invoke-TuneupHealth -Repair:$Repair @phaseArguments }
         Write-TuneupHealthReport -Report $healthReport -Warnings $script:Warnings.ToArray() -Json:$Json
         exit (Get-TuneupHealthExitCode -Report $healthReport)
     }
