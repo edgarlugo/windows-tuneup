@@ -20,7 +20,8 @@ param(
     [switch]$Force,
     [string]$StateRoot,
     [string]$CatalogPath,
-    [string]$ProfilesPath
+    [string]$ProfilesPath,
+    [string]$ActionsPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -68,18 +69,16 @@ $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
 $Include = @(Get-TuneupCleanList ($Include -split ','))
 $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
 
-$conflict = $null
-if ($Tweak -and -not $Undo) { $conflict = '-Tweak (-Undo)' }
-elseif ($Status -and $Undo) { $conflict = '-Status -Undo' }
-elseif ($Status -or $Undo) {
-    $extra = @()
-    if ($ProfileName.Count) { $extra += '-Profile' }
-    if ($Include.Count) { $extra += '-Include' }
-    if ($Exclude.Count) { $extra += '-Exclude' }
-    if ($WhatIf) { $extra += '-WhatIf' }
-    if ($Yes) { $extra += '-Yes' }
-    if ($extra.Count) { $conflict = (@($(if ($Status) { '-Status' } else { '-Undo' })) + $extra) -join ' ' }
-}
+$present = @()
+if ($ProfileName.Count) { $present += 'Profile' }
+if ($Include.Count) { $present += 'Include' }
+if ($Exclude.Count) { $present += 'Exclude' }
+if ($WhatIf) { $present += 'WhatIf' }
+if ($Yes) { $present += 'Yes' }
+if ($Status) { $present += 'Status' }
+if ($Undo) { $present += 'Undo' }
+if ($Tweak) { $present += 'Tweak' }
+$conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
 try {
@@ -88,6 +87,14 @@ try {
     if ($StateRoot) { $StateRoot = $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) }
     $CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $PSScriptRoot 'catalog' })
     $ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $PSScriptRoot 'profiles' })
+    if ($ActionsPath) {
+        # Tests and development only, like -StateRoot: action scripts from another folder.
+        $ActionsPath = $pathApi.GetUnresolvedProviderPathFromPSPath($ActionsPath)
+        if (-not (Test-Path -LiteralPath $ActionsPath -PathType Container)) {
+            Stop-Tuneup -Message (Get-TuneupText -Key 'err.actionsPathMissing' -Format $ActionsPath)
+        }
+        Invoke-TuneupStep { Import-TuneupActionLibrary -Path $ActionsPath }
+    }
 
     $environment = Invoke-TuneupStep { Get-TuneupEnvironment }
 

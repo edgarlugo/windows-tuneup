@@ -10,9 +10,9 @@ BeforeAll {
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:SubKey = 'HKCU:\Software\windows-tuneup-test\Sub'
     $script:PowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en', [string]$Catalog = (Join-Path $Fixtures 'catalog')) {
+    function Invoke-Tuneup([string[]]$Arguments, [string]$Lang = 'en', [string]$Catalog = (Join-Path $Fixtures 'catalog'), [string]$Actions = (Join-Path $Fixtures 'actions')) {
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
-            -CatalogPath $Catalog -ProfilesPath (Join-Path $Fixtures 'profiles') `
+            -CatalogPath $Catalog -ProfilesPath (Join-Path $Fixtures 'profiles') -ActionsPath $Actions `
             -StateRoot $script:Root -Force -Lang $Lang @Arguments
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output -join "`n") }
     }
@@ -55,6 +55,28 @@ Describe 'tuneup.ps1' {
         Remove-TestKey
     }
 
+    It 'plans an action tweak loaded from -ActionsPath' {
+        $result = Invoke-Tuneup @('-Include', 'test.action', '-WhatIf', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        ($json.items | Where-Object { $_.id -eq 'test.action' }).action | Should -Be 'apply'
+        $json.requiresAdmin | Should -BeTrue
+    }
+
+    It 'refuses an actions folder with a script that runs code' {
+        $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $actions | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $actions 'bad-one.ps1'), 'Write-Output hello')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $actions
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'may only define functions'
+    }
+
+    It 'says when the actions folder does not exist' {
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions (Join-Path $TestDrive 'no-such-actions')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'actions folder'
+    }
     It 'shows the plan as JSON without changing anything' {
         $result = Invoke-Tuneup @('-WhatIf', '-Json')
         $result.ExitCode | Should -Be 0

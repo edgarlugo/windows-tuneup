@@ -54,6 +54,17 @@
       "set": { "path": "HKLM:\\SOFTWARE\\windows-tuneup-test", "name": "Machine", "kind": "DWord", "value": 1 },
       "rebootRequired": false,
       "sources": ["https://example.com/test"]
+    },
+    {
+      "id": "test.action",
+      "title": { "es": "Prueba de acción", "en": "Action test" },
+      "why": { "es": "Prueba", "en": "Test" },
+      "risk": "low", "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "action", "scope": "machine",
+      "set": { "script": "fixture-toggle" },
+      "rebootRequired": false,
+      "sources": ["https://example.com/test"]
     }
   ]
 }

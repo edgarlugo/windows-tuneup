@@ -10,6 +10,7 @@
   "err.runNotFound": "Run {0} does not exist.",
   "err.runAlreadyUndone": "Run {0} was already undone.",
   "err.badArgs": "Invalid parameter combination: {0}",
+  "err.actionsPathMissing": "The actions folder {0} does not exist.",
   "undo.none": "There are no runs to undo.",
   "plan.header": "Plan: {0} to apply, {1} skipped",
   "plan.apply": "  + {0} [{1}]",
