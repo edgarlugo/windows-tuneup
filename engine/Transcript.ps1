@@ -46,7 +46,7 @@ function Get-TuneupApplyTranscript {
     Get-TuneupText -Key 'transcript.header' -Format (Get-TuneupVersion), $Run.Id, (Get-Date).ToString('s')
     Get-TuneupText -Key "transcript.request.$($Request.Source)" -Format (& $list $Request.Profiles), (& $list $Request.Include), (& $list $Request.Exclude)
     ''
-    $planArguments = @{ Plan = $Plan; Environment = $Environment }
+    $planArguments = @{ Plan = $Plan; Environment = $Environment; Preflight = @($Report.preflight) }
     Get-TuneupHostText -Step { Write-TuneupPlanReport @planArguments }
     ''
     $reportArguments = @{ Report = $Report }

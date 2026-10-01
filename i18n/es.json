@@ -137,5 +137,16 @@
   "transcript.request.profiles": "Pedido: perfiles {0}; incluidos {1}; excluidos {2}",
   "transcript.request.reapply": "Pedido: volver a aplicar lo que Windows revirtió ({1})",
   "transcript.warnings": "Avisos:",
-  "transcript.undo": "Deshacer con windows-tuneup {0} - {1}"
+  "transcript.undo": "Deshacer con windows-tuneup {0} - {1}",
+  "preflight.header": "Antes de aplicar:",
+  "preflight.pending-reboot": "Windows tiene un reinicio pendiente. Conviene reiniciar antes: algunos cambios (servicios, características) pueden fallar o quedar a medias.",
+  "preflight.low-disk": "Quedan {0} GB libres en el disco del sistema (menos de {1} GB): el punto de restauración y reinstalar apps al deshacer pueden fallar.",
+  "preflight.restore-disabled": "Restaurar sistema está desactivado en el disco del sistema: no habrá punto de restauración, solo el respaldo propio de windows-tuneup (-Undo).",
+  "preflight.restore-blocked": "Restaurar sistema está desactivado por una directiva: no habrá punto de restauración, solo el respaldo propio de windows-tuneup (-Undo).",
+  "preflight.managed-device": "Este equipo lo administra una organización (dominio o Intune): las directivas se omiten y otros cambios pueden ir contra sus reglas. Consulta con quien lo administra.",
+  "preflight.untrusted-location": "windows-tuneup corre como administrador desde {0}, una carpeta que otras cuentas pueden cambiar: instálalo en Program Files (README, Instalación).",
+  "preflight.enableRestore": "¿Activar Restaurar sistema en {0} antes de aplicar? (s/n)",
+  "preflight.restoreEnabled": "Restaurar sistema activado: se creará un punto de restauración.",
+  "preflight.restoreKeptOff": "Se sigue sin punto de restauración, solo con el respaldo de windows-tuneup.",
+  "preflight.restoreEnableFailed": "No se pudo activar Restaurar sistema: {0}"
 }

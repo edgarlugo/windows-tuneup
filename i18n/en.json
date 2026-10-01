@@ -137,5 +137,16 @@
   "transcript.request.profiles": "Asked for: profiles {0}; included {1}; excluded {2}",
   "transcript.request.reapply": "Asked for: apply again what Windows reverted ({1})",
   "transcript.warnings": "Warnings:",
-  "transcript.undo": "Undo with windows-tuneup {0} - {1}"
+  "transcript.undo": "Undo with windows-tuneup {0} - {1}",
+  "preflight.header": "Before applying:",
+  "preflight.pending-reboot": "Windows has a restart pending. It is better to restart first: some changes (services, features) may fail or be left half done.",
+  "preflight.low-disk": "{0} GB are free on the system drive (less than {1} GB): the restore point, and reinstalling apps when undoing, may fail.",
+  "preflight.restore-disabled": "System Restore is turned off on the system drive: there will be no restore point, only the backup of windows-tuneup itself (-Undo).",
+  "preflight.restore-blocked": "System Restore is turned off by a policy: there will be no restore point, only the backup of windows-tuneup itself (-Undo).",
+  "preflight.managed-device": "This PC is managed by an organization (domain or Intune): policies are skipped and other changes may go against its rules. Check with whoever manages it.",
+  "preflight.untrusted-location": "windows-tuneup runs as administrator from {0}, a folder that other accounts can change: install it under Program Files (README, Installation).",
+  "preflight.enableRestore": "Turn on System Restore on {0} before applying? (y/n)",
+  "preflight.restoreEnabled": "System Restore turned on: a restore point will be created.",
+  "preflight.restoreKeptOff": "Going on without a restore point, with the backup of windows-tuneup only.",
+  "preflight.restoreEnableFailed": "System Restore could not be turned on: {0}"
 }

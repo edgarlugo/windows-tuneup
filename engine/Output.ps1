@@ -52,6 +52,7 @@ function Write-TuneupPlanReport {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
         [switch]$Json
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
@@ -63,6 +64,7 @@ function Write-TuneupPlanReport {
             command       = 'plan'
             environment   = ConvertTo-TuneupEnvironmentView -Environment $Environment
             requiresAdmin = $requiresAdmin
+            preflight     = @($Preflight)
             items         = $items
             summary       = [pscustomobject]@{ apply = $toApply; skip = $items.Count - $toApply }
         }))
@@ -80,6 +82,7 @@ function Write-TuneupPlanReport {
     }
     if (-not $toApply) { Write-Host (Get-TuneupText -Key 'nothing') -ForegroundColor Green }
     if ($requiresAdmin -and -not $Environment.IsAdmin) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
+    Write-TuneupPreflight -Preflight $Preflight
 }
 
 function New-TuneupApplyReport {
@@ -87,7 +90,8 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)]$Run,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
         [Parameter(Mandatory)][string]$RestorePoint,
-        [Parameter(Mandatory)]$Environment
+        [Parameter(Mandatory)]$Environment,
+        [AllowEmptyCollection()][object[]]$Preflight = @()
     )
     # A tweak left out because its backup could not be written was not done: it is counted apart, and
     # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to
@@ -101,6 +105,7 @@ function New-TuneupApplyReport {
         runDir         = $Run.Dir
         finishedAt     = (Get-Date).ToString('s')
         environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
+        preflight      = @($Preflight)
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
         signOutRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.signOutRequired }).Count -gt 0)

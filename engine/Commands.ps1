@@ -17,6 +17,7 @@ function New-TuneupContext {
         Force        = $false
         Warnings     = New-Object System.Collections.Generic.List[string]
         Environment  = $null
+        ScriptRoot   = $null
         Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
         ExitCode     = 1
         Result       = $null
@@ -227,9 +228,12 @@ function Invoke-TuneupPlannedApply {
     )
     $environment = Get-TuneupContextEnvironment -Context $Context
     $toApply = @($Plan | Where-Object { $_.Action -eq 'apply' })
+    # Warnings before applying (Preflight.ps1): none of them stops the run.
+    $preflightArguments = @{ Environment = $environment; Plan = $Plan; ScriptRoot = $Context.ScriptRoot }
+    $preflight = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupPreflight @preflightArguments })
     if ($PlanOnly -or -not $toApply.Count) {
         $Context.Result = $null
-        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
         $Context.ExitCode = 0
         return
     }
@@ -243,12 +247,16 @@ function Invoke-TuneupPlannedApply {
             Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.jsonNeedsYes')
             return
         }
-        Write-TuneupPlanReport -Plan $Plan -Environment $environment
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight
+        # The only warning with something to do about it here: System Restore can be turned on first.
+        if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count) { Request-TuneupSystemRestore -Io $Context.Io | Out-Null }
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
             Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
         }
+    } elseif (-not $Context.Json) {
+        Write-TuneupPreflight -Preflight $preflight
     }
     # Elevated runs go to the protected machine folder; the rest to the user folder (user-scope tweaks only).
     $run = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRun -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
@@ -275,10 +283,10 @@ function Invoke-TuneupPlannedApply {
     } finally {
         Disable-TuneupInterruptTrap -Trap $trap
         if (-not $finished) {
-            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint
+            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint -Preflight $preflight
         }
     }
-    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment
+    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment -Preflight $preflight
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
     Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
     $Context.Result = $report
@@ -326,7 +334,8 @@ function Save-TuneupStoppedApply {
         [Parameter(Mandatory)]$Request,
         [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
         [Parameter(Mandatory)][hashtable]$Progress,
-        [Parameter(Mandatory)][string]$RestorePoint
+        [Parameter(Mandatory)][string]$RestorePoint,
+        [AllowEmptyCollection()][object[]]$Preflight = @()
     )
     $done = @($Results.ToArray())
     $doneIds = @($done | ForEach-Object { $_.id })
@@ -336,7 +345,7 @@ function Save-TuneupStoppedApply {
         elseif ($item.Id -eq $Progress.Current) { New-TuneupResult -Item $item -Status 'failed' -ErrorText 'stopped while it was being applied; -Undo can restore it' }
         else { New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted' }
     })
-    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment
+    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment -Preflight $Preflight
     $saved = $true
     try {
         Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $report
@@ -416,6 +425,7 @@ function Invoke-TuneupCli {
     # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
     $pathApi = $ExecutionContext.SessionState.Path
     $Context.Force = [bool]$Force
+    $Context.ScriptRoot = $ScriptRoot
     $Context.StateRoot = $(if ($StateRoot) { $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) } else { $null })
     $Context.CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $ScriptRoot 'catalog' })
     $Context.ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $ScriptRoot 'profiles' })
