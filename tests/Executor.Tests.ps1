@@ -327,3 +327,23 @@ Describe 'Invoke-TuneupPlan stopped with Ctrl+C' {
         $progress.Current | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Invoke-TuneupPlan -Progress and the journal' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'says the tweak was not journaled while its state is read, and journaled once it is saved' {
+        $progress = @{}
+        Mock -ModuleName Tuneup Get-TuneupState { throw "journaled=$($progress.Journaled)" } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw "journaled=$($progress.Journaled)" } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -Progress $progress)
+        $results[0].error | Should -Be 'journaled=False'
+        $results[1].error | Should -Be 'journaled=True'
+        $progress.Journaled | Should -BeFalse
+    }
+}

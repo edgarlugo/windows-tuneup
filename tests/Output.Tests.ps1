@@ -162,7 +162,7 @@ Describe 'Save-TuneupApplyReport' {
     }
 
     It 'warns instead of failing when result.json cannot be saved' {
-        Mock -ModuleName Tuneup Save-TuneupJson { throw [System.UnauthorizedAccessException]::new('Access denied') }
+        Mock -ModuleName Tuneup Write-TuneupRunResult { throw [System.UnauthorizedAccessException]::new('Access denied') }
         $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $TestDrive; Root = 'custom' }
         $saved = Save-TuneupApplyReport -Run $run -Report (New-TestReport @(New-TestResult -Status 'applied')) -WarningVariable warned -WarningAction SilentlyContinue
         $saved | Should -BeFalse

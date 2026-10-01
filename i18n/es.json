@@ -144,10 +144,15 @@
   "preflight.restore-disabled": "Restaurar sistema está desactivado en el disco del sistema: no habrá punto de restauración, solo el respaldo propio de windows-tuneup (-Undo).",
   "preflight.restore-blocked": "Restaurar sistema está desactivado por una directiva: no habrá punto de restauración, solo el respaldo propio de windows-tuneup (-Undo).",
   "preflight.managed-device": "Este equipo lo administra una organización (dominio o Intune): las directivas se omiten y otros cambios pueden ir contra sus reglas. Consulta con quien lo administra.",
-  "preflight.untrusted-location": "windows-tuneup corre como administrador desde {0}, una carpeta que otras cuentas pueden cambiar: instálalo en Program Files (README, Instalación).",
+  "preflight.untrusted-location": "windows-tuneup corre como administrador desde {0}, una carpeta (o archivos suyos) que procesos sin elevar, incluidos los tuyos, pueden cambiar: instálalo en Program Files (README, Instalación).",
   "preflight.enableRestore": "¿Activar Restaurar sistema en {0} antes de aplicar? (s/n)",
   "preflight.restoreEnabled": "Restaurar sistema activado: se creará un punto de restauración.",
   "preflight.restoreKeptOff": "Se sigue sin punto de restauración, solo con el respaldo de windows-tuneup.",
   "preflight.restoreEnableFailed": "No se pudo activar Restaurar sistema: {0}",
-  "reapply.none": "Nada que volver a aplicar: Windows no revirtió ningún ajuste."
+  "reapply.none": "Nada que volver a aplicar: Windows no revirtió ningún ajuste.",
+  "interrupted.hint": "Ctrl+C se detiene después del ajuste en curso; Ctrl+Pausa interrumpe de inmediato",
+  "aborted.saved": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla: .\tuneup.ps1 -Undo {0}",
+  "reason.aborted": "no se aplicó: la corrida se detuvo por un error",
+  "reapply.noneUnverified": "Nada que volver a aplicar entre lo que se pudo comprobar, pero {0} ajustes necesitan administrador para comprobarse: ejecútalo de nuevo como administrador.",
+  "reapply.leftOut": "No se vuelve a aplicar {0}: {1}"
 }

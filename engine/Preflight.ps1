@@ -59,13 +59,38 @@ function Enable-TuneupSystemRestore {
     Enable-ComputerRestore -Drive (Get-TuneupSystemDrive) -ErrorAction Stop
 }
 
+# A file or folder of the tool: not a link, and owned and changeable only by SYSTEM, TrustedInstaller
+# and Administrators.
+function Test-TuneupTrustedEntry {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        return $false
+    }
+    Test-TuneupTrustedSecurity -Security $security -TrustedSids $script:BaseTrustedSids -SkipInheritOnly
+}
+
 # Running elevated from a folder that others can change lets them run code as administrator (README,
-# requirements). Checked on the script and the module, like a program that runs elevated.
+# requirements). The script and the module are checked with their parent folders up to the root, like
+# a program that runs elevated, and so is everything else the tool loads or reads: the files of
+# engine, catalog, profiles, actions and i18n, and those folders themselves. Any one that a
+# non-elevated process can change makes the location untrusted.
 function Test-TuneupTrustedLocation {
     param([Parameter(Mandatory)][string]$ScriptRoot)
     $root = [System.IO.Path]::GetPathRoot($ScriptRoot)
-    (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'tuneup.ps1') -StopAt $root) -and
-    (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'engine\Tuneup.psm1') -StopAt $root)
+    if (-not (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'tuneup.ps1') -StopAt $root)) { return $false }
+    if (-not (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'engine\Tuneup.psm1') -StopAt $root)) { return $false }
+    foreach ($name in 'engine', 'catalog', 'profiles', 'actions', 'i18n') {
+        $folder = Join-Path $ScriptRoot $name
+        if (-not (Test-Path -LiteralPath $folder)) { continue }
+        foreach ($entry in @(Get-Item -LiteralPath $folder -Force) + @(Get-ChildItem -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue)) {
+            if (-not (Test-TuneupTrustedEntry -Path $entry.FullName)) { return $false }
+        }
+    }
+    $true
 }
 
 function New-TuneupPreflightItem {
@@ -95,7 +120,9 @@ function Get-TuneupPreflight {
     }
     if ($Environment.IsManaged) { New-TuneupPreflightItem -Key 'preflight.managed-device' }
     if ($Environment.IsAdmin -and $ScriptRoot -and -not (Test-TuneupTrustedLocation -ScriptRoot $ScriptRoot)) {
-        New-TuneupPreflightItem -Key 'preflight.untrusted-location' -Format $ScriptRoot
+        # The location is written without the profile folder or the account name: the warning ends up in
+        # the transcript, result.json and the JSON, which people share.
+        New-TuneupPreflightItem -Key 'preflight.untrusted-location' -Format (Hide-TuneupPersonalData -Text $ScriptRoot)
     }
 }
 

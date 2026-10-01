@@ -4,6 +4,29 @@
 # line and anything else on the screen, and Users can read the machine state folder. With -Json the
 # transcript still gets the text for people.
 
+# The text with the profile folder of the account shown as %USERPROFILE% and the account name shown as
+# %USERNAME%, wherever they are. What a run keeps for people to read and share (the transcript,
+# result.json, the warnings of a preflight) goes through here, so a bug report does not carry the
+# account name inside a path. A name of fewer than 3 characters is left alone: it would also change
+# ordinary words. With -JsonEscaped the profile folder is looked for as JSON writes it (doubled
+# backslashes).
+function Hide-TuneupPersonalData {
+    param([AllowNull()][AllowEmptyString()][string]$Text, [switch]$JsonEscaped)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $ignoreCase = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    $folders = @(@($env:USERPROFILE, [Environment]::GetFolderPath('UserProfile')) | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') } |
+        Select-Object -Unique | Sort-Object -Property Length -Descending)
+    foreach ($folder in $folders) {
+        $literal = $(if ($JsonEscaped) { $folder.Replace('\', '\\') } else { $folder })
+        $Text = [regex]::Replace($Text, [regex]::Escape($literal), '%USERPROFILE%', $ignoreCase)
+    }
+    $name = [string]$env:USERNAME
+    if ($name.Length -ge 3) {
+        $Text = [regex]::Replace($Text, '(?<![A-Za-z0-9])' + [regex]::Escape($name) + '(?![A-Za-z0-9])', '%USERNAME%', $ignoreCase)
+    }
+    $Text
+}
+
 # The lines that a step writes to the host, captured instead of shown.
 function Get-TuneupHostText {
     param([Parameter(Mandatory)][scriptblock]$Step)
@@ -27,7 +50,7 @@ function Get-TuneupHostText {
 
 function Add-TuneupTranscript {
     param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines)
-    $text = (@($Lines) -join [Environment]::NewLine) + [Environment]::NewLine
+    $text = Hide-TuneupPersonalData -Text ((@($Lines) -join [Environment]::NewLine) + [Environment]::NewLine)
     Write-TuneupStateFile -Path (Join-Path $Run.Dir 'transcript.log') -Root $Run.Root -Append -Text $text
 }
 

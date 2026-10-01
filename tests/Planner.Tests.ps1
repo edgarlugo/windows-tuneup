@@ -47,6 +47,13 @@ Describe 'New-TuneupPlan' {
         @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Environment (New-TestEnvironment) -TestState $NotApplied -NoBase).Count | Should -Be 0
     }
 
+    It 'plans -Candidates in their order, like a profile does: not asked for by name, so asks and high risk stay out' {
+        $plan = @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Candidates @('ui.b', 'gaming.vbs-off', 'apps.onedrive', 'ui.a') -Environment (New-TestEnvironment) -TestState $NotApplied -NoBase)
+        ($plan | ForEach-Object { "$($_.Id)=$($_.Action)/$($_.Reason)" }) -join ',' |
+            Should -Be 'ui.b=apply/,gaming.vbs-off=skip/high-risk-not-requested,apps.onedrive=skip/needs-confirmation,ui.a=apply/'
+        { New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Candidates @('ui.nope') -Environment (New-TestEnvironment) -TestState $NotApplied } | Should -Throw '*ui.nope*'
+    }
+
     It 'resolves profile aliases case-insensitively' {
         $plan = Invoke-Plan -ProfileIds 'JUEGOS'
         ($plan | ForEach-Object { $_.Id }) -join ',' | Should -Be 'ui.a,ui.b'

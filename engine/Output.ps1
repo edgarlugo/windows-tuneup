@@ -128,11 +128,20 @@ function New-TuneupApplyReport {
     }
 }
 
+# Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData):
+# the file is meant to be read and shared, and the run folder it names is under the profile of the
+# account. Fails when it cannot be written.
+function Write-TuneupRunResult {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    $json = Hide-TuneupPersonalData -Text (ConvertTo-Json -InputObject $Report -Depth 10) -JsonEscaped
+    Write-TuneupStateFile -Path (Join-Path $Run.Dir 'result.json') -Text $json -Root $Run.Root
+}
+
 function Save-TuneupApplyReport {
     param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
     # The changes are already made; losing result.json must not hide the report of what was done.
     try {
-        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $Report
+        Write-TuneupRunResult -Run $Run -Report $Report
         $true
     } catch {
         Write-Warning "The result of run $($Run.Id) could not be saved: $($_.Exception.Message)"

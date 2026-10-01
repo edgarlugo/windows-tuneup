@@ -78,9 +78,13 @@ function Invoke-TuneupStatusCommand {
 # warning: undoing the run that applied it restores it.
 function Invoke-TuneupReapply {
     param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$PlanOnly, [switch]$Yes)
-    $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Sort-Object -Unique)
+    # In the order of the runs that applied them, not alphabetical.
+    $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Select-Object -Unique)
     if (-not $drifted.Count -and -not $Context.Json) {
-        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'reapply.none')
+        # Without administrator some tweaks cannot be checked: that is not the same as nothing to do.
+        $unverified = @($Items | Where-Object { $_.status -eq 'needs-admin' }).Count
+        $line = $(if ($unverified) { Get-TuneupText -Key 'reapply.noneUnverified' -Format $unverified } else { Get-TuneupText -Key 'reapply.none' })
+        Write-TuneupIoLine -Io $Context.Io -Text $line
         $Context.ExitCode = 0
         return
     }
@@ -103,8 +107,16 @@ function Invoke-TuneupReapply {
         }
     }
     $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
-    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Include $ids -NoBase)
+    # Named like a profile names them, not asked for: a tweak that asks first or has high risk is left
+    # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those.
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -NoBase)
     $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids
+    if ($Yes -and -not $PlanOnly -and -not $Context.Json) {
+        # With -Yes the plan is not shown, so what is left out is listed here.
+        foreach ($item in @($plan | Where-Object { $_.Action -eq 'skip' -and @('needs-confirmation', 'high-risk-not-requested') -contains $_.Reason })) {
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'reapply.leftOut' -Format (Get-TuneupTitle -Tweak $item.Tweak), (Get-TuneupText -Key "reason.$($item.Reason)"))
+        }
+    }
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
 }
 
@@ -209,6 +221,7 @@ function New-TuneupContextPlan {
         [AllowEmptyCollection()][string[]]$ProfileIds = @(),
         [AllowEmptyCollection()][string[]]$Include = @(),
         [AllowEmptyCollection()][string[]]$Exclude = @(),
+        [AllowEmptyCollection()][string[]]$Candidates = @(),
         [switch]$Interactive,
         [switch]$NoBase
     )
@@ -218,6 +231,7 @@ function New-TuneupContextPlan {
         ProfileIds  = $ProfileIds
         Include     = $Include
         Exclude     = $Exclude
+        Candidates  = $Candidates
         Environment = Get-TuneupContextEnvironment -Context $Context
         Interactive = $Interactive
         NoBase      = $NoBase
@@ -294,12 +308,16 @@ function Invoke-TuneupPlannedApply {
             return
         }
         Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight
-        # The only warning with something to do about it here: System Restore can be turned on first.
-        if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count) { Request-TuneupSystemRestore -Io $Context.Io | Out-Null }
         if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
             Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
             $Context.ExitCode = 1
             return
+        }
+        # The only warning with something to do about it here: System Restore can be turned on. It is
+        # asked after the apply is confirmed, so declining the apply never leaves it on, and once it is
+        # on the warning is no longer true and leaves the report of the run.
+        if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count -and (Request-TuneupSystemRestore -Io $Context.Io)) {
+            $preflight = @($preflight | Where-Object { $_.id -ne 'restore-disabled' })
         }
     } elseif (-not $Context.Json) {
         Write-TuneupPreflight -Preflight $preflight
@@ -315,6 +333,7 @@ function Invoke-TuneupPlannedApply {
     $results = New-Object System.Collections.Generic.List[object]
     $progress = @{ Current = $null }
     $trap = Enable-TuneupInterruptTrap
+    if ($null -ne $trap -and -not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.hint') }
     $applyArguments = @{
         Plan          = $Plan
         RunDir        = $run.Dir
@@ -323,13 +342,18 @@ function Invoke-TuneupPlannedApply {
         StopRequested = { Test-TuneupInterruptRequested -Trap $trap }
     }
     $finished = $false
+    $failure = $null
     try {
         Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupPlan @applyArguments } | Out-Null
         $finished = $true
+    } catch {
+        # Ctrl+C that stops PowerShell is not an error of the apply; any other error is saved as one.
+        if ($_.Exception -isnot [System.Management.Automation.PipelineStoppedException]) { $failure = $_.Exception.Message }
+        throw
     } finally {
         Disable-TuneupInterruptTrap -Trap $trap
         if (-not $finished) {
-            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint -Preflight $preflight
+            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint -Preflight $preflight -Failure $failure
         }
     }
     $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment -Preflight $preflight -Source $Request.Source
@@ -369,9 +393,11 @@ function Save-TuneupUndoTranscript {
 }
 
 # Ctrl+C reached PowerShell itself while a native program ran (Interrupt.ps1), or the apply failed
-# outside any one tweak. What was done is saved as the result of the run: the tweak in progress is
-# reported as failed (its journal entry lets -Undo restore it) and the rest as interrupted. The output
-# is closed by then (a stopped pipeline), so only the host and the files can be written.
+# outside any one tweak (-Failure holds the error). What was done is saved as the result of the run:
+# the tweak in progress is reported as failed when its journal entry was written (-Undo can restore
+# it) and the rest as interrupted by Ctrl+C or as aborted by the error. A tweak cut before its journal
+# entry changed nothing, so it is only left out. The output is closed by then (a stopped pipeline),
+# so only the host and the files can be written.
 function Save-TuneupStoppedApply {
     param(
         [Parameter(Mandatory)]$Context,
@@ -381,20 +407,23 @@ function Save-TuneupStoppedApply {
         [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
         [Parameter(Mandatory)][hashtable]$Progress,
         [Parameter(Mandatory)][string]$RestorePoint,
-        [AllowEmptyCollection()][object[]]$Preflight = @()
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [string]$Failure
     )
     $done = @($Results.ToArray())
     $doneIds = @($done | ForEach-Object { $_.id })
     $rest = @(foreach ($item in $Plan) {
         if ($doneIds -contains $item.Id) { continue }
         if ($item.Action -ne 'apply') { New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason }
-        elseif ($item.Id -eq $Progress.Current) { New-TuneupResult -Item $item -Status 'failed' -ErrorText 'stopped while it was being applied; -Undo can restore it' }
-        else { New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted' }
+        elseif ($item.Id -eq $Progress.Current -and $Progress.Journaled) {
+            New-TuneupResult -Item $item -Status 'failed' -ErrorText $(if ($Failure) { "$Failure; -Undo can restore it" } else { 'stopped while it was being applied; -Undo can restore it' })
+        }
+        else { New-TuneupResult -Item $item -Status 'skipped' -Reason $(if ($Failure) { 'aborted' } else { 'interrupted' }) }
     })
     $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment -Preflight $Preflight -Source $Request.Source
     $saved = $true
     try {
-        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $report
+        Write-TuneupRunResult -Run $Run -Report $report
     } catch {
         $saved = $false
     }
@@ -407,7 +436,9 @@ function Save-TuneupStoppedApply {
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
-    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.saved' -Format $Run.Id) }
+    if (-not $Context.Json) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' }) -Format $Run.Id)
+    }
 }
 
 # The command line: checks the parameters, resolves the folders, loads the actions of -ActionsPath and

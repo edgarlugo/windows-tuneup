@@ -144,10 +144,15 @@
   "preflight.restore-disabled": "System Restore is turned off on the system drive: there will be no restore point, only the backup of windows-tuneup itself (-Undo).",
   "preflight.restore-blocked": "System Restore is turned off by a policy: there will be no restore point, only the backup of windows-tuneup itself (-Undo).",
   "preflight.managed-device": "This PC is managed by an organization (domain or Intune): policies are skipped and other changes may go against its rules. Check with whoever manages it.",
-  "preflight.untrusted-location": "windows-tuneup runs as administrator from {0}, a folder that other accounts can change: install it under Program Files (README, Installation).",
+  "preflight.untrusted-location": "windows-tuneup runs as administrator from {0}, a folder (or files in it) that non-elevated processes (including your own) can change: install it under Program Files (README, Installation).",
   "preflight.enableRestore": "Turn on System Restore on {0} before applying? (y/n)",
   "preflight.restoreEnabled": "System Restore turned on: a restore point will be created.",
   "preflight.restoreKeptOff": "Going on without a restore point, with the backup of windows-tuneup only.",
   "preflight.restoreEnableFailed": "System Restore could not be turned on: {0}",
-  "reapply.none": "Nothing to apply again: Windows reverted no tweak."
+  "reapply.none": "Nothing to apply again: Windows reverted no tweak.",
+  "interrupted.hint": "Ctrl+C stops after the tweak in progress; Ctrl+Break interrupts at once",
+  "aborted.saved": "The run stopped because of an error. The result of run {0} was saved; to undo it: .\tuneup.ps1 -Undo {0}",
+  "reason.aborted": "not applied: the run stopped because of an error",
+  "reapply.noneUnverified": "Nothing to apply again among what could be checked, but {0} tweaks need administrator to be checked: run it again as administrator.",
+  "reapply.leftOut": "Not applied again, {0}: {1}"
 }

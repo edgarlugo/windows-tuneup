@@ -51,9 +51,11 @@ function Test-TuneupStateUnchanged {
 
 # Applies the plan in order. -StopRequested is asked before each tweak to apply: once it says yes
 # (Ctrl+C, see Interrupt.ps1), that tweak and the rest are left out with the reason interrupted. Each
-# result is also added to -Results when given, and -Progress.Current names the tweak being applied
-# (from its journal entry to its result), so a caller whose pipeline was stopped can still tell what
-# was done and which tweak was cut.
+# result is also added to -Results when given, and -Progress names the tweak being applied
+# (Current, from before its state is read to its result) and whether its journal entry was already
+# written (Journaled), so a caller whose pipeline was stopped can still tell what was done, which
+# tweak was cut and whether -Undo can restore it. A result is added to -Results before Current is
+# cleared, so a stop in between never loses a tweak that was done.
 function Invoke-TuneupPlan {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
@@ -69,6 +71,7 @@ function Invoke-TuneupPlan {
     $interrupted = $false
     foreach ($item in $Plan) {
         $Progress.Current = $null
+        $Progress.Journaled = $false
         if ($item.Action -ne 'apply') {
             $result = New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason
         } elseif ($interrupted -or ($StopRequested -and (& $StopRequested))) {
@@ -78,18 +81,19 @@ function Invoke-TuneupPlan {
             $result = New-TuneupResult -Item $item -Status 'skipped' -Reason 'journal-error' -ErrorText $journalError
         } else {
             $Progress.Current = $item.Id
-            $result = Invoke-TuneupPlanItem -Item $item -Journal $journal -RunDir $RunDir
+            $result = Invoke-TuneupPlanItem -Item $item -Journal $journal -RunDir $RunDir -Progress $Progress
             if ($result.reason -eq 'journal-error') { $journalError = $result.error }
         }
-        $Progress.Current = $null
         $Results.Add($result)
+        $Progress.Current = $null
+        $Progress.Journaled = $false
         $result
     }
 }
 
 # One tweak: read its state, journal it, apply it and check it.
 function Invoke-TuneupPlanItem {
-    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$Journal, [Parameter(Mandatory)][string]$RunDir)
+    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$Journal, [Parameter(Mandatory)][string]$RunDir, [hashtable]$Progress)
     $tweak = $Item.Tweak
     try {
         $state = Get-TuneupState -Tweak $tweak
@@ -101,6 +105,7 @@ function Invoke-TuneupPlanItem {
     } catch {
         return (New-TuneupResult -Item $Item -Status 'skipped' -Reason 'journal-error' -ErrorText $_.Exception.Message)
     }
+    if ($null -ne $Progress) { $Progress.Journaled = $true }
     try {
         # Set may report through New-TuneupOutcome that it changed something but could not finish
         # (partial) or that Windows asked for a restart; any other output is ignored.

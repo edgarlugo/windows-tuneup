@@ -93,6 +93,7 @@ try {
     Invoke-TuneupCli -Context $context -ScriptRoot $Repo -Yes -Force -StateRoot $StateRoot `
         -CatalogPath (Join-Path $Repo 'tests\fixtures\catalog') -ProfilesPath (Join-Path $Repo 'tests\fixtures\profiles') `
         -ActionsPath (Join-Path $Repo 'tests\fixtures\actions') | Out-Null
+    Save-Line "trapAfter=$([Console]::TreatControlCAsInput)"
     Save-Line 'completed=True'
 } finally {
     Save-Line "exit=$($context.ExitCode)"
@@ -146,6 +147,8 @@ Describe 'Ctrl+C while applying' {
         if ($run.Seen['redirected'] -eq 'True') { Set-ItResult -Skipped -Because 'the harness got no console of its own'; return }
         $run.ExitCode | Should -Be 2 -Because $run.Text
         $run.Seen['completed'] | Should -Be 'True'
+        # The trap is off again once the command is done, so the console keeps its usual Ctrl+C.
+        $run.Seen['trapAfter'] | Should -Be 'False'
         $result = Get-RunResult
         ($result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/interrupted'
         $result.summary.interrupted | Should -Be 1

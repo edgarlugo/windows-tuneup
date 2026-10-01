@@ -185,6 +185,34 @@ Describe 'Commands' {
 }
 
 Describe 'Re-applying what drifted' {
+    BeforeAll {
+        # The fixture catalog and profiles plus four tweaks of the re-apply: two plain ones (applied in the
+        # order b, a, which is not the alphabetical one), one that asks first and one of high risk.
+        function New-ReapplyDefinition {
+            $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path (Join-Path $dir 'catalog'), (Join-Path $dir 'profiles') -Force | Out-Null
+            Copy-Item -Path (Join-Path $Fixtures 'catalog\*.json') -Destination (Join-Path $dir 'catalog')
+            Copy-Item -Path (Join-Path $Fixtures 'profiles\*.json') -Destination (Join-Path $dir 'profiles')
+            $extra = @(
+                (New-TestTweak -Id 'rea.b' -Set ([pscustomobject]@{ path = $Key; name = 'B'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.a' -Set ([pscustomobject]@{ path = $Key; name = 'A'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.ask' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.high' -Risk 'high' -Set ([pscustomobject]@{ path = $Key; name = 'High'; kind = 'DWord'; value = 1 }))
+            )
+            [System.IO.File]::WriteAllText((Join-Path $dir 'catalog\rea.json'), (ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = $extra }) -Depth 10))
+            $dir
+        }
+
+        # The four tweaks applied by name and then reverted by Windows.
+        function Initialize-Reverted([string]$Dir) {
+            $context = New-TestContext -Json
+            $context.CatalogPath = Join-Path $Dir 'catalog'
+            $context.ProfilesPath = Join-Path $Dir 'profiles'
+            Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Include @('rea.b', 'rea.a', 'rea.ask', 'rea.high') -Yes } | Out-Null
+            foreach ($name in 'B', 'A', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        }
+    }
+
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
@@ -249,6 +277,56 @@ Describe 'Re-applying what drifted' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
         (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 5
     }
+
+    It 'leaves out a tweak that asks first or has high risk, in the order of the run, and says why' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Yes })[0]
+        ($document.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' |
+            Should -Be 'rea.b=applied/,rea.a=applied/,rea.ask=skipped/needs-confirmation,rea.high=skipped/high-risk-not-requested'
+        $values = Get-ItemProperty -LiteralPath $Key
+        "$($values.B),$($values.A),$($values.Ask),$($values.High)" | Should -Be '1,1,5,5'
+    }
+
+    It 'gives the same plan, in the same order, with -PlanOnly' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -PlanOnly })[0]
+        ($plan.items | ForEach-Object { "$($_.id)=$($_.action)/$($_.reason)" }) -join ',' |
+            Should -Be 'rea.b=apply/,rea.a=apply/,rea.ask=skip/needs-confirmation,rea.high=skip/high-risk-not-requested'
+    }
+
+    It 'lists what it left out when it runs with -Yes and no JSON' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $human = New-TestContext
+        $human.CatalogPath = Join-Path $dir 'catalog'
+        $human.ProfilesPath = Join-Path $dir 'profiles'
+        Invoke-TuneupStatusCommand -Context $human -Reapply -Yes 6>$null
+        $text = $human.Io.Output -join "`n"
+        $text | Should -Match 'Title rea\.ask: needs confirmation'
+        $text | Should -Match 'Title rea\.high: high risk'
+        $text | Should -Not -Match 'Title rea\.b'
+        $human.ExitCode | Should -Be 0
+    }
+
+    It 'does not say there is nothing to apply again when some tweaks need administrator to be checked' {
+        Mock -ModuleName Tuneup Get-TuneupStatus {
+            @([pscustomobject]@{ id = 'x.one'; title = 'One'; status = 'ok'; runId = 'r' }, [pscustomobject]@{ id = 'x.two'; title = 'Two'; status = 'needs-admin'; runId = 'r' })
+        }
+        $human = New-TestContext
+        Invoke-TuneupStatusCommand -Context $human -Reapply 6>$null
+        $text = $human.Io.Output -join "`n"
+        $text | Should -Match 'Nothing to apply again among what could be checked, but 1 tweaks need administrator'
+        $text | Should -Not -Match 'Windows reverted no tweak'
+        $human.ExitCode | Should -Be 0
+    }
 }
 
 Describe 'Invoke-TuneupCli' {
@@ -273,5 +351,120 @@ Describe 'Invoke-TuneupCli' {
         $documents[0].command | Should -Be 'status'
         $context.StateRoot | Should -Be $Root
         $context.CatalogPath | Should -Be (Join-Path $Fixtures 'catalog')
+    }
+}
+
+Describe 'An apply that stops before it ends' {
+    BeforeAll {
+        # What the run saves when the apply fails: test.one was applied, test.two was in progress.
+        function Get-FailedResult([bool]$Journaled) {
+            $script:stop.Journaled = $Journaled
+            $context = New-TestContext
+            { Invoke-TuneupApplyCommand -Context $context -Yes 6>$null } | Should -Throw
+            $dir = @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName
+            [pscustomobject]@{
+                Context = $context
+                Result  = (Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw | ConvertFrom-Json)
+                Text    = ($context.Io.Output -join "`n")
+            }
+        }
+
+        # What the run saves when Ctrl+C stops PowerShell itself. Stopping the pipeline of a test would
+        # stop the test run, so the function that the apply calls from its finally block is called here.
+        function Get-CtrlCResult([bool]$Journaled) {
+            $context = New-TestContext
+            $plan = @(New-TuneupContextPlan -Context $context -Definition (Import-TuneupContextDefinition -Context $context))
+            $run = New-TuneupRun -StateRoot $Root
+            $results = New-Object System.Collections.Generic.List[object]
+            $results.Add((New-TuneupResult -Item $plan[0] -Status 'applied'))
+            $progress = @{ Current = $plan[1].Id; Journaled = $Journaled }
+            Save-TuneupStoppedApply -Context $context -Run $run -Plan $plan -Request (New-TuneupApplyRequest -Source 'profiles') `
+                -Results $results -Progress $progress -RestorePoint 'not-needed'
+            [pscustomobject]@{
+                Context = $context
+                Result  = (Get-Content -LiteralPath (Join-Path $run.Dir 'result.json') -Raw | ConvertFrom-Json)
+                Text    = ($context.Io.Output -join "`n")
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        $script:stop = @{ Journaled = $true }
+        $stop = $script:stop
+        Mock -ModuleName Tuneup Invoke-TuneupPlan {
+            $Results.Add((New-TuneupResult -Item $Plan[0] -Status 'applied'))
+            $Progress.Current = $Plan[1].Id
+            $Progress.Journaled = $stop.Journaled
+            throw 'boom'
+        }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'with Ctrl+C reports the tweak it cut as failed when it was journaled' {
+        $stopped = Get-CtrlCResult $true
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=failed/'
+        $stopped.Result.results[1].error | Should -Match '-Undo can restore it'
+        $stopped.Text | Should -Match 'Stopped with Ctrl\+C'
+        $stopped.Context.ExitCode | Should -Be 2
+    }
+
+    It 'with Ctrl+C before the journal entry leaves the tweak out, as interrupted, with nothing to undo' {
+        $stopped = Get-CtrlCResult $false
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/interrupted'
+        $stopped.Result.summary.interrupted | Should -Be 1
+        $stopped.Result.interrupted | Should -BeTrue
+    }
+
+    It 'with any other error does not say it was Ctrl+C, and saves the error' {
+        $stopped = Get-FailedResult $true
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=failed/'
+        $stopped.Result.results[1].error | Should -Be 'boom; -Undo can restore it'
+        $stopped.Result.interrupted | Should -BeFalse
+        $stopped.Text | Should -Not -Match 'Ctrl\+C'
+        $stopped.Text | Should -Match 'The run stopped because of an error'
+    }
+
+    It 'with another error before the journal entry leaves the tweak out as aborted' {
+        $stopped = Get-FailedResult $false
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/aborted'
+        $stopped.Result.summary.interrupted | Should -Be 0
+    }
+}
+
+Describe 'The Ctrl+C hint' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        Mock -ModuleName Tuneup Test-TuneupInterruptRequested { $false }
+        Mock -ModuleName Tuneup Disable-TuneupInterruptTrap { }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'says once, through Io, how Ctrl+C and Ctrl+Break work while the trap is on' {
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { [pscustomobject]@{ Previous = $false } }
+        $context = New-TestContext
+        Invoke-TuneupApplyCommand -Context $context -Yes 6>$null
+        @($context.Io.Output | Where-Object { $_ -match 'Ctrl\+C stops after the tweak in progress; Ctrl\+Break interrupts at once' }).Count | Should -Be 1
+    }
+
+    It 'says nothing without a console to trap, or with -Json' {
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { $null }
+        $context = New-TestContext
+        Invoke-TuneupApplyCommand -Context $context -Yes 6>$null
+        $context.Io.Output -join "`n" | Should -Not -Match 'Ctrl'
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { [pscustomobject]@{ Previous = $false } }
+        $json = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $json -Yes } | Out-Null
+        $json.Io.Output -join "`n" | Should -Not -Match 'Ctrl'
     }
 }
