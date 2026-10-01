@@ -34,6 +34,17 @@ Describe 'Write-TuneupJson' {
     }
 }
 
+Describe 'Add-TuneupJsonWarning' {
+    It 'adds the version of the tool and the warnings to a copy of the document' {
+        $document = [pscustomobject]@{ schemaVersion = 1; command = 'status' }
+        $copy = Add-TuneupJsonWarning -Document $document -Warnings @('careful')
+        $copy.toolVersion | Should -Be (Get-TuneupVersion)
+        @($copy.warnings) | Should -Be @('careful')
+        $document.PSObject.Properties.Name | Should -Not -Contain 'toolVersion'
+        Get-TuneupVersion | Should -Match '^\d+\.\d+\.\d+$'
+    }
+}
+
 Describe 'ConvertTo-TuneupEnvironmentView' {
     It 'uses camelCase keys' {
         $view = ConvertTo-TuneupEnvironmentView -Environment (New-TestEnvironment -Edition 'Home')

@@ -46,6 +46,7 @@ function New-TuneupRun {
     $userSid = Get-TuneupCurrentUserSid
     $info = [pscustomobject]@{
         schemaVersion = $script:RunSchemaVersion
+        toolVersion   = Get-TuneupVersion
         userSid       = $userSid
         machine       = ($kind -eq 'machine')
         createdAt     = (Get-Date).ToString('s')

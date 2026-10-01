@@ -42,6 +42,7 @@ function Add-TuneupJsonWarning {
     param([Parameter(Mandatory)]$Document, [AllowEmptyCollection()][string[]]$Warnings = @())
     # A copy, so the report saved in the run folder does not change.
     $copy = $Document | Select-Object -Property *
+    $copy | Add-Member -NotePropertyName toolVersion -NotePropertyValue (Get-TuneupVersion) -Force
     $copy | Add-Member -NotePropertyName warnings -NotePropertyValue ([string[]]@($Warnings)) -Force
     $copy
 }
