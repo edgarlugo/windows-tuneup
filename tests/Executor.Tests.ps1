@@ -172,3 +172,23 @@ Describe 'Invoke-TuneupPlan with a refusal' {
         ($warnings -join ' ') | Should -BeLike '*test.one changed nothing*disk full*'
     }
 }
+
+Describe 'Invoke-TuneupPlan and signing out' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'carries signOutRequired of the catalog into each result' {
+        $signOut = New-TestTweak -Id 'test.one' -Set $One.set
+        $signOut | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        $plan = @(New-TuneupPlan -Catalog @($signOut, $Two) -Profiles @(New-TestProfile -Id 'base' -Include @('test.one', 'test.two')) `
+            -Environment (New-TestEnvironment) -TestState { param($tweak) Test-TuneupState -Tweak $tweak })
+        $results = @(Invoke-TuneupPlan -Plan $plan -RunDir $Run.Dir)
+        $results[0].signOutRequired | Should -BeTrue
+        $results[1].signOutRequired | Should -BeFalse
+    }
+}

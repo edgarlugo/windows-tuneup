@@ -286,3 +286,23 @@ Describe 'Test-TuneupTweak requires' {
         (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Test-TuneupTweak signOutRequired' {
+    It 'accepts a tweak without signOutRequired and one with a boolean' {
+        $tweak = New-TestTweak
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -BeNullOrEmpty
+        $tweak | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a signOutRequired that is not a boolean (<Value>)' -TestCases @(
+        @{ Value = 'yes' }
+        @{ Value = 1 }
+        @{ Value = $null }
+    ) {
+        param($Value)
+        $tweak = New-TestTweak
+        $tweak | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $Value
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'signOutRequired must be true or false'
+    }
+}

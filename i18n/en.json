@@ -56,6 +56,7 @@
   "summary": "Applied: {0} | Partial: {1} | No effect: {2} | Failed: {3} | Skipped: {4}",
   "run.saved": "Run {0} saved in {1}. To undo: .\\tuneup.ps1 -Undo {0}",
   "reboot": "Restart the computer to finish the changes.",
+  "signOut": "Sign out and sign in again to finish the changes.",
   "restore.created": "Restore point created.",
   "restore.skipped-recent": "Windows did not create a new restore point because a recent one exists. Changes can still be undone with -Undo.",
   "restore.failed": "The restore point could not be created (is System Restore turned off?). Changes can still be undone with -Undo.",

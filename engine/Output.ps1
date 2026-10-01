@@ -97,6 +97,7 @@ function New-TuneupApplyReport {
         environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
+        signOutRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.signOutRequired }).Count -gt 0)
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
             partial       = & $count 'partial'
@@ -172,6 +173,8 @@ function Write-TuneupApplyReport {
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
     Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+    # A restart also signs the user out, so the sign-out line is only needed without one.
+    elseif ($Report.signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
 }
 
 function Write-TuneupStatusReport {

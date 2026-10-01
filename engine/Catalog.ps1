@@ -57,6 +57,8 @@ function Test-TuneupTweak {
     if ($script:TweakScopes -cnotcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
     if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
     if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
+    $signOutProperty = $Tweak.PSObject.Properties['signOutRequired']
+    if ($null -ne $signOutProperty -and $signOutProperty.Value -isnot [bool]) { $errors.Add("$id signOutRequired must be true or false") }
     $requiresProperty = $Tweak.PSObject.Properties['requires']
     if ($null -ne $requiresProperty) {
         $requires = @($requiresProperty.Value)

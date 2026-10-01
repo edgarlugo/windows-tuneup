@@ -143,6 +143,27 @@ Describe 'Write-TuneupApplyReport' {
         $report.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
 
+    It 'asks to sign out when an applied tweak needs it and no restart is needed' {
+        $signOut = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        $report = New-TestReport @($signOut)
+        $report.signOutRequired | Should -BeTrue
+        (Write-TuneupApplyReport -Report $report 6>&1 | Out-String) | Should -Match 'Sign out and sign in again'
+        ($report | ConvertTo-Json -Depth 10 | ConvertFrom-Json).signOutRequired | Should -BeTrue
+    }
+
+    It 'asks only to restart when one tweak needs a restart and another a sign-out' {
+        $signOut = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        $reboot = [pscustomobject]@{ id = 'test.boot'; title = 'Title boot'; status = 'applied'; reason = $null; error = $null; detail = $null; rebootRequired = $true; signOutRequired = $false }
+        $text = (Write-TuneupApplyReport -Report (New-TestReport @($signOut, $reboot)) 6>&1 | Out-String)
+        $text | Should -Match 'Restart the computer'
+        $text | Should -Not -Match 'Sign out and sign in again'
+    }
+
+    It 'does not ask to sign out for a tweak that was skipped' {
+        $skipped = [pscustomobject]@{ id = 'test.sign'; title = 'Title sign'; status = 'skipped'; reason = 'already-applied'; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true }
+        (New-TestReport @($skipped)).signOutRequired | Should -BeFalse
+    }
+
     It 'shows a tweak that refused to change anything, with its reason and detail' {
         $refused = [pscustomobject]@{ id = 'test.refused'; title = 'Title refused'; status = 'skipped'; reason = 'other-user'; error = $null; detail = 'Nothing was changed'; rebootRequired = $false }
         $text = (Write-TuneupApplyReport -Report (New-TestReport @($refused, $PlanSkip)) 6>&1 | Out-String)

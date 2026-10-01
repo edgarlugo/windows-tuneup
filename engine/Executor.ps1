@@ -7,14 +7,17 @@ function New-TuneupResult {
         [string]$Detail,
         [switch]$RebootRequired
     )
+    # signOutRequired is optional in the catalog: the change shows once the user signs in again.
+    $signOut = $Item.Tweak.PSObject.Properties['signOutRequired']
     [pscustomobject]@{
-        id             = $Item.Id
-        title          = Get-TuneupTitle -Tweak $Item.Tweak
-        status         = $Status
-        reason         = $(if ($Reason) { $Reason } else { $null })
-        error          = $(if ($ErrorText) { $ErrorText } else { $null })
-        detail         = $(if ($Detail) { $Detail } else { $null })
-        rebootRequired = ([bool]$Item.Tweak.rebootRequired -or [bool]$RebootRequired)
+        id              = $Item.Id
+        title           = Get-TuneupTitle -Tweak $Item.Tweak
+        status          = $Status
+        reason          = $(if ($Reason) { $Reason } else { $null })
+        error           = $(if ($ErrorText) { $ErrorText } else { $null })
+        detail          = $(if ($Detail) { $Detail } else { $null })
+        rebootRequired  = ([bool]$Item.Tweak.rebootRequired -or [bool]$RebootRequired)
+        signOutRequired = ($null -ne $signOut -and $signOut.Value -eq $true)
     }
 }
 

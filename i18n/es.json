@@ -56,6 +56,7 @@
   "summary": "Aplicados: {0} · Parciales: {1} · Sin efecto: {2} · Fallidos: {3} · Omitidos: {4}",
   "run.saved": "Corrida {0} guardada en {1}. Para deshacer: .\\tuneup.ps1 -Undo {0}",
   "reboot": "Reinicia el equipo para completar los cambios.",
+  "signOut": "Cierra sesión y vuelve a entrar para completar los cambios.",
   "restore.created": "Punto de restauración creado.",
   "restore.skipped-recent": "Windows no creó un punto de restauración nuevo porque ya hay uno reciente. Los cambios igual se pueden deshacer con -Undo.",
   "restore.failed": "No se pudo crear el punto de restauración (¿está desactivada la restauración del sistema?). Los cambios igual se pueden deshacer con -Undo.",
