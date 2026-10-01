@@ -121,3 +121,35 @@ Describe 'ai catalog' {
         Get-CategoryId 'ai' | Should -Be $expected
     }
 }
+
+Describe 'edge catalog' {
+    It 'ships the edge tweaks in this order' {
+        $expected = @(
+            'edge.personalization-reporting-off',
+            'edge.diagnostic-data-off',
+            'edge.feedback-off',
+            'edge.new-tab-feed-off',
+            'edge.shopping-off',
+            'edge.recommendations-off',
+            'edge.spotlight-off',
+            'edge.default-browser-campaign-off',
+            'edge.acrobat-button-off',
+            'edge.first-run-off',
+            'edge.alternate-error-pages-off',
+            'edge.sidebar-off',
+            'edge.new-tab-bing-chat-off',
+            'edge.history-ai-search-off',
+            'edge.local-ai-model-off',
+            'edge.startup-boost-off',
+            'edge.background-mode-off'
+        ) -join ','
+        Get-CategoryId 'edge' | Should -Be $expected
+    }
+
+    It 'only writes Microsoft Edge policies of the machine' {
+        foreach ($tweak in Get-CategoryTweak 'edge') {
+            $tweak.scope | Should -Be 'machine' -Because $tweak.id
+            [string]$tweak.set.path | Should -BeLike 'HKLM:\SOFTWARE\Policies\Microsoft\Edge*' -Because $tweak.id
+        }
+    }
+}
