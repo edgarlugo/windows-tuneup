@@ -32,3 +32,18 @@ Describe 'Get-TuneupArgumentConflict' {
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected
     }
 }
+
+Describe 'Write-TuneupActionsPathWarning' {
+    It 'warns when elevated' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        Write-TuneupActionsPathWarning -WarningVariable warned -WarningAction SilentlyContinue
+        @($warned).Count | Should -Be 1
+        "$($warned[0])" | Should -Be '-ActionsPath loads functions that run with administrator rights; use only for development and testing'
+    }
+
+    It 'stays quiet when not elevated' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Write-TuneupActionsPathWarning -WarningVariable warned -WarningAction SilentlyContinue
+        @($warned).Count | Should -Be 0
+    }
+}

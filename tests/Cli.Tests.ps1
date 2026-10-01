@@ -77,6 +77,37 @@ Describe 'tuneup.ps1' {
         $result.ExitCode | Should -Be 1
         (ConvertFrom-PureJson $result.Output).message | Should -Match 'actions folder'
     }
+
+    It 'says when -ActionsPath is a file and not a folder' {
+        $file = Join-Path $TestDrive ([guid]::NewGuid().ToString() + '.ps1')
+        [System.IO.File]::WriteAllText($file, 'function Get-Nothing { }')
+        $result = Invoke-Tuneup @('-WhatIf', '-Json') -Actions $file
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Match 'is not a folder'
+    }
+
+    It 'resolves a relative -ActionsPath against the current folder' {
+        Copy-Item -LiteralPath (Join-Path $Fixtures 'actions') -Destination (Join-Path $TestDrive 'relative-actions') -Recurse
+        Push-Location -LiteralPath $TestDrive
+        try {
+            $result = Invoke-Tuneup @('-Include', 'test.action', '-WhatIf', '-Json') -Actions 'relative-actions'
+        } finally {
+            Pop-Location
+        }
+        $result.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $result.Output).items.id | Should -Contain 'test.action'
+    }
+
+    It 'does not warn about -ActionsPath when not elevated' -Skip:$Elevated {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-WhatIf', '-Json')).Output
+        @($json.warnings).Count | Should -Be 0
+    }
+
+    It 'carries the -ActionsPath warning inside the JSON document when elevated' -Skip:(-not $Elevated) {
+        $json = ConvertFrom-PureJson (Invoke-Tuneup @('-WhatIf', '-Json')).Output
+        @($json.warnings) | Should -Contain '-ActionsPath loads functions that run with administrator rights; use only for development and testing'
+    }
+
     It 'shows the plan as JSON without changing anything' {
         $result = Invoke-Tuneup @('-WhatIf', '-Json')
         $result.ExitCode | Should -Be 0

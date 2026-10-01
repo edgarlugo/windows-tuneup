@@ -5,6 +5,12 @@
     .\tuneup.ps1 -Profile base,privacy -WhatIf
 .EXAMPLE
     .\tuneup.ps1 -Undo last
+.PARAMETER ActionsPath
+    Development and testing only: loads action scripts from another folder. They run as the
+    current user, with administrator rights when elevated, so use only a folder you trust.
+.PARAMETER StateRoot
+    Development and testing only: keeps runs and measurements in another folder. That folder
+    is not hardened like the machine state folder.
 #>
 param(
     [Alias('Profile')][string[]]$ProfileName = @(),
@@ -69,15 +75,16 @@ $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
 $Include = @(Get-TuneupCleanList ($Include -split ','))
 $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
 
+# A parameter counts as given when it was bound and carries a value (a switch only when it is on).
 $present = @()
-if ($ProfileName.Count) { $present += 'Profile' }
-if ($Include.Count) { $present += 'Include' }
-if ($Exclude.Count) { $present += 'Exclude' }
-if ($WhatIf) { $present += 'WhatIf' }
-if ($Yes) { $present += 'Yes' }
-if ($Status) { $present += 'Status' }
-if ($Undo) { $present += 'Undo' }
-if ($Tweak) { $present += 'Tweak' }
+if ($PSBoundParameters.ContainsKey('ProfileName') -and $ProfileName.Count) { $present += 'Profile' }
+if ($PSBoundParameters.ContainsKey('Include') -and $Include.Count) { $present += 'Include' }
+if ($PSBoundParameters.ContainsKey('Exclude') -and $Exclude.Count) { $present += 'Exclude' }
+if ($PSBoundParameters.ContainsKey('WhatIf') -and $WhatIf) { $present += 'WhatIf' }
+if ($PSBoundParameters.ContainsKey('Yes') -and $Yes) { $present += 'Yes' }
+if ($PSBoundParameters.ContainsKey('Status') -and $Status) { $present += 'Status' }
+if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
+if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
 $conflict = Get-TuneupArgumentConflict -Present $present
 if ($conflict) { Stop-Tuneup -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict) }
 
@@ -91,8 +98,10 @@ try {
         # Tests and development only, like -StateRoot: action scripts from another folder.
         $ActionsPath = $pathApi.GetUnresolvedProviderPathFromPSPath($ActionsPath)
         if (-not (Test-Path -LiteralPath $ActionsPath -PathType Container)) {
-            Stop-Tuneup -Message (Get-TuneupText -Key 'err.actionsPathMissing' -Format $ActionsPath)
+            $key = $(if (Test-Path -LiteralPath $ActionsPath -PathType Leaf) { 'err.actionsPathNotFolder' } else { 'err.actionsPathMissing' })
+            Stop-Tuneup -Message (Get-TuneupText -Key $key -Format $ActionsPath)
         }
+        Invoke-TuneupStep { Write-TuneupActionsPathWarning }
         Invoke-TuneupStep { Import-TuneupActionLibrary -Path $ActionsPath }
     }
 

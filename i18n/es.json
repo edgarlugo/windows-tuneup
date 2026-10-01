@@ -11,6 +11,7 @@
   "err.runAlreadyUndone": "La corrida {0} ya estaba deshecha.",
   "err.badArgs": "Combinación de parámetros no válida: {0}",
   "err.actionsPathMissing": "No existe la carpeta de acciones {0}.",
+  "err.actionsPathNotFolder": "{0} no es una carpeta: -ActionsPath espera la carpeta de acciones.",
   "undo.none": "No hay corridas para deshacer.",
   "plan.header": "Plan: {0} para aplicar, {1} omitidos",
   "plan.apply": "  + {0} [{1}]",

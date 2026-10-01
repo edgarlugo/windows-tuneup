@@ -17,3 +17,10 @@ function Get-TuneupArgumentConflict {
         if ($extra.Count) { return ((@($commands[0]) + $extra | ForEach-Object { "-$_" }) -join ' ') }
     }
 }
+
+# The action scripts it loads run as the user, so elevated they run with administrator rights.
+function Write-TuneupActionsPathWarning {
+    [CmdletBinding()]
+    param()
+    if (Test-TuneupAdmin) { Write-Warning '-ActionsPath loads functions that run with administrator rights; use only for development and testing' }
+}
