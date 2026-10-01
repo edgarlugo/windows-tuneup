@@ -9,12 +9,13 @@ function New-TestTweak {
         [int]$MinBuild = 19041,
         [string[]]$Editions = @('Home', 'Pro', 'Enterprise', 'Education'),
         [object]$Set = $null,
-        [bool]$RebootRequired = $false
+        [bool]$RebootRequired = $false,
+        [string[]]$Requires
     )
     if ($null -eq $Set) {
         $Set = [pscustomobject]@{ path = 'HKCU:\Software\windows-tuneup-test'; name = 'Sample'; kind = 'DWord'; value = 1 }
     }
-    [pscustomobject]@{
+    $tweak = [pscustomobject]@{
         id             = $Id
         title          = [pscustomobject]@{ es = "Titulo $Id"; en = "Title $Id" }
         why            = [pscustomobject]@{ es = 'Motivo'; en = 'Reason' }
@@ -27,6 +28,8 @@ function New-TestTweak {
         rebootRequired = $RebootRequired
         sources        = @('https://example.com/source')
     }
+    if ($PSBoundParameters.ContainsKey('Requires')) { $tweak | Add-Member -NotePropertyName requires -NotePropertyValue $Requires }
+    $tweak
 }
 
 function New-TestEnvironment {
@@ -34,11 +37,12 @@ function New-TestEnvironment {
         [string]$Family = '11',
         [int]$Build = 26100,
         [string]$Edition = 'Pro',
-        [bool]$IsManaged = $false
+        [bool]$IsManaged = $false,
+        [bool]$HasBattery = $false
     )
     [pscustomobject]@{
         Family = $Family; Build = $Build; UBR = 0; Edition = $Edition; IsServer = $false
-        IsManaged = $IsManaged; IsAdmin = $true; HasBattery = $false; PendingReboot = $false
+        IsManaged = $IsManaged; IsAdmin = $true; HasBattery = $HasBattery; PendingReboot = $false
     }
 }
 

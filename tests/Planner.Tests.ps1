@@ -14,7 +14,10 @@ BeforeAll {
         (New-TestTweak -Id 'ui.future' -MinBuild 30000),
         (New-TestTweak -Id 'ui.edge-build' -MinBuild 26100),
         (New-TestTweak -Id 'ui.only-11' -Families @('11')),
-        (New-TestTweak -Id 'svc.policy-path' -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\Policies\Microsoft\Example'; name = 'Spooler'; startup = 'Disabled' }))
+        (New-TestTweak -Id 'svc.policy-path' -Type 'service' -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\Policies\Microsoft\Example'; name = 'Spooler'; startup = 'Disabled' })),
+        (New-TestTweak -Id 'power.on-battery' -Requires @('battery')),
+        (New-TestTweak -Id 'power.plugged-in' -Requires @('no-battery')),
+        (New-TestTweak -Id 'power.old-laptop' -Requires @('battery') -Editions @('Home'))
     )
     $script:Profiles = @(
         (New-TestProfile -Id 'base' -Include @('ui.a')),
@@ -188,5 +191,33 @@ Describe 'New-TuneupPlan with state that needs elevation to read' {
         $plan = @(New-TuneupPlan -Catalog $AppCatalog -Profiles $AppProfiles -Environment (New-TestEnvironment) -TestState { 'applied' })
         $plan[0].Action | Should -Be 'skip'
         $plan[0].Reason | Should -Be 'already-applied'
+    }
+}
+
+Describe 'New-TuneupPlan with hardware requirements' {
+    It 'skips a tweak for machines with a battery on a machine without one' {
+        $plan = Invoke-Plan -Include 'power.on-battery', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $false)
+        Get-Reason $plan 'power.on-battery' | Should -Be 'not-applicable-hardware'
+        Get-Action $plan 'power.plugged-in' | Should -Be 'apply'
+    }
+
+    It 'skips a tweak for machines without a battery on a laptop' {
+        $plan = Invoke-Plan -Include 'power.on-battery', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true)
+        Get-Action $plan 'power.on-battery' | Should -Be 'apply'
+        Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
+    }
+
+    It 'reports the edition before the hardware, and the hardware before reading the state' {
+        $plan = Invoke-Plan -Include 'power.old-laptop', 'power.plugged-in' -Environment (New-TestEnvironment -HasBattery $true) -TestState { throw 'must not read' }
+        Get-Reason $plan 'power.old-laptop' | Should -Be 'incompatible'
+        Get-Reason $plan 'power.plugged-in' | Should -Be 'not-applicable-hardware'
+    }
+
+    It 'has a text for the new reason in both languages' {
+        foreach ($lang in 'es', 'en') {
+            Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang $lang
+            Get-TuneupText -Key 'reason.not-applicable-hardware' | Should -Not -Be 'reason.not-applicable-hardware'
+        }
+        Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     }
 }

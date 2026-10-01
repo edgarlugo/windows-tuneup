@@ -17,6 +17,21 @@ function Test-TuneupCompatible {
     (@($Tweak.os.editions) -contains $Environment.Edition)
 }
 
+# The optional requires list of a tweak names the hardware it is meant for.
+function Test-TuneupHardwareMatch {
+    param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$Environment)
+    $requiresProperty = $Tweak.PSObject.Properties['requires']
+    if ($null -eq $requiresProperty) { return $true }
+    foreach ($requirement in @($requiresProperty.Value)) {
+        switch -CaseSensitive ([string]$requirement) {
+            'battery' { if (-not $Environment.HasBattery) { return $false } }
+            'no-battery' { if ($Environment.HasBattery) { return $false } }
+            default { throw "Unknown requirement '$requirement' in tweak $($Tweak.id)" }
+        }
+    }
+    $true
+}
+
 function Test-TuneupPolicyTweak {
     param([Parameter(Mandatory)]$Tweak)
     ($Tweak.type -eq 'registry') -and ([string]$Tweak.set.path -match '\\Policies\\')
@@ -81,6 +96,7 @@ function New-TuneupPlan {
         if ($Exclude -contains $tweakId) { $reason = 'excluded' }
         elseif (($keep -contains $tweakId) -and -not $requested) { $reason = 'kept-by-profile' }
         elseif (-not (Test-TuneupCompatible -Tweak $tweak -Environment $Environment)) { $reason = 'incompatible' }
+        elseif (-not (Test-TuneupHardwareMatch -Tweak $tweak -Environment $Environment)) { $reason = 'not-applicable-hardware' }
         elseif ($Environment.IsManaged -and (Test-TuneupPolicyTweak -Tweak $tweak)) { $reason = 'managed-device' }
         else {
             if ((Test-TuneupHandlerReadNeedsAdmin -Tweak $tweak) -and -not $Environment.IsAdmin) {

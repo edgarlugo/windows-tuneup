@@ -2,6 +2,8 @@ $script:TweakRisks = @('low', 'medium', 'high')
 $script:TweakScopes = @('machine', 'user')
 $script:TweakFamilies = @('10', '11')
 $script:TweakEditions = @('Home', 'Pro', 'Enterprise', 'Education')
+# Hardware a tweak can ask for in its optional requires list; the planner checks them.
+$script:TweakRequirements = @('battery', 'no-battery')
 
 function Import-TuneupCatalog {
     param([Parameter(Mandatory)][string]$Path)
@@ -55,6 +57,15 @@ function Test-TuneupTweak {
     if ($script:TweakScopes -cnotcontains $Tweak.scope) { $errors.Add("$id has an invalid scope '$($Tweak.scope)'") }
     if ($Tweak.ask -isnot [bool]) { $errors.Add("$id ask must be true or false") }
     if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
+    $requiresProperty = $Tweak.PSObject.Properties['requires']
+    if ($null -ne $requiresProperty) {
+        $requires = @($requiresProperty.Value)
+        if (-not $requires.Count -or @($requires | Where-Object { $_ -isnot [string] -or $script:TweakRequirements -cnotcontains $_ }).Count) {
+            $errors.Add("$id has invalid requires: use a list of $($script:TweakRequirements -join ', ')")
+        } elseif ($requires -ccontains 'battery' -and $requires -ccontains 'no-battery') {
+            $errors.Add("$id requires both battery and no-battery")
+        }
+    }
 
     $families = @($Tweak.os.families | Where-Object { $_ })
     if (-not $families.Count -or @($families | Where-Object { $script:TweakFamilies -notcontains $_ }).Count) {

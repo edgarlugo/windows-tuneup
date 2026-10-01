@@ -248,3 +248,41 @@ Describe 'Shipped catalog and profiles' {
         (Test-TuneupProfileSet -Profiles $profiles -Catalog $catalog) -join "`n" | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Test-TuneupTweak requires' {
+    It 'accepts a tweak without requires and one with known tokens' {
+        (Test-TuneupTweak -Tweak (New-TestTweak)) -join '; ' | Should -BeNullOrEmpty
+        (Test-TuneupTweak -Tweak (New-TestTweak -Requires @('battery'))) -join '; ' | Should -BeNullOrEmpty
+        (Test-TuneupTweak -Tweak (New-TestTweak -Requires @('no-battery'))) -join '; ' | Should -BeNullOrEmpty
+    }
+
+    It 'rejects <Problem>' -TestCases @(
+        @{ Problem = 'an unknown token'; Requires = @('desktop') }
+        @{ Problem = 'a token in another case'; Requires = @('Battery') }
+        @{ Problem = 'an empty list'; Requires = @() }
+    ) {
+        param($Requires)
+        (Test-TuneupTweak -Tweak (New-TestTweak -Requires $Requires)) -join '; ' | Should -Match 'invalid requires'
+    }
+
+    It 'rejects a requires that is not a list of text' {
+        $tweak = New-TestTweak
+        $tweak | Add-Member -NotePropertyName requires -NotePropertyValue $null
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match 'invalid requires'
+    }
+
+    It 'rejects battery and no-battery together' {
+        (Test-TuneupTweak -Tweak (New-TestTweak -Requires @('battery', 'no-battery'))) -join '; ' | Should -Match 'requires both battery and no-battery'
+    }
+
+    It 'reads requires from a catalog file' {
+        $dir = Join-Path $TestDrive 'requires-catalog'
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $tweak = New-TestTweak -Id 'power.sample' -Requires @('battery')
+        ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = @($tweak) }) -Depth 10 |
+            Set-Content -LiteralPath (Join-Path $dir 'power.json') -Encoding UTF8
+        $catalog = @(Import-TuneupCatalog -Path $dir)
+        @($catalog[0].requires) -join ',' | Should -Be 'battery'
+        (Test-TuneupCatalog -Catalog $catalog) -join '; ' | Should -BeNullOrEmpty
+    }
+}

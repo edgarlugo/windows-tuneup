@@ -27,6 +27,7 @@
   "reason.excluded": "excluded with -Exclude",
   "reason.kept-by-profile": "a selected profile keeps it",
   "reason.incompatible": "does not apply to this Windows version or edition",
+  "reason.not-applicable-hardware": "does not apply to this machine's hardware (for example, only for machines with or without a battery)",
   "reason.managed-device": "managed by an organization: policies are left alone",
   "reason.high-risk-not-requested": "high risk: only applied when you ask for it with -Include",
   "reason.needs-confirmation": "needs confirmation: ask for it with -Include",
