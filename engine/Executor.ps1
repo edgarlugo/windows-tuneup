@@ -59,7 +59,7 @@ function Invoke-TuneupPlan {
             } else {
                 $status = 'not-applied'
             }
-            New-TuneupResult -Item $item -Status $status -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
+            New-TuneupResult -Item $item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
         } catch {
             New-TuneupResult -Item $item -Status 'failed' -ErrorText $_.Exception.Message
         }

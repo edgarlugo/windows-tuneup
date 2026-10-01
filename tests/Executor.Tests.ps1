@@ -84,6 +84,18 @@ Describe 'Invoke-TuneupPlan' {
         @($results | Where-Object { $_ -is [string] }).Count | Should -Be 0
     }
 
+    It 'passes the reason of the Set outcome into the result' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            Write-TuneupRegistryValue -Path $Tweak.set.path -Name $Tweak.set.name -Kind $Tweak.set.kind -Value $Tweak.set.value
+            New-TuneupOutcome -Reason 'reinstalled' -Detail 'note'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'applied'
+        $results[0].reason | Should -Be 'reinstalled'
+        $results[0].detail | Should -Be 'note'
+        $results[1].reason | Should -BeNullOrEmpty
+    }
+
     It 'reports a partial change with its explanation' {
         Mock -ModuleName Tuneup Set-RegistryTweakDesired { 'noise'; New-TuneupOutcome -Partial -Detail 'half done' } -ParameterFilter { $Tweak.id -eq 'test.one' }
         $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
