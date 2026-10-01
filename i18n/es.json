@@ -132,5 +132,10 @@
   "undo.manual.action": "Restáuralo a mano: el README (Tipos de ajuste) explica qué cambia la acción '{0}'.",
   "reason.interrupted": "no se aplicó: la corrida se detuvo con Ctrl+C",
   "interrupted.summary": "Detenido con Ctrl+C: {0} ajustes no se aplicaron. Lo aplicado se puede deshacer con -Undo.",
-  "interrupted.saved": "Detenido con Ctrl+C. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}"
+  "interrupted.saved": "Detenido con Ctrl+C. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}",
+  "transcript.header": "windows-tuneup {0} - corrida {1} - {2}",
+  "transcript.request.profiles": "Pedido: perfiles {0}; incluidos {1}; excluidos {2}",
+  "transcript.request.reapply": "Pedido: volver a aplicar lo que Windows revirtió ({1})",
+  "transcript.warnings": "Avisos:",
+  "transcript.undo": "Deshacer con windows-tuneup {0} - {1}"
 }

@@ -86,6 +86,7 @@ function Invoke-TuneupUndoCommand {
     # Arguments of a step go in a table: PSScriptAnalyzer does not see a parameter used only inside it.
     $undoArguments = @{ Run = $run; TweakId = $TweakId }
     $results = @(Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupUndo @undoArguments })
+    Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupUndoTranscript -Context $Context -Run $run -Results $results }
     $Context.Result = $results
     Write-TuneupUndoReport -RunId $run.Id -Results $results -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = Get-TuneupUndoExitCode -Results $results
@@ -198,7 +199,20 @@ function Invoke-TuneupApplyCommand {
         return
     }
     $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
-    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -PlanOnly:$PlanOnly -Yes:$Yes
+    $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $ProfileIds -Include $Include -Exclude $Exclude
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+}
+
+# What was asked for, for the transcript and the JSON report: profiles and the -Include and -Exclude
+# lists, or a re-apply of what drifted.
+function New-TuneupApplyRequest {
+    param(
+        [Parameter(Mandatory)][ValidateSet('profiles', 'reapply')][string]$Source,
+        [AllowEmptyCollection()][string[]]$Profiles = @(),
+        [AllowEmptyCollection()][string[]]$Include = @(),
+        [AllowEmptyCollection()][string[]]$Exclude = @()
+    )
+    [pscustomobject]@{ Source = $Source; Profiles = [string[]]@($Profiles); Include = [string[]]@($Include); Exclude = [string[]]@($Exclude) }
 }
 
 # Shows the plan, or asks and applies it: the part that applying profiles, re-applying what drifted
@@ -207,6 +221,7 @@ function Invoke-TuneupPlannedApply {
     param(
         [Parameter(Mandatory)]$Context,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)]$Request,
         [switch]$PlanOnly,
         [switch]$Yes
     )
@@ -260,14 +275,43 @@ function Invoke-TuneupPlannedApply {
     } finally {
         Disable-TuneupInterruptTrap -Trap $trap
         if (-not $finished) {
-            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Results $results -Progress $progress -RestorePoint $restorePoint
+            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint
         }
     }
     $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment
     $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
+    Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
     $Context.Result = $report
     Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+}
+
+# The transcript is a convenience: when it cannot be written the run goes on, with a warning.
+function Save-TuneupApplyTranscript {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Run,
+        [Parameter(Mandatory)]$Request,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)]$Report
+    )
+    try {
+        Add-TuneupTranscript -Run $Run -Lines @(Get-TuneupApplyTranscript -Run $Run -Request $Request -Plan $Plan -Report $Report `
+                -Environment $Context.Environment -Warnings $Context.Warnings.ToArray())
+    } catch {
+        Write-Warning "The transcript of run $($Run.Id) could not be saved: $($_.Exception.Message)"
+    }
+}
+
+function Save-TuneupUndoTranscript {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Run, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results)
+    try {
+        Add-TuneupTranscript -Run $Run -Lines @(Get-TuneupUndoTranscript -Run $Run -Results $Results -Warnings $Context.Warnings.ToArray())
+    } catch {
+        Write-Warning "The transcript of run $($Run.Id) could not be updated: $($_.Exception.Message)"
+    }
 }
 
 # Ctrl+C reached PowerShell itself while a native program ran (Interrupt.ps1), or the apply failed
@@ -279,6 +323,7 @@ function Save-TuneupStoppedApply {
         [Parameter(Mandatory)]$Context,
         [Parameter(Mandatory)]$Run,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)]$Request,
         [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
         [Parameter(Mandatory)][hashtable]$Progress,
         [Parameter(Mandatory)][string]$RestorePoint
@@ -297,6 +342,13 @@ function Save-TuneupStoppedApply {
         Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $report
     } catch {
         $saved = $false
+    }
+    try {
+        Add-TuneupTranscript -Run $Run -Lines @(Get-TuneupApplyTranscript -Run $Run -Request $Request -Plan $Plan -Report $report `
+                -Environment $Context.Environment -Warnings $Context.Warnings.ToArray())
+    } catch {
+        # A missing transcript loses nothing that result.json and the journal do not keep.
+        $null = $_
     }
     $Context.Result = $report
     $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)

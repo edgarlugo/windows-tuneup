@@ -132,5 +132,10 @@
   "undo.manual.action": "Restore it by hand: README (Tweak types) explains what the '{0}' action changes.",
   "reason.interrupted": "not applied: the run was stopped with Ctrl+C",
   "interrupted.summary": "Stopped with Ctrl+C: {0} tweaks were not applied. What was applied can be undone with -Undo.",
-  "interrupted.saved": "Stopped with Ctrl+C. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}"
+  "interrupted.saved": "Stopped with Ctrl+C. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}",
+  "transcript.header": "windows-tuneup {0} - run {1} - {2}",
+  "transcript.request.profiles": "Asked for: profiles {0}; included {1}; excluded {2}",
+  "transcript.request.reapply": "Asked for: apply again what Windows reverted ({1})",
+  "transcript.warnings": "Warnings:",
+  "transcript.undo": "Undo with windows-tuneup {0} - {1}"
 }
