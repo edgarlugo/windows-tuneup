@@ -45,10 +45,10 @@ Nuevas para este plan:
 |---|---|---|
 | 1 | La orquestación pasa a funciones del motor que comparten la línea de comandos y el menú; `tuneup.ps1` queda en parámetros, relanzamiento, carga y `exit` | Task 3 |
 | 2 | Menú sin parámetros (con `-Json` y nada más sigue siendo el plan de `base`), línea por línea con `Read-Host`, marcas de texto, los ajustes `high` solo pidiéndolos y escribiendo la palabra completa, una pregunta por ajuste `ask` (sí, no, sí a todos, no a todos) con el motivo `declined` | Tasks 9 y 10 |
-| 3 | Avisos antes de aplicar (`pending-reboot`, `low-disk`, `restore-disabled`, `restore-blocked`, `managed-device`, `untrusted-location`): **ninguno detiene**; con confirmación se muestran junto al plan, con `-Yes` se muestran y se sigue, con `-Json` van en `preflight`. Solo en modo interactivo se ofrece activar Restaurar sistema | Task 7 |
-| 4 | Ctrl+C: `TreatControlCAsInput` durante la aplicación, la tecla se busca antes de cada ajuste; si llega mientras corre un programa nativo, el `finally` guarda lo hecho. Motivo `interrupted`, `summary.interrupted`, código `2` (o `1` antes del primer ajuste) | Task 5 |
-| 5 | `transcript.log` escrito por la herramienta (no `Start-Transcript`), con las mismas reglas de confianza; cada `-Undo` lo completa | Task 6 |
-| 6 | `-Status -Reapply` (acepta `-Yes` y `-WhatIf`): solo lo que está en `drift`, por nombre y con el catálogo actual, como corrida nueva (`source` = `reapply`) | Task 8 |
+| 3 | Avisos antes de aplicar (`pending-reboot`, `low-disk`, `restore-disabled`, `restore-blocked`, `managed-device`, `untrusted-location`): **ninguno detiene**; con confirmación se muestran junto al plan, con `-Yes` se muestran y se sigue, con `-Json` van en `preflight`. Solo en modo interactivo, y después de confirmar, se ofrece activar Restaurar sistema; las ubicaciones se escriben sin la cuenta | Tasks 7 y 8b |
+| 4 | Ctrl+C: `TreatControlCAsInput` durante la aplicación, la tecla se busca antes de cada ajuste; si llega mientras corre un programa nativo, el `finally` guarda lo hecho. Motivo `interrupted`, `summary.interrupted`, código `2` (o `1` antes del primer ajuste); una línea avisa cómo funciona Ctrl+C y un error que no es Ctrl+C no se presenta como tal (`aborted`) | Tasks 5 y 8b |
+| 5 | `transcript.log` escrito por la herramienta (no `Start-Transcript`), con las mismas reglas de confianza y sin el nombre de la cuenta; cada `-Undo` lo completa | Tasks 6 y 8b |
+| 6 | `-Status -Reapply` (acepta `-Yes` y `-WhatIf`): solo lo que está en `drift`, por nombre y con el catálogo actual, como corrida nueva (`source` = `reapply`); un `ask` o de riesgo alto no vuelve solo | Tasks 8 y 8b |
 | 7 | `manual` (líneas para restaurar a mano) y `signOutRequired` en cada resultado de `-Undo` | Task 4 |
 | 8 | `engine/Version.ps1` y `toolVersion` en todo documento JSON y en `run.json` | Task 2 |
 | 9 | `install.ps1` con la versión y el SHA256 del zip escritos por `build/package.ps1`; instala elevado en `%ProgramFiles%\windows-tuneup`; `irm | iex` fijado a una versión | Task 11 |
@@ -162,10 +162,10 @@ Decisiones tomadas al planificar el menú, los avisos antes de aplicar, Ctrl+C, 
 
 1. **Comandos compartidos.** La orquestación sale de `tuneup.ps1` a `engine/Commands.ps1`: `Invoke-TuneupCli` (revisa los parámetros, resuelve las carpetas y despacha), `Invoke-TuneupApplyCommand`, `Invoke-TuneupStatusCommand`, `Invoke-TuneupUndoCommand`, `Invoke-TuneupHealthCommand`, `Invoke-TuneupMeasureCommand` y la parte común de aplicar, `Invoke-TuneupPlannedApply`. Reciben un contexto (`New-TuneupContext`: `-Json`, carpetas, avisos, `Io`, código de salida y último resultado), escriben su reporte (el JSON sale por la salida estándar) y dejan el código en `$Context.ExitCode`; nunca llaman a `exit`. Un ayudante que devuelve valores no escribe reportes (con `-Json` el reporte se mezclaría con lo que devuelve). `tuneup.ps1` queda en los parámetros, el relanzamiento desde `pwsh`, la carga del módulo y los textos, y `exit $context.ExitCode` en un `finally`. El código de salida del contexto **arranca en `1`** y cada comando pone `0` al terminar bien, así un comando que muere antes de informar nunca parece exitoso; `Invoke-TuneupGuarded` convierte lo que lance un comando en un informe de error con código `1` (lo pone antes de escribir el informe, por si el informe también falla). Las líneas de texto de los comandos (cancelado, esperas y fases de salud) salen por `Io.Write`, igual que las preguntas. En las funciones del motor `-WhatIf` se llama `-PlanOnly` (un parámetro `WhatIf` es de ShouldProcess).
 2. **Menú.** `tuneup.ps1` sin comando ni opciones de aplicar, y sin `-Json`, abre el menú (`engine/Menu.ps1`); con `-Json` y nada más sigue siendo el plan de `base`. Toda respuesta es una línea (número, letra o Enter solo), leída con `Read-Host` a través de `$Context.Io`, así funciona en la consola de Windows PowerShell, en Windows Terminal y con la entrada redirigida (el fin de la entrada es volver, hasta salir). Las pruebas pasan un `Io` con respuestas guionadas que falla si se le pide una más. Opciones: Optimizar (perfiles con `[x]`, `(administrador)` y `(siempre)` para `base`; ajustes de riesgo alto solo si se pide verlos y escribiendo la palabra de confirmación completa; una pregunta por ajuste `ask` del plan con sí, no, sí a todos los que quedan y no a todos los que quedan, que quedan omitidos con el motivo `declined`; el plan; si necesita administrador y no lo es, se muestra y se vuelve), Estado (y `r` para volver a aplicar lo revertido), Deshacer (las 15 corridas más nuevas con su estado; toda la corrida o un ajuste), Salud (pide confirmar; si la revisión recomienda reparar, ofrece hacerlo sin revisar otra vez: `Invoke-TuneupHealth -Previous`) y Medir (segundos de espera y comparar con la última). Las marcas son texto, nunca solo color. El código de salida del menú es `0`.
-3. **Avisos antes de aplicar** (`engine/Preflight.ps1`): `pending-reboot`, `low-disk` (menos de 2 GB libres en el disco del sistema), `restore-disabled` / `restore-blocked` (solo para cambios de sistema y elevado: se lee `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SPP\Clients`, que solo pueden leer los administradores, y la directiva `DisableSR`/`DisableConfig`), `managed-device` y `untrusted-location` (elevado y corriendo desde una carpeta que otras cuentas pueden cambiar, con `Test-TuneupTrustedExecutable`). **Ninguno detiene la corrida**: con confirmación se muestran junto al plan; con `-Yes` se muestran y se sigue; con `-Json` van en el arreglo `preflight` (`id`, `message`) del plan y del resultado de aplicar (y de `result.json`). Solo `restore-disabled` tiene algo que hacer: en modo interactivo se pregunta si activar Restaurar sistema en el disco del sistema (`Enable-ComputerRestore`) antes de la confirmación; nunca con `-Yes` ni `-Json`. Activarlo no se anota en el diario (no es un ajuste).
-4. **Ctrl+C** (`engine/Interrupt.ps1`). Mientras se aplica, `[Console]::TreatControlCAsInput` convierte Ctrl+C en una tecla, que se busca antes de cada ajuste (`Invoke-TuneupPlan -StopRequested`): el ajuste en curso termina y los que faltan quedan `skipped` con el motivo `interrupted`, sin entrada en el diario. El resumen los cuenta aparte (`summary.interrupted`, `interrupted`), y el código es `2` (o `1` si se detuvo antes del primer ajuste). Un programa nativo (cmd, sc.exe, DISM, winget) vuelve a activar el Ctrl+C normal de la consola, así que cada revisión vuelve a poner la trampa; si Ctrl+C llega mientras corre uno de ellos, PowerShell se detiene en el acto: el `finally` de aplicar guarda `result.json` con lo hecho, el ajuste cortado como `failed` (su entrada del diario permite deshacerlo) y el resto como `interrupted`, y `tuneup.ps1` sale con ese código desde su `finally`. Sin consola propia (entrada redirigida) no hay trampa. Probado con una consola oculta que recibe la tecla (WriteConsoleInput) o la señal (GenerateConsoleCtrlEvent).
-5. **`transcript.log`** (`engine/Transcript.ps1`). Lo escribe la herramienta, no `Start-Transcript` (que guarda cuenta, equipo y línea de comandos, y Usuarios puede leer la carpeta de máquina): encabezado con versión, corrida y hora, lo pedido (perfiles y listas, o reaplicar), el plan con sus avisos, el reporte y los avisos; cada `-Undo` de esa corrida agrega su reporte. Siempre en texto para personas, también con `-Json`. Se escribe con `Write-TuneupStateFile` (las mismas reglas de confianza); si falla, es un aviso y la corrida sigue.
-6. **`-Status -Reapply`.** `-Reapply` exige `-Status`, y con él `-Status` acepta `-Yes` y `-WhatIf` (no `-Profile`, `-Include` ni `-Exclude`). Planifica con el catálogo actual solo los ajustes en `drift`, por nombre (`New-TuneupPlan -NoBase -Include`): un ajuste `ask` o conservado por un perfil se vuelve a aplicar; la compatibilidad sigue rigiendo. Un ajuste revertido que ya no está en el catálogo se deja fuera con un aviso. Es una corrida nueva; los documentos `plan` y `apply` llevan `source` (`profiles` o `reapply`).
+3. **Avisos antes de aplicar** (`engine/Preflight.ps1`): `pending-reboot`, `low-disk` (menos de 2 GB libres en el disco del sistema), `restore-disabled` / `restore-blocked` (solo para cambios de sistema y elevado: se lee `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\SPP\Clients`, que solo pueden leer los administradores, y la directiva `DisableSR`/`DisableConfig`), `managed-device` y `untrusted-location` (elevado y con el programa o `engine`, `catalog`, `profiles`, `actions` o `i18n` en una carpeta que procesos sin elevar, incluidos los del propio usuario, pueden cambiar: `Test-TuneupTrustedExecutable` sobre `tuneup.ps1` y `Tuneup.psm1`, y la propiedad y los permisos de cada archivo y carpeta de esas cinco carpetas; el aviso escribe la carpeta con el perfil como `%USERPROFILE%`). **Ninguno detiene la corrida**: con confirmación se muestran junto al plan; con `-Yes` se muestran y se sigue; con `-Json` van en el arreglo `preflight` (`id`, `message`) del plan y del resultado de aplicar (y de `result.json`). Solo `restore-disabled` tiene algo que hacer: en modo interactivo se pregunta si activar Restaurar sistema en el disco del sistema (`Enable-ComputerRestore`) después de confirmar "¿Aplicar N cambios?" (así rechazar no deja nada activado) y, si se activa, el aviso `restore-disabled` sale del reporte; nunca con `-Yes` ni `-Json`. Activarlo no se anota en el diario (no es un ajuste).
+4. **Ctrl+C** (`engine/Interrupt.ps1`). Mientras se aplica, `[Console]::TreatControlCAsInput` convierte Ctrl+C en una tecla, que se busca antes de cada ajuste (`Invoke-TuneupPlan -StopRequested`): el ajuste en curso termina y los que faltan quedan `skipped` con el motivo `interrupted`, sin entrada en el diario. El resumen los cuenta aparte (`summary.interrupted`, `interrupted`), y el código es `2` (o `1` si se detuvo antes del primer ajuste). Un programa nativo (cmd, sc.exe, DISM, winget) vuelve a activar el Ctrl+C normal de la consola, así que cada revisión vuelve a poner la trampa; si Ctrl+C llega mientras corre uno de ellos, PowerShell se detiene en el acto: el `finally` de aplicar guarda `result.json` con lo hecho, el ajuste cortado como `failed` (su entrada del diario permite deshacerlo) y el resto como `interrupted`, y `tuneup.ps1` sale con ese código desde su `finally`. Sin consola propia (entrada redirigida) no hay trampa. Al empezar a aplicar, una línea dice cómo funcionan Ctrl+C (se detiene después del ajuste en curso) y Ctrl+Pausa (interrumpe de inmediato). El ajuste cortado se informa como `failed` solo si su entrada del diario ya estaba escrita; si la detención llegó antes, queda `interrupted`. Un error de otro tipo que corta la aplicación no se presenta como Ctrl+C: `result.json` se guarda con el error, el ajuste en curso con diario como `failed` y los que faltan como `aborted`, y el error se informa como siempre. Con `-Json`, si Ctrl+C detiene PowerShell la salida estándar queda vacía, el código es `2` y el documento está en `result.json`. Probado con una consola oculta que recibe la tecla (WriteConsoleInput) o la señal (GenerateConsoleCtrlEvent).
+5. **`transcript.log`** (`engine/Transcript.ps1`). Lo escribe la herramienta, no `Start-Transcript` (que guarda cuenta, equipo y línea de comandos, y Usuarios puede leer la carpeta de máquina): encabezado con versión, corrida y hora, lo pedido (perfiles y listas, o reaplicar), el plan con sus avisos, el reporte y los avisos; cada `-Undo` de esa corrida agrega su reporte. Siempre en texto para personas, también con `-Json`. Se escribe con `Write-TuneupStateFile` (las mismas reglas de confianza); si falla, es un aviso y la corrida sigue. Ni el transcript ni `result.json` llevan el nombre de la cuenta ni la carpeta del perfil: se escriben `%USERNAME%` y `%USERPROFILE%` (`Hide-TuneupPersonalData`); la salida JSON conserva el `runDir` real, que es para quien ejecutó la corrida.
+6. **`-Status -Reapply`.** `-Reapply` exige `-Status`, y con él `-Status` acepta `-Yes` y `-WhatIf` (no `-Profile`, `-Include` ni `-Exclude`). Planifica con el catálogo actual solo los ajustes en `drift`, por nombre y en el orden de las corridas que los aplicaron (`New-TuneupPlan -NoBase -Candidates`, como los pone un perfil, sin pedirlos): uno conservado por un perfil se vuelve a aplicar, pero uno que pregunta antes (`ask`) o de riesgo alto no vuelve solo: queda omitido con `needs-confirmation` o `high-risk-not-requested` y se informa (el menú pregunta por cada uno); la compatibilidad sigue rigiendo. Sin nada revertido dice que no hay nada que volver a aplicar, o que hay ajustes que sin administrador no se pueden comprobar. Un ajuste revertido que ya no está en el catálogo se deja fuera con un aviso. Es una corrida nueva; los documentos `plan` y `apply` llevan `source` (`profiles` o `reapply`).
 7. **Deshacer a mano.** Cada resultado de `-Undo` lleva `manual` y `signOutRequired`; el documento `undo` suma `signOutRequired`. `manual` son líneas de **PowerShell** (para pegar en PowerShell como administrador) que restauran a mano un ajuste que falló, armadas con la definición y el estado guardado; cada nombre y valor va en un literal entre comillas simples con las comillas dobladas (también las tipográficas) y un salto de línea como `[char]`, así nada se expande ni se ejecuta al pegar. Por tipo: registro, `New-ItemProperty -LiteralPath … -Name … -PropertyType <tipo> -Value … -Force` (DWORD con signo; binarios `([byte[]](0x01,0x02))` y `([byte[]]@())`; MultiString `@('a','b')`; `[Microsoft.Win32.Registry]::SetValue` para los tipos None y Unknown), o `Remove-ItemProperty` si el valor no existía, más un `Remove-Item` por cada clave que el ajuste creó, que solo borra la clave si quedó vacía y si no lo avisa; servicio, `Set-Service -StartupType Automatic|Manual|Disabled` (`sc.exe config … start= delayed-auto` solo para un nombre de una palabra, porque Windows PowerShell 5.1 no tiene inicio retrasado) y `Start-Service` si corría; tarea, `Enable-ScheduledTask` o `Disable-ScheduledTask`; capacidad, `Add-WindowsCapability` o `Remove-WindowsCapability`; característica, `Enable-WindowsOptionalFeature` o `Disable-WindowsOptionalFeature` con `-NoRestart`; energía, `powercfg.exe /setactive`, `/setacvalueindex` y `/setdcvalueindex` (solo con GUID y números validados) y `/setactive SCHEME_CURRENT`; Appx, `winget install --id <id> --source msstore` (una sola fuente, `Get-TuneupWingetManualCommand`, que también usa la nota de la restauración); para una acción, una frase. Si las líneas no se pueden armar (un valor raro en el estado guardado), `manual` queda vacío y el fallo de la restauración se informa igual. `signOutRequired` es verdadero solo en un ajuste restaurado cuya definición lo pide, nunca en uno que falló o se omitió.
 8. **Versión.** `engine/Version.ps1` (`Get-TuneupVersion`, hoy `0.1.0`). Todo documento JSON lleva `toolVersion` y `run.json` también.
 9. **Distribución.** `build/package.ps1` arma `windows-tuneup-<versión>.zip` (carpeta `windows-tuneup-<versión>/` con `tuneup.ps1`, `engine`, `i18n`, `catalog/*.json`, `profiles`, `actions`, `docs/es`, `docs/en`, `README.md` y `LICENSE`; en un checkout de git, solo archivos seguidos), con entradas ordenadas y fechadas con el último commit (el mismo commit da el mismo zip en la misma máquina), `install.ps1` con la versión y el SHA256 del zip escritos, `SHA256SUMS` (formato de `sha256sum`) y `release-notes.md`. `install.ps1` comprueba el SHA256 antes de extraer, rechaza entradas fuera de su carpeta, instala elevado en `%ProgramFiles%\windows-tuneup` (reemplaza solo una copia anterior de windows-tuneup) y sin elevar en la carpeta actual con una advertencia; corre en su propio ámbito y lanza errores, nunca `exit`, así `irm | iex` no deja nada en la sesión ni la cierra. Sus mensajes están en inglés. `.github/workflows/release.yml`: una etiqueta `v*` igual a `Get-TuneupVersion` corre lint y pruebas, empaqueta y deja un **borrador** de release; se publica a mano tras adjuntar los reportes.
@@ -4093,6 +4093,983 @@ git commit -m "feat: -Status -Reapply vuelve a aplicar lo que Windows revirtió"
 
 ---
 
+### Task 8b: Correcciones de la revisión de las Tasks 5 a 8
+
+**Files:**
+- Modify: `engine/Executor.ps1` (`Invoke-TuneupPlan`, `Invoke-TuneupPlanItem`), `engine/Output.ps1` (nuevo `Write-TuneupRunResult`, `Save-TuneupApplyReport`), `engine/Transcript.ps1` (nuevo `Hide-TuneupPersonalData`, `Add-TuneupTranscript`), `engine/Preflight.ps1` (`Test-TuneupTrustedLocation`, nuevo `Test-TuneupTrustedEntry`, aviso `untrusted-location`), `engine/Planner.ps1` (`New-TuneupPlan -Candidates`), `engine/Commands.ps1` (`Invoke-TuneupReapply`, `New-TuneupContextPlan`, `Invoke-TuneupPlannedApply`, `Save-TuneupStoppedApply`), `i18n/es.json`, `i18n/en.json`
+- Test: `tests/Interrupt.Tests.ps1`, `tests/Executor.Tests.ps1`, `tests/Planner.Tests.ps1`, `tests/Output.Tests.ps1`, `tests/Preflight.Tests.ps1`, `tests/Commands.Tests.ps1`
+
+La revisión de las Tasks 5 a 8 pidió estos ocho cambios; se hicieron en un commit aparte, con pruebas primero:
+
+1. **Ctrl+C avisa.** Al empezar a aplicar, si hay trampa (consola propia) y no es `-Json`, una línea por `Io` dice que Ctrl+C se detiene después del ajuste en curso y que Ctrl+Pausa (Ctrl+Break) interrumpe de inmediato (`interrupted.hint`). La consola oculta de `Interrupt.Tests.ps1` comprueba que `TreatControlCAsInput` vale `False` otra vez al terminar `Invoke-TuneupCli`.
+2. **Un ajuste cortado antes de su entrada del diario no se informa como "fallido, -Undo puede restaurarlo".** `-Progress` suma `Journaled` (verdadero desde que la entrada del diario está escrita hasta el resultado); `Save-TuneupStoppedApply` informa `failed` solo si estaba en curso y con diario, y en otro caso lo deja `interrupted`. Además el resultado se agrega a `-Results` antes de borrar `Current`, así una detención entre las dos líneas no pierde un ajuste ya hecho.
+3. **Un error que no es Ctrl+C no pasa por el mensaje "Detenido con Ctrl+C".** `Invoke-TuneupPlannedApply` distingue la detención de PowerShell (`PipelineStoppedException`, que no es un error de la aplicación) de cualquier otra excepción, que guarda en `$failure`. `Save-TuneupStoppedApply -Failure` guarda igual `result.json`, pero con el error: el ajuste en curso con diario queda `failed` con "<error>; -Undo can restore it", el resto `skipped` con el motivo nuevo `aborted`, y el mensaje es `aborted.saved`. La excepción sigue su camino y `Invoke-TuneupGuarded` la informa como siempre.
+4. **Ni `transcript.log` ni `result.json` ni el JSON llevan la cuenta o el perfil.** `Hide-TuneupPersonalData` escribe la carpeta del perfil como `%USERPROFILE%` y el nombre de la cuenta (3 letras o más, como palabra entera) como `%USERNAME%`. Pasa por ahí el aviso `untrusted-location` (que lleva la carpeta desde donde corre), cada línea de `Add-TuneupTranscript` y el JSON de `result.json` (`Write-TuneupRunResult -JsonEscaped`, que también cubre `runDir`). La salida estándar con `-Json` conserva el `runDir` real: es para quien lo ejecutó. El aviso pasa a decir "una carpeta (o archivos suyos) que procesos sin elevar, incluidos los tuyos, pueden cambiar".
+5. **`untrusted-location` revisa también `engine`, `catalog`, `profiles`, `actions` e `i18n`**: cada archivo y carpeta debe ser de SYSTEM, TrustedInstaller o Administradores y no dar derechos de cambio a nadie más ni ser un vínculo (`Test-TuneupTrustedEntry`); uno solo basta para el aviso.
+6. **Restaurar sistema se ofrece después de confirmar.** Se pregunta después de "¿Aplicar N cambios?", así rechazar la aplicación no deja nada activado; si se activa, el aviso `restore-disabled` sale del `preflight` del reporte, de `result.json` y del transcript.
+7. **`-Status -Reapply` no vuelve a aplicar solo un ajuste `ask` ni uno de riesgo alto.** `New-TuneupPlan -Candidates` los planifica como un perfil (sin pedirlos por nombre): quedan `skip` con `needs-confirmation` o `high-risk-not-requested`, y con `-Yes` sin `-Json` se listan por `Io` (`reapply.leftOut`); el plan y el resultado JSON los traen. El orden es el de las corridas que los aplicaron, no el alfabético. Sin nada revertido, el texto distingue "nada que volver a aplicar" de "hay ajustes que sin administrador no se pueden comprobar" (`reapply.noneUnverified`). El menú (Tasks 9 y 10) es quien pregunta de a uno por los `ask` y los de riesgo alto al reaplicar.
+8. **Contrato JSON** (Task 15): con `-Json`, si Ctrl+C detiene PowerShell mientras corre un programa nativo, la salida estándar queda vacía, el código es `2` y el documento está en `result.json`; si llega como tecla entre dos ajustes, sale el documento `apply` normal con `interrupted: true`.
+
+Se probó que lanzar un `PipelineStoppedException` de verdad dentro de una prueba detiene a Pester entero: la ruta de Ctrl+C se prueba llamando a `Save-TuneupStoppedApply` (lo que llama el `finally`), y la consola oculta de `Interrupt.Tests.ps1` cubre la señal real.
+
+- [ ] **Step 1: Pruebas que fallan**
+
+En `tests/Interrupt.Tests.ps1`, reemplazar:
+
+```powershell
+    Save-Line 'completed=True'
+```
+por:
+```powershell
+    Save-Line "trapAfter=$([Console]::TreatControlCAsInput)"
+    Save-Line 'completed=True'
+```
+En `tests/Interrupt.Tests.ps1`, reemplazar:
+```powershell
+        $run.Seen['completed'] | Should -Be 'True'
+        $result = Get-RunResult
+```
+por:
+```powershell
+        $run.Seen['completed'] | Should -Be 'True'
+        # The trap is off again once the command is done, so the console keeps its usual Ctrl+C.
+        $run.Seen['trapAfter'] | Should -Be 'False'
+        $result = Get-RunResult
+```
+Agregar al final de `tests/Executor.Tests.ps1`:
+```powershell
+Describe 'Invoke-TuneupPlan -Progress and the journal' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'says the tweak was not journaled while its state is read, and journaled once it is saved' {
+        $progress = @{}
+        Mock -ModuleName Tuneup Get-TuneupState { throw "journaled=$($progress.Journaled)" } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw "journaled=$($progress.Journaled)" } -ParameterFilter { $Tweak.id -eq 'test.two' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir -Progress $progress)
+        $results[0].error | Should -Be 'journaled=False'
+        $results[1].error | Should -Be 'journaled=True'
+        $progress.Journaled | Should -BeFalse
+    }
+}
+```
+En `tests/Planner.Tests.ps1`, agregar antes de `It 'resolves profile aliases case-insensitively' {`:
+```powershell
+    It 'plans -Candidates in their order, like a profile does: not asked for by name, so asks and high risk stay out' {
+        $plan = @(New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Candidates @('ui.b', 'gaming.vbs-off', 'apps.onedrive', 'ui.a') -Environment (New-TestEnvironment) -TestState $NotApplied -NoBase)
+        ($plan | ForEach-Object { "$($_.Id)=$($_.Action)/$($_.Reason)" }) -join ',' |
+            Should -Be 'ui.b=apply/,gaming.vbs-off=skip/high-risk-not-requested,apps.onedrive=skip/needs-confirmation,ui.a=apply/'
+        { New-TuneupPlan -Catalog $Catalog -Profiles $Profiles -Candidates @('ui.nope') -Environment (New-TestEnvironment) -TestState $NotApplied } | Should -Throw '*ui.nope*'
+    }
+```
+En `tests/Output.Tests.ps1`, reemplazar:
+```powershell
+        Mock -ModuleName Tuneup Save-TuneupJson { throw [System.UnauthorizedAccessException]::new('Access denied') }
+```
+por:
+```powershell
+        Mock -ModuleName Tuneup Write-TuneupRunResult { throw [System.UnauthorizedAccessException]::new('Access denied') }
+```
+En `tests/Preflight.Tests.ps1`, reemplazar la prueba `It 'offers to turn System Restore on before asking, and only turns it on with a yes'` completa por estas tres:
+```powershell
+    It 'offers to turn System Restore on only after the apply is confirmed, and drops the warning once it is on' {
+        Mock -ModuleName Tuneup Get-TuneupPreflight { [pscustomobject]@{ id = 'restore-disabled'; message = 'System Restore is turned off' } }
+        $context = New-TestContext -Answers @('y', 'y')
+        Invoke-TuneupApplyCommand -Context $context 6>$null
+        Should -Invoke Enable-TuneupSystemRestore -ModuleName Tuneup -Times 1 -Exactly
+        $output = $context.Io.Output -join "`n"
+        $output | Should -Match 'Apply 2 changes\? \(y/n\)[\s\S]*Turn on System Restore on .* before applying\? \(y/n\)'
+        @($context.Result.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
+        $saved = Get-Content -LiteralPath (Join-Path $context.Result.runDir 'result.json') -Raw | ConvertFrom-Json
+        @($saved.preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count | Should -Be 0
+    }
+
+    It 'keeps the warning when System Restore is not turned on' {
+        Mock -ModuleName Tuneup Get-TuneupPreflight { [pscustomobject]@{ id = 'restore-disabled'; message = 'System Restore is turned off' } }
+        $context = New-TestContext -Answers @('y', 'n')
+        Invoke-TuneupApplyCommand -Context $context 6>$null
+        Should -Invoke Enable-TuneupSystemRestore -ModuleName Tuneup -Times 0 -Exactly
+        @($context.Result.preflight | ForEach-Object { $_.id }) | Should -Be @('restore-disabled')
+    }
+
+    It 'never asks about System Restore when the apply is declined' {
+        Mock -ModuleName Tuneup Get-TuneupPreflight { [pscustomobject]@{ id = 'restore-disabled'; message = 'System Restore is turned off' } }
+        $context = New-TestContext -Answers @('n')
+        Invoke-TuneupApplyCommand -Context $context 6>$null
+        Should -Invoke Enable-TuneupSystemRestore -ModuleName Tuneup -Times 0 -Exactly
+        $context.Io.Output -join "`n" | Should -Not -Match 'Turn on System Restore'
+        $context.ExitCode | Should -Be 1
+    }
+```
+Agregar al final de `tests/Preflight.Tests.ps1`:
+```powershell
+Describe 'Locations in what the run keeps' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        Mock -ModuleName Tuneup Test-TuneupTrustedLocation { $false }
+        $script:Profile = $env:USERPROFILE.TrimEnd('\')
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'writes the untrusted folder with the profile folder as %USERPROFILE% and rewords the warning' {
+        $items = @(Get-TuneupPreflight -Environment (New-TestEnvironment -IsAdmin $true) -Plan @(New-PlanItem) -ScriptRoot (Join-Path $Profile 'Downloads\windows-tuneup'))
+        $items.Count | Should -Be 1
+        $items[0].message | Should -Match '%USERPROFILE%\\Downloads\\windows-tuneup'
+        $items[0].message | Should -Not -Match ([regex]::Escape($Profile))
+        $items[0].message | Should -Match 'that non-elevated processes \(including your own\) can change'
+    }
+
+    It 'never writes the account name nor the profile folder in transcript.log or result.json, from a profile folder' {
+        $context = New-TestContext -Json
+        $context.Environment = New-TestEnvironment -IsAdmin $true
+        $context.ScriptRoot = Join-Path $Profile "Downloads\$env:USERNAME\windows-tuneup"
+        Invoke-TuneupApplyCommand -Context $context -Yes | Out-Null
+        $context.ExitCode | Should -Be 0
+        $runDir = $context.Result.runDir
+        # The run folder of this test is under the profile too, so the paths in the files are real ones.
+        $runDir | Should -Match ([regex]::Escape($Profile))
+        foreach ($name in 'transcript.log', 'result.json') {
+            $text = [System.IO.File]::ReadAllText((Join-Path $runDir $name))
+            $text | Should -Match '%USERPROFILE%' -Because $name
+            $text | Should -Not -Match ('(?i)' + [regex]::Escape($Profile)) -Because $name
+            $text | Should -Not -Match ('(?i)' + [regex]::Escape($Profile.Replace('\', '\\'))) -Because $name
+            $text | Should -Not -Match ('(?i)(?<![A-Za-z0-9])' + [regex]::Escape($env:USERNAME) + '(?![A-Za-z0-9])') -Because $name
+        }
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'transcript.log')) | Should -Match 'non-elevated processes'
+    }
+}
+
+Describe 'Hide-TuneupPersonalData' {
+    It 'replaces the profile folder and the account name, whatever the case' {
+        $text = "Folder $($env:USERPROFILE.ToLowerInvariant())\AppData of $($env:USERNAME.ToUpperInvariant())"
+        Hide-TuneupPersonalData -Text $text | Should -Be 'Folder %USERPROFILE%\AppData of %USERNAME%'
+    }
+
+    It 'replaces the profile folder as it is written in JSON' {
+        $json = ConvertTo-Json -InputObject ([pscustomobject]@{ dir = (Join-Path $env:USERPROFILE 'x') })
+        $hidden = Hide-TuneupPersonalData -Text $json -JsonEscaped
+        ($hidden | ConvertFrom-Json).dir | Should -Be '%USERPROFILE%\x'
+    }
+
+    It 'leaves a word that only contains the name alone' {
+        Hide-TuneupPersonalData -Text "$($env:USERNAME)s and x$($env:USERNAME)" | Should -Be "$($env:USERNAME)s and x$($env:USERNAME)"
+    }
+
+    It 'gives back text without either of them untouched' {
+        Hide-TuneupPersonalData -Text 'Applied: 2 | Partial: 0' | Should -Be 'Applied: 2 | Partial: 0'
+        Hide-TuneupPersonalData -Text '' | Should -Be ''
+    }
+}
+
+Describe 'Test-TuneupTrustedLocation and the folders the tool reads' {
+    BeforeEach {
+        $script:Copy = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $Copy -Force | Out-Null
+        # The program files themselves are taken as trusted, so only the other folders decide.
+        Mock -ModuleName Tuneup Test-TuneupTrustedExecutable { $true }
+    }
+
+    It 'trusts a location with nothing else to read' {
+        Test-TuneupTrustedLocation -ScriptRoot $Copy | Should -BeTrue
+    }
+
+    It 'does not trust a location when <Folder> is a folder that the user owns' -TestCases @(
+        @{ Folder = 'catalog' }
+        @{ Folder = 'profiles' }
+        @{ Folder = 'actions' }
+        @{ Folder = 'i18n' }
+        @{ Folder = 'engine' }
+    ) {
+        param($Folder)
+        $path = Join-Path $Copy $Folder
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $path 'x.json'), '{}')
+        Test-TuneupTrustedLocation -ScriptRoot $Copy | Should -BeFalse
+    }
+}
+```
+En `tests/Commands.Tests.ps1`, agregar dentro de `Describe 'Re-applying what drifted'`, después de su última prueba:
+```powershell
+    BeforeAll {
+        # The fixture catalog and profiles plus four tweaks of the re-apply: two plain ones (applied in the
+        # order b, a, which is not the alphabetical one), one that asks first and one of high risk.
+        function New-ReapplyDefinition {
+            $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+            New-Item -ItemType Directory -Path (Join-Path $dir 'catalog'), (Join-Path $dir 'profiles') -Force | Out-Null
+            Copy-Item -Path (Join-Path $Fixtures 'catalog\*.json') -Destination (Join-Path $dir 'catalog')
+            Copy-Item -Path (Join-Path $Fixtures 'profiles\*.json') -Destination (Join-Path $dir 'profiles')
+            $extra = @(
+                (New-TestTweak -Id 'rea.b' -Set ([pscustomobject]@{ path = $Key; name = 'B'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.a' -Set ([pscustomobject]@{ path = $Key; name = 'A'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.ask' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask'; kind = 'DWord'; value = 1 })),
+                (New-TestTweak -Id 'rea.high' -Risk 'high' -Set ([pscustomobject]@{ path = $Key; name = 'High'; kind = 'DWord'; value = 1 }))
+            )
+            [System.IO.File]::WriteAllText((Join-Path $dir 'catalog\rea.json'), (ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = $extra }) -Depth 10))
+            $dir
+        }
+
+        # The four tweaks applied by name and then reverted by Windows.
+        function Initialize-Reverted([string]$Dir) {
+            $context = New-TestContext -Json
+            $context.CatalogPath = Join-Path $Dir 'catalog'
+            $context.ProfilesPath = Join-Path $Dir 'profiles'
+            Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Include @('rea.b', 'rea.a', 'rea.ask', 'rea.high') -Yes } | Out-Null
+            foreach ($name in 'B', 'A', 'Ask', 'High') { Set-ItemProperty -LiteralPath $Key -Name $name -Value 5 }
+        }
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'applies again, as a new run, only the tweaks that Windows reverted' {
+        $context = New-TestContext -Json
+        $first = @(Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -ProfileIds @('extra') -Yes })[0]
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $documents = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Yes })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'apply'
+        $documents[0].source | Should -Be 'reapply'
+        $documents[0].runId | Should -Not -Be $first.runId
+        ($documents[0].results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.one=applied'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        $status = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context })[0]
+        @($status.items | Where-Object { $_.status -ne 'ok' }).Count | Should -Be 0
+    }
+
+    It 'shows the plan of a re-apply with -PlanOnly and says when nothing drifted' {
+        $context = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Yes } | Out-Null
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -PlanOnly })[0]
+        $plan.command | Should -Be 'plan'
+        $plan.source | Should -Be 'reapply'
+        @($plan.items).Count | Should -Be 0
+        $human = New-TestContext
+        $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 6>&1 | Out-String)
+        $text | Should -Match 'Tweaks applied by windows-tuneup:'
+        $human.Io.Output -join "`n" | Should -Match 'Nothing to apply again: Windows reverted no tweak.'
+        $human.ExitCode | Should -Be 0
+    }
+
+    It 'asks before re-applying and leaves out, with a warning, a tweak the catalog no longer has' {
+        $context = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $context -Include @('test.three') -Yes } | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Set-ItemProperty -LiteralPath $Key -Name 'Three' -Value 5
+        $catalog = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $catalog | Out-Null
+        $source = Get-Content -LiteralPath (Join-Path $Fixtures 'catalog\test.json') -Raw | ConvertFrom-Json
+        $source.tweaks = @($source.tweaks | Where-Object { $_.id -ne 'test.three' })
+        [System.IO.File]::WriteAllText((Join-Path $catalog 'test.json'), ($source | ConvertTo-Json -Depth 10))
+        # The profile that names test.three goes too, or the catalog check would fail first.
+        $profiles = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $profiles | Out-Null
+        Get-ChildItem -LiteralPath (Join-Path $Fixtures 'profiles') -Filter '*.json' | Where-Object { $_.Name -ne 'extra.json' } |
+            Copy-Item -Destination $profiles
+        $human = New-TestContext -Answers @('y')
+        $human.CatalogPath = $catalog
+        $human.ProfilesPath = $profiles
+        $text = (Invoke-TuneupStatusCommand -Context $human -Reapply 3>&1 6>&1 | Out-String)
+        $text | Should -Match 'Tweak test.three was reverted but is no longer in the catalog'
+        $text | Should -Match 'Plan: 1 to apply'
+        $human.Io.Output -join "`n" | Should -Match 'Apply 1 changes\? \(y/n\)'
+        $human.ExitCode | Should -Be 0
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 5
+    }
+
+    It 'leaves out a tweak that asks first or has high risk, in the order of the run, and says why' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Yes })[0]
+        ($document.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' |
+            Should -Be 'rea.b=applied/,rea.a=applied/,rea.ask=skipped/needs-confirmation,rea.high=skipped/high-risk-not-requested'
+        $values = Get-ItemProperty -LiteralPath $Key
+        "$($values.B),$($values.A),$($values.Ask),$($values.High)" | Should -Be '1,1,5,5'
+    }
+
+    It 'gives the same plan, in the same order, with -PlanOnly' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -PlanOnly })[0]
+        ($plan.items | ForEach-Object { "$($_.id)=$($_.action)/$($_.reason)" }) -join ',' |
+            Should -Be 'rea.b=apply/,rea.a=apply/,rea.ask=skip/needs-confirmation,rea.high=skip/high-risk-not-requested'
+    }
+
+    It 'lists what it left out when it runs with -Yes and no JSON' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $human = New-TestContext
+        $human.CatalogPath = Join-Path $dir 'catalog'
+        $human.ProfilesPath = Join-Path $dir 'profiles'
+        Invoke-TuneupStatusCommand -Context $human -Reapply -Yes 6>$null
+        $text = $human.Io.Output -join "`n"
+        $text | Should -Match 'Title rea\.ask: needs confirmation'
+        $text | Should -Match 'Title rea\.high: high risk'
+        $text | Should -Not -Match 'Title rea\.b'
+        $human.ExitCode | Should -Be 0
+    }
+
+    It 'does not say there is nothing to apply again when some tweaks need administrator to be checked' {
+        Mock -ModuleName Tuneup Get-TuneupStatus {
+            @([pscustomobject]@{ id = 'x.one'; title = 'One'; status = 'ok'; runId = 'r' }, [pscustomobject]@{ id = 'x.two'; title = 'Two'; status = 'needs-admin'; runId = 'r' })
+        }
+        $human = New-TestContext
+        Invoke-TuneupStatusCommand -Context $human -Reapply 6>$null
+        $text = $human.Io.Output -join "`n"
+        $text | Should -Match 'Nothing to apply again among what could be checked, but 1 tweaks need administrator'
+        $text | Should -Not -Match 'Windows reverted no tweak'
+        $human.ExitCode | Should -Be 0
+    }
+```
+Agregar al final de `tests/Commands.Tests.ps1`:
+```powershell
+Describe 'An apply that stops before it ends' {
+    BeforeAll {
+        # What the run saves when the apply fails: test.one was applied, test.two was in progress.
+        function Get-FailedResult([bool]$Journaled) {
+            $script:stop.Journaled = $Journaled
+            $context = New-TestContext
+            { Invoke-TuneupApplyCommand -Context $context -Yes 6>$null } | Should -Throw
+            $dir = @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName
+            [pscustomobject]@{
+                Context = $context
+                Result  = (Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw | ConvertFrom-Json)
+                Text    = ($context.Io.Output -join "`n")
+            }
+        }
+
+        # What the run saves when Ctrl+C stops PowerShell itself. Stopping the pipeline of a test would
+        # stop the test run, so the function that the apply calls from its finally block is called here.
+        function Get-CtrlCResult([bool]$Journaled) {
+            $context = New-TestContext
+            $plan = @(New-TuneupContextPlan -Context $context -Definition (Import-TuneupContextDefinition -Context $context))
+            $run = New-TuneupRun -StateRoot $Root
+            $results = New-Object System.Collections.Generic.List[object]
+            $results.Add((New-TuneupResult -Item $plan[0] -Status 'applied'))
+            $progress = @{ Current = $plan[1].Id; Journaled = $Journaled }
+            Save-TuneupStoppedApply -Context $context -Run $run -Plan $plan -Request (New-TuneupApplyRequest -Source 'profiles') `
+                -Results $results -Progress $progress -RestorePoint 'not-needed'
+            [pscustomobject]@{
+                Context = $context
+                Result  = (Get-Content -LiteralPath (Join-Path $run.Dir 'result.json') -Raw | ConvertFrom-Json)
+                Text    = ($context.Io.Output -join "`n")
+            }
+        }
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        $script:stop = @{ Journaled = $true }
+        $stop = $script:stop
+        Mock -ModuleName Tuneup Invoke-TuneupPlan {
+            $Results.Add((New-TuneupResult -Item $Plan[0] -Status 'applied'))
+            $Progress.Current = $Plan[1].Id
+            $Progress.Journaled = $stop.Journaled
+            throw 'boom'
+        }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'with Ctrl+C reports the tweak it cut as failed when it was journaled' {
+        $stopped = Get-CtrlCResult $true
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=failed/'
+        $stopped.Result.results[1].error | Should -Match '-Undo can restore it'
+        $stopped.Text | Should -Match 'Stopped with Ctrl\+C'
+        $stopped.Context.ExitCode | Should -Be 2
+    }
+
+    It 'with Ctrl+C before the journal entry leaves the tweak out, as interrupted, with nothing to undo' {
+        $stopped = Get-CtrlCResult $false
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/interrupted'
+        $stopped.Result.summary.interrupted | Should -Be 1
+        $stopped.Result.interrupted | Should -BeTrue
+    }
+
+    It 'with any other error does not say it was Ctrl+C, and saves the error' {
+        $stopped = Get-FailedResult $true
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=failed/'
+        $stopped.Result.results[1].error | Should -Be 'boom; -Undo can restore it'
+        $stopped.Result.interrupted | Should -BeFalse
+        $stopped.Text | Should -Not -Match 'Ctrl\+C'
+        $stopped.Text | Should -Match 'The run stopped because of an error'
+    }
+
+    It 'with another error before the journal entry leaves the tweak out as aborted' {
+        $stopped = Get-FailedResult $false
+        ($stopped.Result.results | ForEach-Object { "$($_.id)=$($_.status)/$($_.reason)" }) -join ',' | Should -Be 'test.one=applied/,test.two=skipped/aborted'
+        $stopped.Result.summary.interrupted | Should -Be 0
+    }
+}
+
+Describe 'The Ctrl+C hint' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        Mock -ModuleName Tuneup Test-TuneupInterruptRequested { $false }
+        Mock -ModuleName Tuneup Disable-TuneupInterruptTrap { }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'says once, through Io, how Ctrl+C and Ctrl+Break work while the trap is on' {
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { [pscustomobject]@{ Previous = $false } }
+        $context = New-TestContext
+        Invoke-TuneupApplyCommand -Context $context -Yes 6>$null
+        @($context.Io.Output | Where-Object { $_ -match 'Ctrl\+C stops after the tweak in progress; Ctrl\+Break interrupts at once' }).Count | Should -Be 1
+    }
+
+    It 'says nothing without a console to trap, or with -Json' {
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { $null }
+        $context = New-TestContext
+        Invoke-TuneupApplyCommand -Context $context -Yes 6>$null
+        $context.Io.Output -join "`n" | Should -Not -Match 'Ctrl'
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { [pscustomobject]@{ Previous = $false } }
+        $json = New-TestContext -Json
+        Get-JsonOutput { Invoke-TuneupApplyCommand -Context $json -Yes } | Out-Null
+        $json.Io.Output -join "`n" | Should -Not -Match 'Ctrl'
+    }
+}
+```
+- [ ] **Step 2: Verificar que fallan**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
+Expected: FAIL en las pruebas nuevas (no existen `-Candidates`, `Hide-TuneupPersonalData`, `-Failure`...).
+
+- [ ] **Step 3: Ejecutor, resultado y transcript**
+
+En `engine/Executor.ps1`, reemplazar la función `Invoke-TuneupPlan` completa (con su comentario) por:
+
+```powershell
+# Applies the plan in order. -StopRequested is asked before each tweak to apply: once it says yes
+# (Ctrl+C, see Interrupt.ps1), that tweak and the rest are left out with the reason interrupted. Each
+# result is also added to -Results when given, and -Progress names the tweak being applied
+# (Current, from before its state is read to its result) and whether its journal entry was already
+# written (Journaled), so a caller whose pipeline was stopped can still tell what was done, which
+# tweak was cut and whether -Undo can restore it. A result is added to -Results before Current is
+# cleared, so a stop in between never loses a tweak that was done.
+function Invoke-TuneupPlan {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)][string]$RunDir,
+        [scriptblock]$StopRequested,
+        [System.Collections.Generic.List[object]]$Results,
+        [hashtable]$Progress
+    )
+    if ($null -eq $Results) { $Results = New-Object System.Collections.Generic.List[object] }
+    if ($null -eq $Progress) { $Progress = @{} }
+    $journal = Join-Path $RunDir 'snapshot.jsonl'
+    $journalError = $null
+    $interrupted = $false
+    foreach ($item in $Plan) {
+        $Progress.Current = $null
+        $Progress.Journaled = $false
+        if ($item.Action -ne 'apply') {
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason
+        } elseif ($interrupted -or ($StopRequested -and (& $StopRequested))) {
+            $interrupted = $true
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted'
+        } elseif ($journalError) {
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason 'journal-error' -ErrorText $journalError
+        } else {
+            $Progress.Current = $item.Id
+            $result = Invoke-TuneupPlanItem -Item $item -Journal $journal -RunDir $RunDir -Progress $Progress
+            if ($result.reason -eq 'journal-error') { $journalError = $result.error }
+        }
+        $Results.Add($result)
+        $Progress.Current = $null
+        $Progress.Journaled = $false
+        $result
+    }
+}
+```
+En `engine/Executor.ps1`, reemplazar la línea de parámetros de `Invoke-TuneupPlanItem`:
+```powershell
+    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$Journal, [Parameter(Mandatory)][string]$RunDir)
+```
+por:
+```powershell
+    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$Journal, [Parameter(Mandatory)][string]$RunDir, [hashtable]$Progress)
+```
+En `engine/Executor.ps1`, dentro de `Invoke-TuneupPlanItem`, reemplazar:
+```powershell
+        return (New-TuneupResult -Item $Item -Status 'skipped' -Reason 'journal-error' -ErrorText $_.Exception.Message)
+    }
+    try {
+```
+por:
+```powershell
+        return (New-TuneupResult -Item $Item -Status 'skipped' -Reason 'journal-error' -ErrorText $_.Exception.Message)
+    }
+    if ($null -ne $Progress) { $Progress.Journaled = $true }
+    try {
+```
+En `engine/Output.ps1`, agregar antes de `Save-TuneupApplyReport` y reemplazar esa función completa por:
+```powershell
+# Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData):
+# the file is meant to be read and shared, and the run folder it names is under the profile of the
+# account. Fails when it cannot be written.
+function Write-TuneupRunResult {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    $json = Hide-TuneupPersonalData -Text (ConvertTo-Json -InputObject $Report -Depth 10) -JsonEscaped
+    Write-TuneupStateFile -Path (Join-Path $Run.Dir 'result.json') -Text $json -Root $Run.Root
+}
+
+function Save-TuneupApplyReport {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    # The changes are already made; losing result.json must not hide the report of what was done.
+    try {
+        Write-TuneupRunResult -Run $Run -Report $Report
+        $true
+    } catch {
+        Write-Warning "The result of run $($Run.Id) could not be saved: $($_.Exception.Message)"
+        $false
+    }
+}
+```
+En `engine/Transcript.ps1`, agregar antes de `Get-TuneupHostText` (con su comentario):
+```powershell
+# The text with the profile folder of the account shown as %USERPROFILE% and the account name shown as
+# %USERNAME%, wherever they are. What a run keeps for people to read and share (the transcript,
+# result.json, the warnings of a preflight) goes through here, so a bug report does not carry the
+# account name inside a path. A name of fewer than 3 characters is left alone: it would also change
+# ordinary words. With -JsonEscaped the profile folder is looked for as JSON writes it (doubled
+# backslashes).
+function Hide-TuneupPersonalData {
+    param([AllowNull()][AllowEmptyString()][string]$Text, [switch]$JsonEscaped)
+    if ([string]::IsNullOrEmpty($Text)) { return $Text }
+    $ignoreCase = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    $folders = @(@($env:USERPROFILE, [Environment]::GetFolderPath('UserProfile')) | Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') } |
+        Select-Object -Unique | Sort-Object -Property Length -Descending)
+    foreach ($folder in $folders) {
+        $literal = $(if ($JsonEscaped) { $folder.Replace('\', '\\') } else { $folder })
+        $Text = [regex]::Replace($Text, [regex]::Escape($literal), '%USERPROFILE%', $ignoreCase)
+    }
+    $name = [string]$env:USERNAME
+    if ($name.Length -ge 3) {
+        $Text = [regex]::Replace($Text, '(?<![A-Za-z0-9])' + [regex]::Escape($name) + '(?![A-Za-z0-9])', '%USERNAME%', $ignoreCase)
+    }
+    $Text
+}
+```
+En `engine/Transcript.ps1`, reemplazar la función `Add-TuneupTranscript` completa por:
+```powershell
+function Add-TuneupTranscript {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)][AllowEmptyCollection()][AllowEmptyString()][string[]]$Lines)
+    $text = Hide-TuneupPersonalData -Text ((@($Lines) -join [Environment]::NewLine) + [Environment]::NewLine)
+    Write-TuneupStateFile -Path (Join-Path $Run.Dir 'transcript.log') -Root $Run.Root -Append -Text $text
+}
+```
+- [ ] **Step 4: Avisos y planificador**
+
+En `engine/Preflight.ps1`, reemplazar la función `Test-TuneupTrustedLocation` completa (con su comentario) por estas dos funciones:
+```powershell
+# A file or folder of the tool: not a link, and owned and changeable only by SYSTEM, TrustedInstaller
+# and Administrators.
+function Test-TuneupTrustedEntry {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $false }
+        $security = Get-Acl -LiteralPath $Path -ErrorAction Stop
+    } catch {
+        return $false
+    }
+    Test-TuneupTrustedSecurity -Security $security -TrustedSids $script:BaseTrustedSids -SkipInheritOnly
+}
+
+# Running elevated from a folder that others can change lets them run code as administrator (README,
+# requirements). The script and the module are checked with their parent folders up to the root, like
+# a program that runs elevated, and so is everything else the tool loads or reads: the files of
+# engine, catalog, profiles, actions and i18n, and those folders themselves. Any one that a
+# non-elevated process can change makes the location untrusted.
+function Test-TuneupTrustedLocation {
+    param([Parameter(Mandatory)][string]$ScriptRoot)
+    $root = [System.IO.Path]::GetPathRoot($ScriptRoot)
+    if (-not (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'tuneup.ps1') -StopAt $root)) { return $false }
+    if (-not (Test-TuneupTrustedExecutable -Path (Join-Path $ScriptRoot 'engine\Tuneup.psm1') -StopAt $root)) { return $false }
+    foreach ($name in 'engine', 'catalog', 'profiles', 'actions', 'i18n') {
+        $folder = Join-Path $ScriptRoot $name
+        if (-not (Test-Path -LiteralPath $folder)) { continue }
+        foreach ($entry in @(Get-Item -LiteralPath $folder -Force) + @(Get-ChildItem -LiteralPath $folder -Recurse -Force -ErrorAction SilentlyContinue)) {
+            if (-not (Test-TuneupTrustedEntry -Path $entry.FullName)) { return $false }
+        }
+    }
+    $true
+}
+```
+En `engine/Preflight.ps1`, dentro de `Get-TuneupPreflight`, reemplazar:
+```powershell
+        New-TuneupPreflightItem -Key 'preflight.untrusted-location' -Format $ScriptRoot
+```
+por:
+```powershell
+        # The location is written without the profile folder or the account name: the warning ends up in
+        # the transcript, result.json and the JSON, which people share.
+        New-TuneupPreflightItem -Key 'preflight.untrusted-location' -Format (Hide-TuneupPersonalData -Text $ScriptRoot)
+```
+En `engine/Planner.ps1`, dentro de `New-TuneupPlan`, reemplazar:
+```powershell
+        [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
+        [Parameter(Mandatory)]$Environment,
+```
+por:
+```powershell
+        [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
+        # Tweaks named like a profile names them, in this order and without being asked for: one that
+        # asks first or has high risk is left out as in a profile.
+        [AllowEmptyCollection()][AllowNull()][string[]]$Candidates = @(),
+        [Parameter(Mandatory)]$Environment,
+```
+En `engine/Planner.ps1`, reemplazar:
+```powershell
+    $Exclude = @(Get-TuneupCleanList $Exclude)
+
+    # Hashtable
+```
+por:
+```powershell
+    $Exclude = @(Get-TuneupCleanList $Exclude)
+    $Candidates = @(Get-TuneupCleanList $Candidates)
+
+    # Hashtable
+```
+En `engine/Planner.ps1`, reemplazar:
+```powershell
+    foreach ($tweakId in @($Include) + @($Exclude)) {
+```
+por:
+```powershell
+    foreach ($tweakId in @($Include) + @($Exclude) + @($Candidates)) {
+```
+En `engine/Planner.ps1`, reemplazar:
+```powershell
+    $Exclude = @($Exclude | ForEach-Object { & $canonical $_ })
+```
+por:
+```powershell
+    $Exclude = @($Exclude | ForEach-Object { & $canonical $_ })
+    $Candidates = @($Candidates | ForEach-Object { & $canonical $_ })
+```
+En `engine/Planner.ps1`, reemplazar:
+```powershell
+    foreach ($tweakId in $Include) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
+```
+por:
+```powershell
+    foreach ($tweakId in $Include) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
+    foreach ($tweakId in $Candidates) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
+```
+(El parámetro no se llama `Wanted` porque PowerShell no distingue mayúsculas y chocaría con la lista local `$wanted`.)
+
+- [ ] **Step 5: Comandos**
+
+En `engine/Commands.ps1`, reemplazar la función `Invoke-TuneupReapply` completa (con su comentario) por:
+```powershell
+# Plans again, from the catalog of now, the tweaks whose status is drift: only them (no base profile)
+# and by name, so a tweak that asks first or is kept by a profile is applied again too; the
+# compatibility checks still apply. A drifted tweak that the catalog no longer has is left out with a
+# warning: undoing the run that applied it restores it.
+function Invoke-TuneupReapply {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items, [switch]$PlanOnly, [switch]$Yes)
+    # In the order of the runs that applied them, not alphabetical.
+    $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Select-Object -Unique)
+    if (-not $drifted.Count -and -not $Context.Json) {
+        # Without administrator some tweaks cannot be checked: that is not the same as nothing to do.
+        $unverified = @($Items | Where-Object { $_.status -eq 'needs-admin' }).Count
+        $line = $(if ($unverified) { Get-TuneupText -Key 'reapply.noneUnverified' -Format $unverified } else { Get-TuneupText -Key 'reapply.none' })
+        Write-TuneupIoLine -Io $Context.Io -Text $line
+        $Context.ExitCode = 0
+        return
+    }
+    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+    if ($unsupported) {
+        Write-TuneupCommandError -Context $Context -Message $unsupported
+        return
+    }
+    $definition = Import-TuneupContextDefinition -Context $Context
+    if ($definition.Problems.Count) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
+        return
+    }
+    $known = @{}
+    foreach ($tweak in $definition.Catalog) { $known[[string]$tweak.id] = $true }
+    $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
+    if ($missing.Count) {
+        Invoke-TuneupContextStep -Context $Context -Step {
+            foreach ($id in $missing) { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+        }
+    }
+    $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
+    # Named like a profile names them, not asked for: a tweak that asks first or has high risk is left
+    # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those.
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -NoBase)
+    $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids
+    if ($Yes -and -not $PlanOnly -and -not $Context.Json) {
+        # With -Yes the plan is not shown, so what is left out is listed here.
+        foreach ($item in @($plan | Where-Object { $_.Action -eq 'skip' -and @('needs-confirmation', 'high-risk-not-requested') -contains $_.Reason })) {
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'reapply.leftOut' -Format (Get-TuneupTitle -Tweak $item.Tweak), (Get-TuneupText -Key "reason.$($item.Reason)"))
+        }
+    }
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+}
+```
+En `engine/Commands.ps1`, reemplazar la función `New-TuneupContextPlan` completa por:
+```powershell
+function New-TuneupContextPlan {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Definition,
+        [AllowEmptyCollection()][string[]]$ProfileIds = @(),
+        [AllowEmptyCollection()][string[]]$Include = @(),
+        [AllowEmptyCollection()][string[]]$Exclude = @(),
+        [AllowEmptyCollection()][string[]]$Candidates = @(),
+        [switch]$Interactive,
+        [switch]$NoBase
+    )
+    $planArguments = @{
+        Catalog     = $Definition.Catalog
+        Profiles    = $Definition.Profiles
+        ProfileIds  = $ProfileIds
+        Include     = $Include
+        Exclude     = $Exclude
+        Candidates  = $Candidates
+        Environment = Get-TuneupContextEnvironment -Context $Context
+        Interactive = $Interactive
+        NoBase      = $NoBase
+        TestState   = { param($tweak) Test-TuneupState -Tweak $tweak }
+    }
+    @(Invoke-TuneupContextStep -Context $Context -Step { New-TuneupPlan @planArguments })
+}
+```
+En `engine/Commands.ps1`, reemplazar la función `Invoke-TuneupPlannedApply` completa (con su comentario) por:
+```powershell
+# Shows the plan, or asks and applies it: the part that applying profiles, re-applying what drifted
+# and the menu have in common.
+function Invoke-TuneupPlannedApply {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)]$Request,
+        [switch]$PlanOnly,
+        [switch]$Yes
+    )
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $toApply = @($Plan | Where-Object { $_.Action -eq 'apply' })
+    # Warnings before applying (Preflight.ps1): none of them stops the run.
+    $preflightArguments = @{ Environment = $environment; Plan = $Plan; ScriptRoot = $Context.ScriptRoot }
+    $preflight = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupPreflight @preflightArguments })
+    if ($PlanOnly -or -not $toApply.Count) {
+        $Context.Result = $null
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight -Source $Request.Source -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        $Context.ExitCode = 0
+        return
+    }
+    $machineChanges = @($toApply | Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak }).Count
+    if ($machineChanges -and -not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.notAdmin')
+        return
+    }
+    if (-not $Yes) {
+        if ($Context.Json) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.jsonNeedsYes')
+            return
+        }
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Preflight $preflight
+        if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'aborted')
+            $Context.ExitCode = 1
+            return
+        }
+        # The only warning with something to do about it here: System Restore can be turned on. It is
+        # asked after the apply is confirmed, so declining the apply never leaves it on, and once it is
+        # on the warning is no longer true and leaves the report of the run.
+        if (@($preflight | Where-Object { $_.id -eq 'restore-disabled' }).Count -and (Request-TuneupSystemRestore -Io $Context.Io)) {
+            $preflight = @($preflight | Where-Object { $_.id -ne 'restore-disabled' })
+        }
+    } elseif (-not $Context.Json) {
+        Write-TuneupPreflight -Preflight $preflight
+    }
+    # Elevated runs go to the protected machine folder; the rest to the user folder (user-scope tweaks only).
+    $run = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRun -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
+    Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupJson -Path (Join-Path $run.Dir 'plan.json') -Root $run.Root -Object @(ConvertTo-TuneupPlanView -Plan $Plan) }
+    $restorePoint = 'not-needed'
+    if ($machineChanges) { $restorePoint = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
+    # Ctrl+C stops the run between two tweaks (Interrupt.ps1). If it stops PowerShell itself, the
+    # finally block saves what was done; the results and the tweak in progress are kept outside the
+    # pipeline for that.
+    $results = New-Object System.Collections.Generic.List[object]
+    $progress = @{ Current = $null }
+    $trap = Enable-TuneupInterruptTrap
+    if ($null -ne $trap -and -not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'interrupted.hint') }
+    $applyArguments = @{
+        Plan          = $Plan
+        RunDir        = $run.Dir
+        Results       = $results
+        Progress      = $progress
+        StopRequested = { Test-TuneupInterruptRequested -Trap $trap }
+    }
+    $finished = $false
+    $failure = $null
+    try {
+        Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupPlan @applyArguments } | Out-Null
+        $finished = $true
+    } catch {
+        # Ctrl+C that stops PowerShell is not an error of the apply; any other error is saved as one.
+        if ($_.Exception -isnot [System.Management.Automation.PipelineStoppedException]) { $failure = $_.Exception.Message }
+        throw
+    } finally {
+        Disable-TuneupInterruptTrap -Trap $trap
+        if (-not $finished) {
+            Save-TuneupStoppedApply -Context $Context -Run $run -Plan $Plan -Request $Request -Results $results -Progress $progress -RestorePoint $restorePoint -Preflight $preflight -Failure $failure
+        }
+    }
+    $report = New-TuneupApplyReport -Run $run -Results $results.ToArray() -RestorePoint $restorePoint -Environment $environment -Preflight $preflight -Source $Request.Source
+    $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
+    Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyTranscript -Context $Context -Run $run -Request $Request -Plan $Plan -Report $report }
+    $Context.Result = $report
+    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+}
+```
+En `engine/Commands.ps1`, reemplazar la función `Save-TuneupStoppedApply` completa (con su comentario) por:
+```powershell
+# Ctrl+C reached PowerShell itself while a native program ran (Interrupt.ps1), or the apply failed
+# outside any one tweak (-Failure holds the error). What was done is saved as the result of the run:
+# the tweak in progress is reported as failed when its journal entry was written (-Undo can restore
+# it) and the rest as interrupted by Ctrl+C or as aborted by the error. A tweak cut before its journal
+# entry changed nothing, so it is only left out. The output is closed by then (a stopped pipeline),
+# so only the host and the files can be written.
+function Save-TuneupStoppedApply {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Run,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [Parameter(Mandatory)]$Request,
+        [Parameter(Mandatory)][AllowEmptyCollection()][System.Collections.Generic.List[object]]$Results,
+        [Parameter(Mandatory)][hashtable]$Progress,
+        [Parameter(Mandatory)][string]$RestorePoint,
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [string]$Failure
+    )
+    $done = @($Results.ToArray())
+    $doneIds = @($done | ForEach-Object { $_.id })
+    $rest = @(foreach ($item in $Plan) {
+        if ($doneIds -contains $item.Id) { continue }
+        if ($item.Action -ne 'apply') { New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason }
+        elseif ($item.Id -eq $Progress.Current -and $Progress.Journaled) {
+            New-TuneupResult -Item $item -Status 'failed' -ErrorText $(if ($Failure) { "$Failure; -Undo can restore it" } else { 'stopped while it was being applied; -Undo can restore it' })
+        }
+        else { New-TuneupResult -Item $item -Status 'skipped' -Reason $(if ($Failure) { 'aborted' } else { 'interrupted' }) }
+    })
+    $report = New-TuneupApplyReport -Run $Run -Results (@($done) + @($rest)) -RestorePoint $RestorePoint -Environment $Context.Environment -Preflight $Preflight -Source $Request.Source
+    $saved = $true
+    try {
+        Write-TuneupRunResult -Run $Run -Report $report
+    } catch {
+        $saved = $false
+    }
+    try {
+        Add-TuneupTranscript -Run $Run -Lines @(Get-TuneupApplyTranscript -Run $Run -Request $Request -Plan $Plan -Report $report `
+                -Environment $Context.Environment -Warnings $Context.Warnings.ToArray())
+    } catch {
+        # A missing transcript loses nothing that result.json and the journal do not keep.
+        $null = $_
+    }
+    $Context.Result = $report
+    $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+    if (-not $Context.Json) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key $(if ($Failure) { 'aborted.saved' } else { 'interrupted.saved' }) -Format $Run.Id)
+    }
+}
+```
+En `i18n/es.json`, reemplazar el texto de `preflight.untrusted-location` por:
+```json
+  "preflight.untrusted-location": "windows-tuneup corre como administrador desde {0}, una carpeta (o archivos suyos) que procesos sin elevar, incluidos los tuyos, pueden cambiar: instálalo en Program Files (README, Instalación).",
+```
+En `i18n/en.json`, reemplazar el texto de `preflight.untrusted-location` por:
+```json
+  "preflight.untrusted-location": "windows-tuneup runs as administrator from {0}, a folder (or files in it) that non-elevated processes (including your own) can change: install it under Program Files (README, Installation).",
+```
+En `i18n/es.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
+```json
+  "interrupted.hint": "Ctrl+C se detiene después del ajuste en curso; Ctrl+Pausa interrumpe de inmediato",
+  "aborted.saved": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla: .\tuneup.ps1 -Undo {0}",
+  "reason.aborted": "no se aplicó: la corrida se detuvo por un error",
+  "reapply.noneUnverified": "Nada que volver a aplicar entre lo que se pudo comprobar, pero {0} ajustes necesitan administrador para comprobarse: ejecútalo de nuevo como administrador.",
+  "reapply.leftOut": "No se vuelve a aplicar {0}: {1}"
+```
+En `i18n/en.json`, agregar estas claves al final (una coma después de la última clave que ya estaba):
+```json
+  "interrupted.hint": "Ctrl+C stops after the tweak in progress; Ctrl+Break interrupts at once",
+  "aborted.saved": "The run stopped because of an error. The result of run {0} was saved; to undo it: .\tuneup.ps1 -Undo {0}",
+  "reason.aborted": "not applied: the run stopped because of an error",
+  "reapply.noneUnverified": "Nothing to apply again among what could be checked, but {0} tweaks need administrator to be checked: run it again as administrator.",
+  "reapply.leftOut": "Not applied again, {0}: {1}"
+```
+- [ ] **Step 6: Verificar que pasan**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Executor.Tests.ps1`
+Expected: PASS (`Tests Passed: 26, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Planner.Tests.ps1`
+Expected: PASS (`Tests Passed: 46, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Preflight.Tests.ps1`
+Expected: PASS (`Tests Passed: 29, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Commands.Tests.ps1`
+Expected: PASS (`Tests Passed: 31, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Interrupt.Tests.ps1`
+Expected: PASS (`Tests Passed: 3, Failed: 0`).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1`
+Expected: toda la suite en verde (`Tests Passed: 1164, Failed: 0, Skipped: 1`).
+
+- [ ] **Step 7: Lint**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/lint.ps1`
+Expected: `PSScriptAnalyzer: no findings`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add engine/Executor.ps1 engine/Output.ps1 engine/Transcript.ps1 engine/Preflight.ps1 engine/Planner.ps1 engine/Commands.ps1 i18n/es.json i18n/en.json tests/Interrupt.Tests.ps1 tests/Executor.Tests.ps1 tests/Planner.Tests.ps1 tests/Output.Tests.ps1 tests/Preflight.Tests.ps1 tests/Commands.Tests.ps1
+git commit -m "fix: Ctrl+C avisa, transcript sin nombre de cuenta y reaplicar con confirmación"
+```
+
+---
+
 ### Task 9: Menú: estructura, estado, deshacer, salud y medir
 
 **Files:**
@@ -6475,7 +7452,7 @@ Fields that several documents carry.
 | `environment.isAdmin` | boolean | The process is elevated. |
 | `environment.hasBattery` | boolean | A battery on a portable chassis. |
 | `environment.pendingReboot` | boolean | Windows has a restart pending. |
-| `preflight[].id` | string | A warning before applying (none stops the run): `pending-reboot`, `low-disk` (less than 2 GB free on the system drive), `restore-disabled` (System Restore off on the system drive), `restore-blocked` (off by policy), `managed-device`, `untrusted-location` (elevated, running from a folder that other accounts can change). Only when the plan changes something; `restore-*` only for system changes made elevated. |
+| `preflight[].id` | string | A warning before applying (none stops the run): `pending-reboot`, `low-disk` (less than 2 GB free on the system drive), `restore-disabled` (System Restore off on the system drive), `restore-blocked` (off by policy), `managed-device`, `untrusted-location` (elevated, with the program or its `engine`, `catalog`, `profiles`, `actions` or `i18n` folders in a place that non-elevated processes can change; the message shows the folder with the profile folder written `%USERPROFILE%`). Only when the plan changes something; `restore-*` only for system changes made elevated, and a System Restore turned on from the offer (asked after the apply is confirmed) takes `restore-disabled` out of the apply document. |
 | `preflight[].message` | string | The warning for people. |
 
 ## `plan`
@@ -6502,7 +7479,7 @@ Fields that several documents carry.
 
 ## `apply`
 
-Also saved, without `warnings` and `toolVersion`, as `result.json` in the run folder.
+Also saved, without `warnings` and `toolVersion`, as `result.json` in the run folder. In the saved copy the profile folder is written `%USERPROFILE%` and the account name `%USERNAME%` (`runDir` included, so the file can be shared); the standard output keeps the real `runDir`.
 
 | Field | Type | Meaning |
 |---|---|---|
@@ -6529,7 +7506,7 @@ Also saved, without `warnings` and `toolVersion`, as `result.json` in the run fo
 | `results[].id` | string | Tweak id. |
 | `results[].title` | string | Tweak title. |
 | `results[].status` | string | `applied`, `partial`, `not-applied`, `failed`, `skipped`. |
-| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`). |
+| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, `aborted` (the run stopped because of an error that was not Ctrl+C), or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`). |
 | `results[].error` | string or null | What failed. |
 | `results[].detail` | string or null | Explanation of a partial result or a refusal. |
 | `results[].rebootRequired` | boolean | This tweak needs a restart. |
@@ -6537,6 +7514,8 @@ Also saved, without `warnings` and `toolVersion`, as `result.json` in the run fo
 | `results[].refused` | boolean | The tweak refused to change anything. |
 
 Exit code: `0` everything applied (refusals and skips included); `2` something partial, not applied, failed, interrupted after a change, or a backup or `result.json` not saved; `1` nothing changed (no backup could be written, or Ctrl+C before the first tweak).
+
+Ctrl+C with `-Json`: when it reaches the console as a key (between two tweaks, with a console of its own) the usual `apply` document comes out, with `interrupted` true and the exit code above. When it stops PowerShell itself (a native program such as DISM or winget was running) nothing is written to the standard output: the exit code is `2` and the document is the `result.json` of the newest folder under `runs` of the state folder (the tweak that was cut is `failed`, with its journal entry, so `-Undo last` restores it; the ones not reached are `interrupted`). A caller must read an empty output with exit code `2` as "look at `result.json`". A failure that is not Ctrl+C leaves the same `result.json` with the tweaks not reached as `aborted`, and the error report on the standard output.
 
 ## `status`
 
@@ -6827,8 +7806,8 @@ Without parameters, `tuneup.ps1` opens a menu in the console (Windows PowerShell
   Ctrl+C while applying finishes the tweak in progress and leaves the rest unapplied: the summary says so, the result is saved and the exit code is 2 (or 1 if nothing had been touched yet). If Ctrl+C arrives while an external program runs (DISM, winget), everything stops at once; the result is still saved and the journal, written before each change, lets you undo the tweak that was cut.
 - Cada corrida guarda `transcript.log` con lo que se vio en pantalla (lo pedido, el plan, los avisos, los resultados y cada deshacer posterior), escrito por la herramienta: sin nombres de cuenta ni de equipo ni la línea de comandos.
   Every run keeps `transcript.log` with what was shown (what was asked for, the plan, the warnings, the results and every later undo), written by the tool itself: no account or machine names and no command line.
-- `-Status -Reapply` (o el menú) vuelve a aplicar, como una corrida nueva, los ajustes que Windows revirtió (`drift`), con la definición del catálogo actual.
-  `-Status -Reapply` (or the menu) applies again, as a new run, the tweaks that Windows reverted (`drift`), with the definition of the current catalog.
+- `-Status -Reapply` (o el menú) vuelve a aplicar, como una corrida nueva, los ajustes que Windows revirtió (`drift`), con la definición del catálogo actual. Un ajuste que pregunta antes o de riesgo alto no se vuelve a aplicar solo: queda omitido, con su motivo (el menú pregunta por cada uno).
+  `-Status -Reapply` (or the menu) applies again, as a new run, the tweaks that Windows reverted (`drift`), with the definition of the current catalog. A tweak that asks first or has high risk is not applied again on its own: it stays out, with its reason (the menu asks about each one).
 - Si `-Undo` no puede restaurar un ajuste, muestra cómo hacerlo a mano con líneas de PowerShell (`New-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `powercfg.exe` o `winget`); con `-Json`, en `results[].manual`.
   When `-Undo` cannot restore a tweak, it shows how to do it by hand with PowerShell lines (`New-ItemProperty`, `Set-Service`, `Enable-ScheduledTask`, `Add-WindowsCapability`, `powercfg.exe` or `winget`); with `-Json`, in `results[].manual`.
 - Idioma con `-Lang es|en`.
@@ -7036,8 +8015,9 @@ Sin verificar al escribir el plan:
 
 - Contexto: `New-TuneupContext` (`Json`, `StateRoot`, `CatalogPath`, `ProfilesPath`, `Force`, `Warnings`, `Environment`, `ScriptRoot`, `Io`, `InputEnded`, `ExitCode`, `Result`), `Invoke-TuneupContextStep`, `Write-TuneupCommandError`, `Get-TuneupContextEnvironment`, `Get-TuneupUnsupportedMessage`, `Import-TuneupContextDefinition` (`Catalog`, `Profiles`, `Problems`), `New-TuneupContextPlan`, `New-TuneupApplyRequest` (`Source` = `profiles` | `reapply`).
 - Comandos: `Invoke-TuneupCli`, `Invoke-TuneupApplyCommand`, `Invoke-TuneupPlannedApply`, `Invoke-TuneupStatusCommand` (`-Reapply`, `-PlanOnly`, `-Yes`), `Invoke-TuneupReapply`, `Invoke-TuneupUndoCommand`, `Invoke-TuneupHealthCommand` (`-Previous`), `Invoke-TuneupMeasureCommand`, `Save-TuneupStoppedApply`, `Save-TuneupApplyTranscript`, `Save-TuneupUndoTranscript`.
+- Privacidad y confianza: `Hide-TuneupPersonalData` (`%USERPROFILE%`, `%USERNAME%`), `Write-TuneupRunResult`, `Test-TuneupTrustedEntry`.
 - Campos JSON nuevos: `toolVersion` (todos), `preflight[].id`/`message` (`plan`, `apply`), `source` (`plan`, `apply`), `interrupted` y `summary.interrupted` (`apply`), `signOutRequired` y `results[].manual`/`signOutRequired` (`undo`). Todos en `docs/json-contract.md`, que la prueba mantiene al día.
-- Motivos nuevos con texto en los dos idiomas: `interrupted`, `declined`. Ids de avisos: `pending-reboot`, `low-disk`, `restore-disabled`, `restore-blocked`, `managed-device`, `untrusted-location` (claves `preflight.<id>`).
+- Motivos nuevos con texto en los dos idiomas: `interrupted`, `aborted`, `declined`. Ids de avisos: `pending-reboot`, `low-disk`, `restore-disabled`, `restore-blocked`, `managed-device`, `untrusted-location` (claves `preflight.<id>`).
 - Marcadores del instalador: `'__TUNEUP_VERSION__'` y `'__TUNEUP_ZIP_SHA256__'` (con las comillas) en `install.ps1`, que `build/package.ps1` reemplaza y exige.
 
 **Correcciones hechas al ejecutar el plan en la copia:** el ayudante que escribía el error del catálogo y devolvía `$null` mezclaba el documento JSON con su valor de retorno (ahora devuelve `Problems`); PSScriptAnalyzer marcaba parámetros usados solo dentro de un bloque de paso (tablas de argumentos) y un `-WhatIf` propio (`-PlanOnly`); `Get-ItemProperty` devuelve un DWORD como `UInt32`, por eso la prueba de `reg.exe` lee con `GetValue`; la prueba de cobertura tomaba `transcript.log` por una clave; `[pscustomobject]` no tiene `.Count` en Windows PowerShell 5.1, por eso las pruebas envuelven con `@()`; con `$ErrorActionPreference = 'Stop'` la salida de error de `install.ps1` se volvía una excepción en las pruebas (se baja a `Continue` solo ahí); la prueba de reaplicar con un ajuste que ya no está en el catálogo también tiene que quitar el perfil que lo nombra; `build/package.ps1` fallaba fuera de un checkout de git (la salida de error de git con `Stop`), lo que mostró la copia rearmada desde el plan; un texto de `i18n` escrito a mano con `.\tuneup.ps1` quedó con un tabulador (`\t` en JSON) y lo detectó la comparación del plan con la copia: en los `.json` de textos la barra se escribe doble (`.\\tuneup.ps1`), como en `run.saved`.
