@@ -273,3 +273,54 @@ Describe 'dev catalog' {
         Get-CategoryId 'dev' | Should -Be $expected
     }
 }
+
+Describe 'apps catalog' {
+    It 'ships the apps tweaks in this order' {
+        $expected = @(
+            'apps.clipchamp',
+            'apps.bing-news',
+            'apps.bing-weather',
+            'apps.bing-finance',
+            'apps.office-hub',
+            'apps.power-automate',
+            'apps.dev-home',
+            'apps.messaging',
+            'apps.mixed-reality-portal',
+            'apps.movies-tv',
+            'apps.bing-search',
+            'apps.copilot',
+            'apps.get-help',
+            'apps.feedback-hub',
+            'apps.todos',
+            'apps.alarms-clock',
+            'apps.sound-recorder',
+            'apps.media-player',
+            'apps.quick-assist',
+            'apps.phone-link',
+            'apps.xbox-gaming-app',
+            'apps.xbox-game-bar',
+            'apps.widgets-web-experience',
+            'apps.widgets-platform-runtime',
+            'apps.start-experiences',
+            'apps.outlook-new',
+            'apps.family-safety',
+            'apps.mail-calendar',
+            'apps.msteams',
+            'apps.onedrive'
+        ) -join ','
+        Get-CategoryId 'apps' | Should -Be $expected
+    }
+
+    It 'asks before removing the apps people often use' {
+        $asked = @(Get-CategoryTweak 'apps' | Where-Object { $_.ask } | ForEach-Object { $_.id }) -join ','
+        $asked | Should -Be 'apps.copilot,apps.get-help,apps.media-player,apps.quick-assist,apps.phone-link,apps.outlook-new,apps.family-safety,apps.msteams,apps.onedrive'
+    }
+
+    It 'gives every Store app the id that winget reinstalls' {
+        foreach ($tweak in Get-CategoryTweak 'apps' | Where-Object { $_.type -eq 'appx' }) {
+            [string]$tweak.set.storeId | Should -MatchExactly '^(?:[0-9A-Z]{12}|XP[0-9A-Z]{12})$' -Because $tweak.id
+        }
+        (Get-CategoryTweak 'apps' | Where-Object { $_.id -eq 'apps.msteams' }).set.storeId | Should -Be 'XP8BT8DW290MPQ'
+        (Get-CategoryTweak 'apps' | Where-Object { $_.id -eq 'apps.onedrive' }).set.script | Should -Be 'onedrive'
+    }
+}
