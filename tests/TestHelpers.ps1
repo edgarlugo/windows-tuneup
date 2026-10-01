@@ -150,3 +150,16 @@ function New-TestProfile {
         keep        = $Keep
     }
 }
+
+# Questions and answers for the menu and the confirmations: each read takes the next scripted answer
+# ($null stands for the end of the input) and fails when there are none left, so a test that asks
+# more than it planned fails instead of waiting. What is written is kept in Output.
+function New-TestIo {
+    param([object[]]$Answers = @())
+    $queue = New-Object System.Collections.Queue
+    foreach ($answer in $Answers) { $queue.Enqueue($answer) }
+    $output = New-Object System.Collections.Generic.List[string]
+    $read = { if ($queue.Count -eq 0) { throw 'The test has no more answers' }; $queue.Dequeue() }.GetNewClosure()
+    $write = { param([AllowEmptyString()][string]$Text, [switch]$NoNewline) $output.Add($Text) }.GetNewClosure()
+    [pscustomobject]@{ PSTypeName = 'Tuneup.Io'; Read = $read; Write = $write; Output = $output; Pending = $queue }
+}

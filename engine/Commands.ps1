@@ -1,0 +1,320 @@
+# The commands of the tool, shared by the command line (tuneup.ps1) and the menu. Each one writes its
+# report (a JSON document on the output with -Json, text for people otherwise), leaves its exit code in
+# $Context.ExitCode and what it produced in $Context.Result. A command never calls exit: an error that
+# ends it is written as an error report with exit code 1.
+
+# What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
+# collected so far, the questions and answers (Io), the exit code and the last result.
+function New-TuneupContext {
+    param([switch]$Json, $Io)
+    [pscustomobject]@{
+        PSTypeName   = 'Tuneup.Context'
+        Json         = [bool]$Json
+        StateRoot    = $null
+        CatalogPath  = $null
+        ProfilesPath = $null
+        Force        = $false
+        Warnings     = New-Object System.Collections.Generic.List[string]
+        Environment  = $null
+        Io           = $(if ($null -ne $Io) { $Io } else { New-TuneupConsoleIo })
+        ExitCode     = 0
+        Result       = $null
+    }
+}
+
+# With -Json the warnings go inside the document; otherwise each one is shown once.
+function Invoke-TuneupContextStep {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][scriptblock]$Step)
+    Invoke-TuneupStepCollectingWarning -Step $Step -Warnings $Context.Warnings -Json:$Context.Json
+}
+
+function Write-TuneupCommandError {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [AllowEmptyCollection()][string[]]$Details = @())
+    Write-TuneupErrorReport -Message $Message -Details $Details -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 1
+}
+
+function Get-TuneupContextEnvironment {
+    param([Parameter(Mandatory)]$Context)
+    if ($null -eq $Context.Environment) {
+        $Context.Environment = Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupEnvironment }
+    }
+    $Context.Environment
+}
+
+function Invoke-TuneupStatusCommand {
+    param([Parameter(Mandatory)]$Context)
+    $items = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupStatus -StateRoot $Context.StateRoot })
+    $Context.Result = $items
+    Write-TuneupStatusReport -Items $items -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 0
+}
+
+function Invoke-TuneupUndoCommand {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$RunId, [string]$TweakId)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $run = Invoke-TuneupContextStep -Context $Context -Step { Resolve-TuneupRun -StateRoot $Context.StateRoot -RunId $RunId }
+    if (-not $run) {
+        $missing = $(if ($RunId -eq 'last') { Get-TuneupText -Key 'undo.none' } else { Get-TuneupText -Key 'err.runNotFound' -Format $RunId })
+        Write-TuneupCommandError -Context $Context -Message $missing
+        return
+    }
+    # Machine-folder runs always need elevation; a -StateRoot run only for its machine tweaks.
+    $needsAdmin = ($run.Root -eq 'machine')
+    if (-not $needsAdmin) {
+        # Its warnings come again, once, from the undo itself.
+        $needsAdmin = @(Invoke-TuneupContextStep -Context $Context -Step { Read-TuneupRunJournal -Run $run -WarningAction SilentlyContinue } |
+            Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.tweak }).Count -gt 0
+    }
+    if ($needsAdmin -and -not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.notAdmin')
+        return
+    }
+    # Arguments of a step go in a table: PSScriptAnalyzer does not see a parameter used only inside it.
+    $undoArguments = @{ Run = $run; TweakId = $TweakId }
+    $results = @(Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupUndo @undoArguments })
+    $Context.Result = $results
+    Write-TuneupUndoReport -RunId $run.Id -Results $results -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = Get-TuneupUndoExitCode -Results $results
+}
+
+function Invoke-TuneupHealthCommand {
+    param([Parameter(Mandatory)]$Context, [switch]$Repair)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    if (-not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
+        return
+    }
+    if (-not $Context.Json) { Write-Host (Get-TuneupText -Key 'health.running') }
+    # One line per phase for people; with -Json nothing but the document goes to the output.
+    $healthArguments = @{ Repair = $Repair }
+    if (-not $Context.Json) { $healthArguments.OnPhase = { param($Name) Write-Host (Get-TuneupText -Key "health.phase.$Name") } }
+    $report = Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupHealth @healthArguments }
+    $Context.Result = $report
+    Write-TuneupHealthReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = Get-TuneupHealthExitCode -Report $report
+}
+
+function Invoke-TuneupMeasureCommand {
+    param([Parameter(Mandatory)]$Context, [string]$Compare, [int]$IdleSeconds = 0)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    # Resolved before measuring, so 'last' is never the new measurement.
+    $against = $null
+    if ($Compare) {
+        $against = Invoke-TuneupContextStep -Context $Context -Step { Resolve-TuneupMeasurement -StateRoot $Context.StateRoot -Id $Compare }
+        if (-not $against) {
+            $missing = $(if ($Compare -eq 'last') { Get-TuneupText -Key 'err.noMeasurements' } else { Get-TuneupText -Key 'err.measurementNotFound' -Format $Compare })
+            Write-TuneupCommandError -Context $Context -Message $missing
+            return
+        }
+    }
+    if ($IdleSeconds -gt 0 -and -not $Context.Json) { Write-Host (Get-TuneupText -Key 'measure.waiting' -Format $IdleSeconds) }
+    $measurement = Invoke-TuneupContextStep -Context $Context -Step { Measure-TuneupSystem -Environment $environment -IdleSeconds $IdleSeconds }
+    $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupMeasurement -Measurement $measurement -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
+    $report = New-TuneupMeasureReport -Saved $saved -Against $against
+    $Context.Result = $report
+    Write-TuneupMeasureReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 0
+}
+
+# Windows Server and builds older than 19041 are refused unless -Force; Server then plans like
+# Enterprise, which supports every policy that Server supports. Gives the message of the refusal, or
+# nothing. Helpers like this one return values and never write a report: with -Json the report is
+# output, and it would be mixed into what the helper returns.
+function Get-TuneupUnsupportedMessage {
+    param([Parameter(Mandatory)]$Context)
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    if ($environment.IsServer -and -not $Context.Force) { return (Get-TuneupText -Key 'err.server') }
+    if (($environment.Build -lt 19041 -or $environment.Edition -eq 'Unknown') -and -not $Context.Force) {
+        return (Get-TuneupText -Key 'err.unsupported')
+    }
+    if ($environment.IsServer) { $environment.Edition = 'Enterprise' }
+}
+
+# The catalog and the profiles, with the problems that the checks found (none when they are valid).
+function Import-TuneupContextDefinition {
+    param([Parameter(Mandatory)]$Context)
+    $catalog = @(Invoke-TuneupContextStep -Context $Context -Step { Import-TuneupCatalog -Path $Context.CatalogPath })
+    $profileSet = @(Invoke-TuneupContextStep -Context $Context -Step { Import-TuneupProfileSet -Path $Context.ProfilesPath })
+    $problems = @(Test-TuneupCatalog -Catalog $catalog) + @(Test-TuneupProfileSet -Profiles $profileSet -Catalog $catalog)
+    [pscustomobject]@{ Catalog = $catalog; Profiles = $profileSet; Problems = [string[]]$problems }
+}
+
+function New-TuneupContextPlan {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)]$Definition,
+        [AllowEmptyCollection()][string[]]$ProfileIds = @(),
+        [AllowEmptyCollection()][string[]]$Include = @(),
+        [AllowEmptyCollection()][string[]]$Exclude = @(),
+        [switch]$Interactive
+    )
+    $planArguments = @{
+        Catalog     = $Definition.Catalog
+        Profiles    = $Definition.Profiles
+        ProfileIds  = $ProfileIds
+        Include     = $Include
+        Exclude     = $Exclude
+        Environment = Get-TuneupContextEnvironment -Context $Context
+        Interactive = $Interactive
+        TestState   = { param($tweak) Test-TuneupState -Tweak $tweak }
+    }
+    @(Invoke-TuneupContextStep -Context $Context -Step { New-TuneupPlan @planArguments })
+}
+
+function Invoke-TuneupApplyCommand {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [AllowEmptyCollection()][string[]]$ProfileIds = @(),
+        [AllowEmptyCollection()][string[]]$Include = @(),
+        [AllowEmptyCollection()][string[]]$Exclude = @(),
+        [switch]$PlanOnly,
+        [switch]$Yes
+    )
+    $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+    if ($unsupported) {
+        Write-TuneupCommandError -Context $Context -Message $unsupported
+        return
+    }
+    $definition = Import-TuneupContextDefinition -Context $Context
+    if ($definition.Problems.Count) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.catalog') -Details $definition.Problems
+        return
+    }
+    $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -PlanOnly:$PlanOnly -Yes:$Yes
+}
+
+# Shows the plan, or asks and applies it: the part that applying profiles, re-applying what drifted
+# and the menu have in common.
+function Invoke-TuneupPlannedApply {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
+        [switch]$PlanOnly,
+        [switch]$Yes
+    )
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    $toApply = @($Plan | Where-Object { $_.Action -eq 'apply' })
+    if ($PlanOnly -or -not $toApply.Count) {
+        $Context.Result = $null
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        $Context.ExitCode = 0
+        return
+    }
+    $machineChanges = @($toApply | Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak }).Count
+    if ($machineChanges -and -not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.notAdmin')
+        return
+    }
+    if (-not $Yes) {
+        if ($Context.Json) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.jsonNeedsYes')
+            return
+        }
+        Write-TuneupPlanReport -Plan $Plan -Environment $environment
+        if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'confirm' -Format $toApply.Count))) {
+            Write-Host (Get-TuneupText -Key 'aborted')
+            $Context.ExitCode = 1
+            return
+        }
+    }
+    # Elevated runs go to the protected machine folder; the rest to the user folder (user-scope tweaks only).
+    $run = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRun -StateRoot $Context.StateRoot -Machine:$environment.IsAdmin }
+    Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupJson -Path (Join-Path $run.Dir 'plan.json') -Root $run.Root -Object @(ConvertTo-TuneupPlanView -Plan $Plan) }
+    $restorePoint = 'not-needed'
+    if ($machineChanges) { $restorePoint = Invoke-TuneupContextStep -Context $Context -Step { New-TuneupRestorePoint -Description "windows-tuneup $($run.Id)" } }
+    $results = @(Invoke-TuneupContextStep -Context $Context -Step { Invoke-TuneupPlan -Plan $Plan -RunDir $run.Dir })
+    $report = New-TuneupApplyReport -Run $run -Results $results -RestorePoint $restorePoint -Environment $environment
+    $saved = Invoke-TuneupContextStep -Context $Context -Step { Save-TuneupApplyReport -Run $run -Report $report }
+    $Context.Result = $report
+    Write-TuneupApplyReport -Report $report -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = Get-TuneupApplyExitCode -Report $report -ResultNotSaved:(-not $saved)
+}
+
+# The command line: checks the parameters, resolves the folders, loads the actions of -ActionsPath and
+# runs the command they name. Same parameters as tuneup.ps1 except -Lang and -Json (the caller sets
+# the language, and the context carries -Json), and -WhatIf is called -PlanOnly (a parameter named
+# WhatIf belongs to ShouldProcess in a function).
+function Invoke-TuneupCli {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [Parameter(Mandatory)][string]$ScriptRoot,
+        [string[]]$ProfileName = @(),
+        [string[]]$Include = @(),
+        [string[]]$Exclude = @(),
+        [switch]$PlanOnly,
+        [switch]$Yes,
+        [switch]$Status,
+        [string]$Undo,
+        [string]$Tweak,
+        [switch]$Force,
+        [string]$StateRoot,
+        [string]$CatalogPath,
+        [string]$ProfilesPath,
+        [string]$ActionsPath,
+        [switch]$Health,
+        [switch]$Repair,
+        [switch]$Measure,
+        [string]$Compare,
+        [int]$IdleSeconds = 0
+    )
+    $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
+    $Include = @(Get-TuneupCleanList ($Include -split ','))
+    $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
+
+    # A parameter counts as given when it was bound and carries a value (a switch only when it is on).
+    $present = @()
+    if ($PSBoundParameters.ContainsKey('ProfileName') -and $ProfileName.Count) { $present += 'Profile' }
+    if ($PSBoundParameters.ContainsKey('Include') -and $Include.Count) { $present += 'Include' }
+    if ($PSBoundParameters.ContainsKey('Exclude') -and $Exclude.Count) { $present += 'Exclude' }
+    if ($PSBoundParameters.ContainsKey('PlanOnly') -and $PlanOnly) { $present += 'WhatIf' }
+    if ($PSBoundParameters.ContainsKey('Yes') -and $Yes) { $present += 'Yes' }
+    if ($PSBoundParameters.ContainsKey('Status') -and $Status) { $present += 'Status' }
+    if ($PSBoundParameters.ContainsKey('Undo') -and $Undo) { $present += 'Undo' }
+    if ($PSBoundParameters.ContainsKey('Tweak') -and $Tweak) { $present += 'Tweak' }
+    if ($PSBoundParameters.ContainsKey('Health') -and $Health) { $present += 'Health' }
+    if ($PSBoundParameters.ContainsKey('Repair') -and $Repair) { $present += 'Repair' }
+    if ($PSBoundParameters.ContainsKey('Measure') -and $Measure) { $present += 'Measure' }
+    if ($PSBoundParameters.ContainsKey('Compare') -and $Compare) { $present += 'Compare' }
+    if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
+    $conflict = Get-TuneupArgumentConflict -Present $present
+    if ($conflict) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict)
+        return
+    }
+    # Checked here and not with ValidateRange, so that -Json gets its error as a JSON document.
+    $maxIdleSeconds = 3600
+    if ($PSBoundParameters.ContainsKey('IdleSeconds') -and ($IdleSeconds -lt 0 -or $IdleSeconds -gt $maxIdleSeconds)) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.idleSecondsRange' -Format 0, $maxIdleSeconds)
+        return
+    }
+
+    # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
+    $pathApi = $ExecutionContext.SessionState.Path
+    $Context.Force = [bool]$Force
+    $Context.StateRoot = $(if ($StateRoot) { $pathApi.GetUnresolvedProviderPathFromPSPath($StateRoot) } else { $null })
+    $Context.CatalogPath = $(if ($CatalogPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($CatalogPath) } else { Join-Path $ScriptRoot 'catalog' })
+    $Context.ProfilesPath = $(if ($ProfilesPath) { $pathApi.GetUnresolvedProviderPathFromPSPath($ProfilesPath) } else { Join-Path $ScriptRoot 'profiles' })
+    if ($ActionsPath) {
+        # Tests and development only, like -StateRoot: action scripts from another folder.
+        $ActionsPath = $pathApi.GetUnresolvedProviderPathFromPSPath($ActionsPath)
+        if (-not (Test-Path -LiteralPath $ActionsPath -PathType Container)) {
+            $key = $(if (Test-Path -LiteralPath $ActionsPath -PathType Leaf) { 'err.actionsPathNotFolder' } else { 'err.actionsPathMissing' })
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key $key -Format $ActionsPath)
+            return
+        }
+        Invoke-TuneupContextStep -Context $Context -Step { Write-TuneupActionsPathWarning }
+        Invoke-TuneupContextStep -Context $Context -Step { Import-TuneupActionLibrary -Path $ActionsPath }
+    }
+    # Scripts of the repository folder or of -ActionsPath that could not be loaded: a warning here,
+    # and an error in the catalog check only for the tweaks that use them.
+    Invoke-TuneupContextStep -Context $Context -Step { Write-TuneupActionLoadWarning }
+    Get-TuneupContextEnvironment -Context $Context | Out-Null
+
+    if ($Status) { Invoke-TuneupStatusCommand -Context $Context; return }
+    if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
+    if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }
+    if ($Measure) { Invoke-TuneupMeasureCommand -Context $Context -Compare $Compare -IdleSeconds $IdleSeconds; return }
+    Invoke-TuneupApplyCommand -Context $Context -ProfileIds $ProfileName -Include $Include -Exclude $Exclude -PlanOnly:$PlanOnly -Yes:$Yes
+}
