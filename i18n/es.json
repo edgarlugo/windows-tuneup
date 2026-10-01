@@ -41,6 +41,8 @@
   "reason.reinstalled": "reinstalada desde Microsoft Store para el usuario actual",
   "reason.not-reprovisioned": "solo estaba provisionada para usuarios nuevos y no se puede volver a provisionar desde la Store",
   "reason.installed-for-other-users": "lo tenían otros usuarios: cada uno debe reinstalarla desde la Store",
+  "reason.onedrive-known-folders": "no se tocó: Escritorio, Documentos o Imágenes están en OneDrive; devuélvelos a la carpeta local primero",
+  "reason.onedrive-online-only-files": "no se tocó: OneDrive tiene archivos que solo están en la nube y dejarían de abrirse desde este equipo",
   "status.applied": "aplicado",
   "status.partial": "parcial",
   "status.not-applied": "sin efecto (Windows o una política lo revirtió)",
