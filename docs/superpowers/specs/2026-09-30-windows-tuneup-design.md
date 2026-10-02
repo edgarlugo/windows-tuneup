@@ -618,10 +618,10 @@ Todo es aditivo: `schemaVersion` sigue en `1` y `docs/json-contract.md` document
 1. **`-List [-Json]`** (documento `list`, solo lectura, sin administrador): `profiles[]` con `id`, `aliases`, `title`, `description` (en el idioma de la corrida), `tweakCount` y `needsAdmin` (algún ajuste del perfil lo necesita); `tweaks[]` con `id`, `title`, `why`, `risk`, `ask`, `type`, `scope`, `needsAdmin`, `rebootRequired`, `requires` y `profiles` (ids de los perfiles que lo incluyen), solo los compatibles con el equipo, más `incompatible[]` con `id` y motivo. La lista negra no es un dato del motor: la skill lee `docs/<idioma>/blacklist.md` de la copia instalada. Sin `-Json`, una tabla legible.
 2. **`-Suggest [-Json]`** (documento `suggest`, solo lectura, sin administrador): `signals[]` con `id`, `detected` y `evidence` (nombres de productos, nunca rutas ni la cuenta):
    - `dev`: Visual Studio, VS Code, JetBrains, Git, Node.js, Python, JDK o WSL instalados.
-   - `gaming`: Steam, Epic Games, Xbox/Game Pass o EA app.
+   - `gaming`: Steam, Epic Games, EA app o Xbox/Game Pass (Gaming Services, que la app de Xbox instala para jugar Game Pass: la app de Xbox y la Game Bar vienen con Windows 11 y no cuentan).
    - `laptop`: hay batería.
    - `work`: unido a dominio, a Entra ID o inscrito en MDM.
-   - `legacy`: menos de 8 GB de RAM o el disco del sistema es HDD.
+   - `legacy`: menos de 8 GB de RAM (redondeada al GB: Windows informa un poco menos de lo instalado) o el disco del sistema es HDD.
    - `managed`: políticas de grupo o MDM; no propone perfil, sirve para avisar.
 
    `suggestions[]` con `profile` y `signals` (ids que lo justifican): `base` siempre (con `signals` vacío); `privacy` y `lite` nunca, van en `questions[]` (`id`, `text`). Cada detector es una función con su prueba y lee el registro de desinstalación (máquina y usuario), los paquetes Appx del usuario, CIM (`Win32_Battery`, `Win32_ComputerSystem`, `MSFT_PhysicalDisk`) y las claves de inscripción en el registro; un detector que falla deja su señal en `detected: false` con un `warning`, nunca rompe el documento.
@@ -649,7 +649,7 @@ Reemplaza la ruta `claude/skills/windows-tuneup/` de la sección 8. El zip de la
 2. Si no, pide permiso para descargar (URL de la release, tamaño y SHA256) y, con un solo UAC, abre una PowerShell elevada que descarga a memoria `install.ps1` y `SHA256SUMS` de esa release, compara el SHA256 del primero con su línea en el segundo y ejecuta esos mismos bytes. Nada se escribe en `%TEMP%`, así que nada cambia entre la comprobación y la ejecución elevada.
 3. Un clon local de desarrollo se usa solo sin elevar, y la skill lo dice.
 
-**Elevar.** Lo que no necesita administrador (`-List`, `-Suggest`, `-WhatIf`, `-Status`) corre directo. Aplicar, deshacer una corrida con cambios de sistema y `-Health` corren con `Start-Process powershell.exe -Verb RunAs -Wait -PassThru` sobre el `tuneup.ps1` de Program Files con `-Yes -Json -ResultId <guid>`; la skill toma el código de salida y lee `out\<guid>.json`. Si el usuario rechaza el UAC o el equipo no deja elevar, le da el comando para una PowerShell de administrador y después lee el mismo archivo.
+**Elevar.** Lo que no necesita administrador (`-List`, `-Suggest`, `-WhatIf`, `-Status`, `-Measure`, y aplicar o deshacer solo ajustes de usuario) corre directo. Aplicar un plan con cambios de sistema (`requiresAdmin`), deshacer una corrida con cambios de sistema, `-Status -Reapply` con cambios de sistema y `-Health` corren con `Start-Process powershell.exe -Verb RunAs -Wait -PassThru` sobre el `tuneup.ps1` de Program Files con `-Json -ResultId <guid>`, más `-Yes` solo al aplicar o reaplicar (`-Undo` y `-Health` rechazan `-Yes`); el texto elevado va en `-EncodedCommand`. La skill toma el código de salida y lee `out\<guid>.json`. Si el usuario rechaza el UAC o el equipo no deja elevar, le da el comando para una PowerShell de administrador y después lee el mismo archivo.
 
 ### 13.4 Flujo
 
