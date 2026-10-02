@@ -71,8 +71,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Health        
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Health -Repair         # + DISM /RestoreHealth si hace falta / if needed
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleSeconds 120                 # medir / measure
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleSeconds 120 -Compare last   # comparar / compare
-powershell -NoProfile -ExecutionPolicy Bypass -File .	uneup.ps1 -List                   # perfiles y ajustes para este equipo / profiles and tweaks for this PC
-powershell -NoProfile -ExecutionPolicy Bypass -File .	uneup.ps1 -Suggest                # perfiles sugeridos / suggested profiles
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -List                   # perfiles y ajustes para este equipo / profiles and tweaks for this PC
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Suggest                # perfiles sugeridos / suggested profiles
 ```
 
 `-ExecutionPolicy Bypass` solo afecta a ese proceso y permite ejecutar el script aunque la política de PowerShell sea `Restricted`; no cambia la configuración del equipo.
