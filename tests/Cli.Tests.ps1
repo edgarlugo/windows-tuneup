@@ -252,7 +252,9 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
         foreach ($arguments in @(@('-ReadResult', $id, '-Json'), @('-ReadResult', $id))) {
             $result = Invoke-Tuneup $arguments
             $result.ExitCode | Should -Be 0
-            $result.Output.Trim() | Should -Be ($saved -replace "`r`n", "`n").Trim()
+            # Elevated, the text mode says first that -StateRoot turns the hardening off: it is not part of the result.
+            $text = (@($result.Output -split "`n") | Where-Object { $_ -notmatch '^WARNING: -StateRoot ' }) -join "`n"
+            $text.Trim() | Should -Be ($saved -replace "`r`n", "`n").Trim()
         }
     }
 
