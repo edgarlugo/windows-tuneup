@@ -36,8 +36,8 @@ function Invoke-TuneupContextStep {
 }
 
 function Write-TuneupCommandError {
-    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [AllowEmptyCollection()][string[]]$Details = @())
-    Write-TuneupErrorReport -Message $Message -Details $Details -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][string]$Message, [AllowEmptyCollection()][string[]]$Details = @(), [string]$Reason)
+    Write-TuneupErrorReport -Message $Message -Details $Details -Reason $Reason -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
     $Context.ExitCode = 1
 }
 
@@ -241,6 +241,29 @@ function Invoke-TuneupSuggestCommand {
     $document = Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupSuggestion }
     $Context.Result = $document
     Write-TuneupSuggestReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 0
+}
+
+# -ReadResult: the document that a run with -ResultId saved, exactly as it was written, for a caller that
+# started the tool elevated (the Claude skill) and reads the result unelevated through the tool instead
+# of opening the file itself: the tool checks that only an administrator could have written it. An
+# elevated caller reads only the machine folder; an unelevated one also its own folder. A result that
+# cannot be read is an error with a stable reason. It reads no catalog, state or environment.
+function Invoke-TuneupReadResultCommand {
+    param([Parameter(Mandatory)]$Context, [AllowEmptyString()][string]$Id, [string]$StateRoot)
+    if ($Id -cnotmatch $script:ResultIdPattern) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.readResultInvalid')
+        return
+    }
+    $readArguments = @{ Id = $Id; IncludeUser = -not (Test-TuneupAdmin) }
+    if ($StateRoot) { $readArguments.StateRoot = $StateRoot }
+    $read = Invoke-TuneupContextStep -Context $Context -Step { Read-TuneupResultFile @readArguments }
+    if ($read.Code) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key $read.Key -Format $Id, $read.Folder) -Reason $read.Code
+        return
+    }
+    $Context.Result = $read.Text
+    Write-Output $read.Text
     $Context.ExitCode = 0
 }
 
@@ -508,9 +531,9 @@ function Save-TuneupStoppedApply {
 }
 
 # The command line: checks the parameters, resolves the folders, loads the actions of -ActionsPath and
-# runs the command they name. Same parameters as tuneup.ps1 except -Lang and -Json (the caller sets
-# the language, and the context carries -Json), and -WhatIf is called -PlanOnly (a parameter named
-# WhatIf belongs to ShouldProcess in a function).
+# runs the command they name. Same parameters as tuneup.ps1 except -Lang, -Json and -ResultId (the
+# caller sets the language, the context carries -Json, and tuneup.ps1 writes the result file), and
+# -WhatIf is called -PlanOnly (a parameter named WhatIf belongs to ShouldProcess in a function).
 function Invoke-TuneupCli {
     param(
         [Parameter(Mandatory)]$Context,
@@ -535,7 +558,8 @@ function Invoke-TuneupCli {
         [string]$Compare,
         [int]$IdleSeconds = 0,
         [switch]$List,
-        [switch]$Suggest
+        [switch]$Suggest,
+        [AllowEmptyString()][string]$ReadResult
     )
     $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
     $Include = @(Get-TuneupCleanList ($Include -split ','))
@@ -559,6 +583,7 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
     if ($PSBoundParameters.ContainsKey('List') -and $List) { $present += 'List' }
     if ($PSBoundParameters.ContainsKey('Suggest') -and $Suggest) { $present += 'Suggest' }
+    if ($PSBoundParameters.ContainsKey('ReadResult')) { $present += 'ReadResult' }
     $conflict = Get-TuneupArgumentConflict -Present $present
     if ($conflict) {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict)
@@ -571,6 +596,11 @@ function Invoke-TuneupCli {
         return
     }
 
+    if ($PSBoundParameters.ContainsKey('ReadResult')) {
+        $resolvedRoot = $(if ($StateRoot) { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($StateRoot) } else { $null })
+        Invoke-TuneupReadResultCommand -Context $Context -Id $ReadResult -StateRoot $resolvedRoot
+        return
+    }
     # -Suggest reads no catalog, state or environment of the tool (what it needs it reads itself and
     # tolerates failing), so a broken system query cannot turn it into an error.
     if ($Suggest) {

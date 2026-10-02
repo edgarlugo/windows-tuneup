@@ -11,6 +11,8 @@
     .\tuneup.ps1 -Suggest
 .EXAMPLE
     .\tuneup.ps1 -List -Json -ResultId 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12
+.EXAMPLE
+    .\tuneup.ps1 -ReadResult 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12 -Json
 .PARAMETER List
     Shows the profiles and the tweaks that suit this machine. Read only.
 .PARAMETER Suggest
@@ -20,6 +22,11 @@
     With -Json only: also writes the JSON document to out\<id>.json in the state folder (the machine
     one when elevated, which only administrators can change), so a program that started the tool
     elevated can read it. 8 to 64 letters, digits or hyphens; a file with that id must not exist.
+.PARAMETER ReadResult
+    Prints the document that a run with -ResultId saved, as it was written, after checking that only
+    an administrator could have written it (the machine folder; without elevation, also the user
+    folder). Needs no elevation. Exit code 0, or 1 with an error when the result is missing, not
+    complete yet or not trusted.
 .PARAMETER ActionsPath
     Development and testing only: loads action scripts from another folder. They run as the
     current user, with administrator rights when elevated, so use only a folder you trust.
@@ -57,6 +64,7 @@ param(
     [switch]$List,
     [switch]$Suggest,
     [string]$ResultId,
+    [string]$ReadResult,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$_Rest = @()
 )
 
@@ -109,6 +117,11 @@ $run = {
 $resultFile = $null
 $document = New-Object System.Collections.Generic.List[string]
 try {
+    # Reading a result never writes one.
+    if ($PSBoundParameters.ContainsKey('ReadResult') -and $PSBoundParameters.ContainsKey('ResultId')) {
+        Write-TuneupCommandError -Context $context -Message (Get-TuneupText -Key 'err.badArgs' -Format '-ReadResult -ResultId')
+        return
+    }
     if ($PSBoundParameters.ContainsKey('ResultId')) {
         $problem = Get-TuneupResultIdProblem -Id $ResultId -Json:$Json
         if (-not $problem) {

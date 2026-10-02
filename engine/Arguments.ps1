@@ -1,5 +1,5 @@
 # Commands exclude each other and the options of applying a plan.
-$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure', 'List', 'Suggest')
+$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure', 'List', 'Suggest', 'ReadResult')
 $script:CliApplyOptions = @('Profile', 'Include', 'Exclude', 'WhatIf', 'Yes')
 # Options that only make sense with one command.
 $script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure'; Reapply = 'Status' }

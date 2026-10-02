@@ -289,3 +289,146 @@ Describe 'Machine result files' {
         [System.IO.File]::ReadAllText($first.Path) | Should -Be 'old'
     }
 }
+
+Describe 'Reading result files' {
+    BeforeEach {
+        Use-CurrentUserAsTrusted
+        # Writing to the machine folder needs an elevated process; reading it does not ask.
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        $script:MachineRoot = New-TestMachineRoot
+        $script:UserRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $script:Document = '{"schemaVersion":1,"command":"status","toolVersion":"0.1.0","warnings":[],"items":[]}'
+        # Both folders that an unelevated caller looks in.
+        $script:Roots = @{ MachineRoot = $MachineRoot; UserRoot = $UserRoot }
+    }
+
+    AfterEach {
+        Reset-TestTrust
+    }
+
+    It 'reads a result of the user folder when the machine folder has none' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -UserRoot $UserRoot) -Text $Document | Should -BeTrue
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -BeNullOrEmpty
+        $read.Text | Should -Be $Document
+        $read.Path | Should -Be (Join-Path $UserRoot "out\$Id.json")
+    }
+
+    It 'never looks in the user folder for an elevated caller' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -UserRoot $UserRoot) -Text $Document | Should -BeTrue
+        $read = Read-TuneupResultFile -Id $Id @Roots
+        $read.Code | Should -Be 'result-missing'
+        $read.Text | Should -BeNullOrEmpty
+    }
+
+    It 'reads a result of the machine folder, before the user folder' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot) -Text $Document | Should -BeTrue
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -UserRoot $UserRoot) -Text '{"command":"user"}' | Should -BeTrue
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -BeNullOrEmpty
+        $read.Text | Should -Be $Document
+        $read.Path | Should -Be (Join-Path $MachineRoot "out\$Id.json")
+    }
+
+    It 'says result-missing when no folder has it' {
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-missing'
+        $read.Key | Should -Be 'err.readResultMissing'
+        Test-Path -LiteralPath $MachineRoot | Should -BeFalse
+        Test-Path -LiteralPath $UserRoot | Should -BeFalse
+    }
+
+    It 'refuses a result in an out folder that other accounts can change, reading nothing' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot) -Text $Document | Should -BeTrue
+        Grant-EveryoneWrite (Join-Path $MachineRoot 'out')
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-untrusted'
+        $read.Key | Should -Be 'err.readResultUntrusted'
+        $read.Folder | Should -Be $MachineRoot
+        $read.Text | Should -BeNullOrEmpty
+    }
+
+    It 'refuses a result file that other accounts can change' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot) -Text $Document | Should -BeTrue
+        Grant-EveryoneWrite (Join-Path $MachineRoot "out\$Id.json")
+        (Read-TuneupResultFile -Id $Id @Roots -IncludeUser).Code | Should -Be 'result-untrusted'
+    }
+
+    It 'refuses a machine folder that another account made, also when the result is not there' {
+        # A standard user can make the folder before the first elevated run, which then refuses to write.
+        Initialize-TuneupStateRoot -Path $MachineRoot -Children @('out')
+        Grant-EveryoneWrite $MachineRoot
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-untrusted'
+        $read.Folder | Should -Be $MachineRoot
+    }
+
+    It 'refuses an out folder that is a junction, reading nothing where it points' {
+        Initialize-TuneupStateRoot -Path $MachineRoot -Children @('runs')
+        $target = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $target | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $target "$Id.json"), $Document)
+        $out = Join-Path $MachineRoot 'out'
+        New-Item -ItemType Junction -Path $out -Target $target | Out-Null
+        try {
+            $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+            $read.Code | Should -Be 'result-untrusted'
+            $read.Text | Should -BeNullOrEmpty
+        } finally {
+            [System.IO.Directory]::Delete($out)
+        }
+    }
+
+    It 'refuses a result that is a hard link to a file elsewhere' {
+        Initialize-TuneupStateRoot -Path $MachineRoot -Children @('out')
+        $outside = New-OutsideFile -Text $Document
+        New-Item -ItemType HardLink -Path (Join-Path $MachineRoot "out\$Id.json") -Target $outside | Out-Null
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-untrusted'
+        $read.Text | Should -BeNullOrEmpty
+    }
+
+    It 'says result-incomplete for an empty result, a run that was stopped before it wrote' {
+        $file = Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot
+        $file.Stream.Dispose()
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-incomplete'
+        $read.Key | Should -Be 'err.readResultIncomplete'
+    }
+
+    It 'says result-incomplete while the result is still being written' {
+        $file = Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot
+        try {
+            (Read-TuneupResultFile -Id $Id @Roots -IncludeUser).Code | Should -Be 'result-incomplete'
+        } finally {
+            Close-TuneupResultFile -File $file -Text $Document | Should -BeTrue
+        }
+        (Read-TuneupResultFile -Id $Id @Roots -IncludeUser).Text | Should -Be $Document
+    }
+
+    It 'says result-incomplete for <Name>' -TestCases @(
+        @{ Name = 'text that is not JSON'; Text = 'not json' }
+        @{ Name = 'two documents'; Text = '{"command":"status"}{"command":"error"}' }
+        @{ Name = 'an array'; Text = '[1,2]' }
+        @{ Name = 'only spaces'; Text = '   ' }
+    ) {
+        param($Text)
+        New-Item -ItemType Directory -Path (Join-Path $UserRoot 'out') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $UserRoot "out\$Id.json"), $Text)
+        (Read-TuneupResultFile -Id $Id @Roots -IncludeUser).Code | Should -Be 'result-incomplete'
+    }
+
+    It 'reads only the -StateRoot folder of tests and development' {
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot) -Text '{"command":"machine"}' | Should -BeTrue
+        $custom = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -StateRoot $custom -WarningAction SilentlyContinue) -Text $Document | Should -BeTrue
+        $read = Read-TuneupResultFile -Id $Id -StateRoot $custom @Roots -IncludeUser -WarningAction SilentlyContinue
+        $read.Text | Should -Be $Document
+        $read.Path | Should -Be (Join-Path $custom "out\$Id.json")
+    }
+
+    It 'refuses an id that is not a plain name, reading nothing' {
+        { Read-TuneupResultFile -Id '..\outside-1' @Roots -IncludeUser } | Should -Throw '*Invalid result id*'
+        { Read-TuneupResultFile -Id "abcd1234`n" @Roots -IncludeUser } | Should -Throw '*Invalid result id*'
+    }
+}

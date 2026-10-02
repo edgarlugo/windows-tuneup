@@ -374,6 +374,55 @@ Describe 'Invoke-TuneupCli' {
         Should -Invoke Get-TuneupEnvironment -ModuleName Tuneup -Times 0 -Exactly
     }
 
+    It 'prints a saved result as it was written with -ReadResult, without reading the environment' {
+        Mock -ModuleName Tuneup Get-TuneupEnvironment { throw 'WMI is broken' }
+        $id = [guid]::NewGuid().ToString()
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        $text = '{"schemaVersion":1,"command":"apply","toolVersion":"0.1.0","warnings":[],"runId":"20261002-120000"}'
+        [System.IO.File]::WriteAllText((Join-Path $Root "out\$id.json"), $text)
+        foreach ($json in $true, $false) {
+            $context = New-TuneupContext -Json:$json
+            $output = @(Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult $id -StateRoot $Root 6>$null)
+            $output -join "`n" | Should -Be $text
+            $context.ExitCode | Should -Be 0
+        }
+        Should -Invoke Get-TuneupEnvironment -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'gives the reason with the message when a result cannot be read' {
+        $id = [guid]::NewGuid().ToString()
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult $id -StateRoot $Root })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'error'
+        $documents[0].reason | Should -Be 'result-missing'
+        $documents[0].message | Should -BeLike "*$id*"
+        $context.ExitCode | Should -Be 1
+        Test-Path -LiteralPath $Root | Should -BeFalse
+    }
+
+    It 'refuses a -ReadResult id that is not a result id' {
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult '..\x-123456' -StateRoot $Root })
+        $documents[0].message | Should -Be '-ReadResult takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was read.'
+        $documents[0].PSObject.Properties.Name | Should -Not -Contain 'reason'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'looks in the user folder only when not elevated (<Name>)' -TestCases @(
+        @{ Name = 'elevated'; Admin = $true; IncludeUser = $false }
+        @{ Name = 'not elevated'; Admin = $false; IncludeUser = $true }
+    ) {
+        param($Admin, $IncludeUser)
+        $script:FakeAdmin = $Admin
+        $script:ExpectedIncludeUser = $IncludeUser
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $script:FakeAdmin }
+        Mock -ModuleName Tuneup Read-TuneupResultFile { [pscustomobject]@{ Code = $null; Key = $null; Text = '{}'; Path = 'x'; Folder = 'y' } }
+        $context = New-TuneupContext -Json
+        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult ([guid]::NewGuid().ToString()) | Should -Be '{}'
+        Should -Invoke Read-TuneupResultFile -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { [bool]$IncludeUser -eq $script:ExpectedIncludeUser -and -not $StateRoot }
+    }
+
     It 'resolves the folders into the context and runs the command they name' {
         $context = New-TuneupContext -Json
         $documents = @(Get-JsonOutput {

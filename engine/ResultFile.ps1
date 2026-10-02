@@ -158,6 +158,92 @@ function Hide-TuneupValuePersonalData {
     }
 }
 
+# -ReadResult: the text of out\<id>.json, for a caller that started the tool elevated and must not trust
+# the file by its path alone (a standard user can make %ProgramData%\windows-tuneup before the first
+# elevated run, which then refuses to write, and leave a result of their own there). The machine folder
+# first, checked like the machine state on every level (the folder that holds it, the state folder, out
+# and the file itself: owner, who can write, no junction, one link); then, for an unelevated caller,
+# the user folder, where its unelevated runs write; -StateRoot alone in tests. Gives { Code, Key, Text,
+# Path, Folder }: Code is null and Text the document as it was written, or Code says why there is none
+# (result-missing, result-incomplete, result-untrusted) and Key is its message.
+function Read-TuneupResultFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Id, [string]$StateRoot, [string]$MachineRoot, [string]$UserRoot, [switch]$IncludeUser)
+    if ($Id -cnotmatch $script:ResultIdPattern) { throw "Invalid result id '$Id'" }
+    $machine = $(if ($MachineRoot) { $MachineRoot } else { Get-TuneupStateRoot -Machine })
+    $answer = {
+        param([string]$Code, [string]$Key, [string]$Text, [string]$Path)
+        [pscustomobject]@{ PSTypeName = 'Tuneup.ResultRead'; Code = $Code; Key = $Key; Text = $Text; Path = $Path; Folder = $machine }
+    }
+    $fileName = "$Id.json"
+    if ($StateRoot) {
+        Write-TuneupStateRootWarning
+        $places = @([pscustomobject]@{ Kind = 'custom'; Path = Join-Path $StateRoot "out\$fileName" })
+    }
+    else {
+        $places = @([pscustomobject]@{ Kind = 'machine'; Path = Join-Path $machine "out\$fileName" })
+        if ($IncludeUser) {
+            $user = $(if ($UserRoot) { $UserRoot } else { Get-TuneupStateRoot })
+            $places += [pscustomobject]@{ Kind = 'user'; Path = Join-Path $user "out\$fileName" }
+        }
+    }
+    foreach ($place in $places) {
+        if (-not (Test-Path -LiteralPath $place.Path)) { continue }
+        try {
+            if ($place.Kind -eq 'machine') {
+                if (-not (Test-TuneupResultFolderTrusted -Root $machine)) { return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $place.Path) }
+                try {
+                    $stream = Open-TuneupTrustedStream -Path $place.Path
+                }
+                catch {
+                    # In use: the run is still writing it. Anything else: not a file of an administrator.
+                    if ($_.Exception.GetBaseException() -is [System.IO.IOException]) { throw }
+                    return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $place.Path)
+                }
+                $reader = New-Object System.IO.StreamReader -ArgumentList $stream, $script:Utf8NoBom, $true
+                try { $text = $reader.ReadToEnd() } finally { $reader.Dispose() }
+            }
+            else {
+                $text = [System.IO.File]::ReadAllText($place.Path, $script:Utf8NoBom)
+            }
+        }
+        catch {
+            if ($_.Exception.GetBaseException() -is [System.IO.IOException]) { return (& $answer 'result-incomplete' 'err.readResultIncomplete' $null $place.Path) }
+            throw
+        }
+        if (-not (Test-TuneupResultDocument -Text $text)) { return (& $answer 'result-incomplete' 'err.readResultIncomplete' $null $place.Path) }
+        return (& $answer $null $null $text $place.Path)
+    }
+    # No result anywhere. A machine folder that is not trusted is why an elevated run could not write it.
+    if (-not $StateRoot -and (Test-Path -LiteralPath $machine) -and -not (Test-TuneupResultFolderTrusted -Root $machine)) {
+        return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $null)
+    }
+    & $answer 'result-missing' 'err.readResultMissing' $null $null
+}
+
+# The machine state folder and its out folder (when there is one), with the folder that holds them,
+# pass the checks of the machine state: only administrators could have put a result there.
+function Test-TuneupResultFolderTrusted {
+    param([Parameter(Mandatory)][string]$Root)
+    if (-not (Test-TuneupBaseFolder -Path (Split-Path -Parent $Root))) { return $false }
+    if (-not (Test-TuneupTrustedItem -Path $Root)) { return $false }
+    $out = Join-Path $Root 'out'
+    (-not (Test-Path -LiteralPath $out)) -or (Test-TuneupTrustedItem -Path $out)
+}
+
+# One JSON object, the whole text: an empty file or a cut one is a run still going or stopped.
+function Test-TuneupResultDocument {
+    param([AllowEmptyString()][string]$Text)
+    if (-not $Text -or -not $Text.Trim()) { return $false }
+    try {
+        $document = $Text | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        return $false
+    }
+    $document -is [System.Management.Automation.PSCustomObject]
+}
+
 # Writes the document and closes the file; true when it was saved. In the machine folder, which Users
 # can read, the personal paths are hidden (the standard output keeps them). With no document (Ctrl+C
 # stopped PowerShell itself) or when it cannot be written, the file is removed: a caller then finds no

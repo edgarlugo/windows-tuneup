@@ -16,6 +16,7 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'the plan of a re-apply'; Present = @('Status', 'Reapply', 'WhatIf') }
         @{ Name = 'the list'; Present = @('List') }
         @{ Name = 'the suggestions'; Present = @('Suggest') }
+        @{ Name = 'reading a result'; Present = @('ReadResult') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -42,6 +43,11 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('List', 'Profile'); Expected = '-List -Profile' }
         @{ Present = @('Suggest', 'WhatIf'); Expected = '-Suggest -WhatIf' }
         @{ Present = @('List', 'Yes'); Expected = '-List -Yes' }
+        @{ Present = @('ReadResult', 'Status'); Expected = '-Status -ReadResult' }
+        @{ Present = @('ReadResult', 'Suggest'); Expected = '-Suggest -ReadResult' }
+        @{ Present = @('ReadResult', 'Profile'); Expected = '-ReadResult -Profile' }
+        @{ Present = @('ReadResult', 'Yes'); Expected = '-ReadResult -Yes' }
+        @{ Present = @('ReadResult', 'WhatIf'); Expected = '-ReadResult -WhatIf' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected

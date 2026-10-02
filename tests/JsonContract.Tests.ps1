@@ -63,7 +63,7 @@ Describe 'docs/json-contract.md' {
         $Documents.undo = Invoke-TuneupUndoCommand -Context $context -RunId 'last' | ConvertFrom-Json
         Invoke-TuneupMeasureCommand -Context $context | Out-Null
         $Documents.measure = Invoke-TuneupMeasureCommand -Context $context -Compare 'last' | ConvertFrom-Json
-        $Documents.error = Write-TuneupErrorReport -Message 'x' -Details @('y') -Json | ConvertFrom-Json
+        $Documents.error = Write-TuneupErrorReport -Message 'x' -Details @('y') -Reason 'result-missing' -Json | ConvertFrom-Json
         $cbs = Join-Path $Fixtures 'cbs'
         $lines = @(Get-Content -LiteralPath (Join-Path $cbs 'sfc-unrepaired.log') -Encoding UTF8) + @(Get-Content -LiteralPath (Join-Path $cbs 'scanhealth-corrupt.log') -Encoding UTF8)
         $scan = New-TuneupHealthScan -Lines $lines -SfcRun ([pscustomobject]@{ ExitCode = 1; Output = 'x' }) -DismRun ([pscustomobject]@{ ExitCode = 0; Output = '' })
@@ -110,6 +110,7 @@ Describe 'docs/json-contract.md' {
         $paths.health | Should -Contain 'after.componentStore.operationResult'
         $paths.health | Should -Contain 'before.corruptComponents[].files'
         $paths.error | Should -Contain 'details'
+        $paths.error | Should -Contain 'reason'
         $paths.list | Should -Contain 'profiles[].needsAdmin'
         $paths.list | Should -Contain 'tweaks[].profiles'
         $paths.list | Should -Contain 'incompatible[].reason'

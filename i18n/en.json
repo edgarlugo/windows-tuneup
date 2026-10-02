@@ -248,5 +248,9 @@
   "suggest.managed": "This PC is managed by an organization: ask its administrators before changing it. windows-tuneup leaves its policies alone.",
   "err.resultIdNeedsJson": "-ResultId needs -Json: the result file holds the JSON document. Nothing was done.",
   "err.resultIdInvalid": "-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was done.",
-  "err.resultIdExists": "The result {0} already exists: use a new -ResultId. Nothing was done."
+  "err.resultIdExists": "The result {0} already exists: use a new -ResultId. Nothing was done.",
+  "err.readResultInvalid": "-ReadResult takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was read.",
+  "err.readResultMissing": "There is no result {0}. If an elevated window ran the command, it refused before it started: run the same command in PowerShell as administrator to see why.",
+  "err.readResultIncomplete": "The result {0} is not complete: the command is still running, or it was stopped before it ended (its window was closed). Check what was applied with -Status.",
+  "err.readResultUntrusted": "The result {0} was not read: it, or the folder {1} that holds it, is not protected like the state of the machine, so an account that is not an administrator could have written it. Delete {1} as administrator and run the command again."
 }

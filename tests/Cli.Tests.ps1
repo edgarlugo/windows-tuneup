@@ -199,6 +199,43 @@ Describe 'tuneup.ps1' {
         @((ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $dir "$id.json")))).warnings) -join "`n" | Should -Match 'old-00000001\.json'
     }
 
+    It 'reads a saved result back with -ReadResult, as it was written, with or without -Json' {
+        $id = [guid]::NewGuid().ToString()
+        (Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)).ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        foreach ($arguments in @(@('-ReadResult', $id, '-Json'), @('-ReadResult', $id))) {
+            $result = Invoke-Tuneup $arguments
+            $result.ExitCode | Should -Be 0
+            $result.Output.Trim() | Should -Be ($saved -replace "`r`n", "`n").Trim()
+        }
+    }
+
+    It 'says why a result cannot be read, with its reason' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-ReadResult', $id, '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.reason | Should -Be 'result-missing'
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root "out\$id.json"), '')
+        $result = Invoke-Tuneup @('-ReadResult', $id, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).reason | Should -Be 'result-incomplete'
+    }
+
+    It 'rejects -ReadResult with <Case>' -TestCases @(
+        @{ Case = '-ResultId'; Arguments = @('-ResultId', 'abcd-1234-efgh'); Expected = '-ReadResult -ResultId' }
+        @{ Case = 'another command'; Arguments = @('-Status'); Expected = '-Status -ReadResult' }
+        @{ Case = 'an option of applying'; Arguments = @('-Yes'); Expected = '-ReadResult -Yes' }
+    ) {
+        param($Arguments, $Expected)
+        $result = Invoke-Tuneup (@('-ReadResult', [guid]::NewGuid().ToString(), '-Json') + $Arguments)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be "Invalid parameter combination: $Expected"
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
     It 'exits with 2 instead of 0 when the result file cannot be saved' {
         # In this process, so that saving can fail: tuneup.ps1 then uses the module this file loaded.
         Mock Import-Module { }

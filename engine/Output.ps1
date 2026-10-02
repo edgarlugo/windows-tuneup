@@ -314,15 +314,19 @@ function Write-TuneupErrorReport {
         [Parameter(Mandatory)][string]$Message,
         [AllowEmptyCollection()][string[]]$Details = @(),
         [AllowEmptyCollection()][string[]]$Warnings = @(),
+        # A stable token for programs, when the error has one (-ReadResult); not in the text for people.
+        [string]$Reason,
         [switch]$Json
     )
     if ($Json) {
-        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
+        $document = [pscustomobject]@{
             schemaVersion = 1
             command       = 'error'
             message       = $Message
             details       = [string[]]@($Details)
-        }))
+        }
+        if ($Reason) { $document | Add-Member -NotePropertyName reason -NotePropertyValue $Reason }
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document $document)
         return
     }
     Write-Host $Message -ForegroundColor Red
