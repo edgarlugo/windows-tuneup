@@ -76,8 +76,8 @@ BeforeAll {
         foreach ($line in [regex]::Matches($text, '^[^\r\n]*$', 'Multiline')) {
             $isCount = $line.Value.Contains('Get-TuneupCountKey')
             foreach ($match in [regex]::Matches($line.Value, $namespaced)) {
-                # A file name such as run.json starts like a key but is not one.
-                if ($match.Groups[1].Value -match '\.jsonl?$') { continue }
+                # A file name such as run.json or transcript.log starts like a key but is not one.
+                if ($match.Groups[1].Value -match '\.(jsonl?|log)$') { continue }
                 & $add 'key' $match.Groups[1].Value
                 if ($isCount) { & $add 'key' "$($match.Groups[1].Value).one" }
             }

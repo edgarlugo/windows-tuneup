@@ -324,15 +324,23 @@ function Get-TuneupHealthRecommendation {
     'none'
 }
 
+# -Previous: a report of an earlier check, whose result is used as the starting point instead of
+# checking again (the menu offers to repair right after a check that found damage).
 function Invoke-TuneupHealth {
-    param([switch]$Repair, [scriptblock]$OnPhase)
-    $started = Get-TuneupLogTime
-    if ($OnPhase) { & $OnPhase 'sfc' }
-    $sfcRun = Invoke-TuneupSfc
-    if ($OnPhase) { & $OnPhase 'dismScan' }
-    $dismRun = Invoke-TuneupDism -Operation 'ScanHealth'
-    $scanned = Get-TuneupLogTime
-    $before = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $started -Until $scanned) -SfcRun $sfcRun -DismRun $dismRun
+    param([switch]$Repair, [scriptblock]$OnPhase, $Previous)
+    if ($null -ne $Previous) {
+        $started = [datetime]$Previous.startedAt
+        $before = $Previous.before
+        $scanned = Get-TuneupLogTime
+    } else {
+        $started = Get-TuneupLogTime
+        if ($OnPhase) { & $OnPhase 'sfc' }
+        $sfcRun = Invoke-TuneupSfc
+        if ($OnPhase) { & $OnPhase 'dismScan' }
+        $dismRun = Invoke-TuneupDism -Operation 'ScanHealth'
+        $scanned = Get-TuneupLogTime
+        $before = New-TuneupHealthScan -Lines @(Read-TuneupCbsLog -Since $started -Until $scanned) -SfcRun $sfcRun -DismRun $dismRun
+    }
     $after = $null
     if ($Repair -and (Test-TuneupHealthNeedsRepair -Scan $before)) {
         if ($OnPhase) { & $OnPhase 'dismRestore' }

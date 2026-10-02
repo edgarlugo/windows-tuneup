@@ -30,12 +30,24 @@ Describe 'Measuring guide' {
     }
 }
 
+Describe 'Virtual machine checklist' {
+    It 'covers what Windows Sandbox cannot, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'vm-checklist.md'
+            foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+}
+
 Describe 'Documentation in both languages' {
     It 'has <Name> in Spanish and English, in UTF-8 without a byte order mark' -TestCases @(
         @{ Name = 'blacklist.md' }
         @{ Name = 'profiles.md' }
         @{ Name = 'measuring.md' }
         @{ Name = 'catalog.md' }
+        @{ Name = 'vm-checklist.md' }
     ) {
         param($Name)
         foreach ($lang in 'es', 'en') {

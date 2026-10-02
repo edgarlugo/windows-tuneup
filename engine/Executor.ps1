@@ -49,64 +49,88 @@ function Test-TuneupStateUnchanged {
     (ConvertTo-Json -InputObject $Before -Depth 10 -Compress) -ceq (ConvertTo-Json -InputObject $after -Depth 10 -Compress)
 }
 
+# Applies the plan in order. -StopRequested is asked before each tweak to apply: once it says yes
+# (Ctrl+C, see Interrupt.ps1), that tweak and the rest are left out with the reason interrupted. Each
+# result is also added to -Results when given, and -Progress names the tweak being applied
+# (Current, from before its state is read to its result) and whether its journal entry was already
+# written (Journaled), so a caller whose pipeline was stopped can still tell what was done, which
+# tweak was cut and whether -Undo can restore it. A result is added to -Results before Current is
+# cleared, so a stop in between never loses a tweak that was done.
 function Invoke-TuneupPlan {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
-        [Parameter(Mandatory)][string]$RunDir
+        [Parameter(Mandatory)][string]$RunDir,
+        [scriptblock]$StopRequested,
+        [System.Collections.Generic.List[object]]$Results,
+        [hashtable]$Progress
     )
+    if ($null -eq $Results) { $Results = New-Object System.Collections.Generic.List[object] }
+    if ($null -eq $Progress) { $Progress = @{} }
     $journal = Join-Path $RunDir 'snapshot.jsonl'
     $journalError = $null
+    $interrupted = $false
     foreach ($item in $Plan) {
+        $Progress.Current = $null
+        $Progress.Journaled = $false
         if ($item.Action -ne 'apply') {
-            New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason
-            continue
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason $item.Reason
+        } elseif ($interrupted -or ($StopRequested -and (& $StopRequested))) {
+            $interrupted = $true
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason 'interrupted'
+        } elseif ($journalError) {
+            $result = New-TuneupResult -Item $item -Status 'skipped' -Reason 'journal-error' -ErrorText $journalError
+        } else {
+            $Progress.Current = $item.Id
+            $result = Invoke-TuneupPlanItem -Item $item -Journal $journal -RunDir $RunDir -Progress $Progress
+            if ($result.reason -eq 'journal-error') { $journalError = $result.error }
         }
-        if ($journalError) {
-            New-TuneupResult -Item $item -Status 'skipped' -Reason 'journal-error' -ErrorText $journalError
-            continue
-        }
-        $tweak = $item.Tweak
-        try {
-            $state = Get-TuneupState -Tweak $tweak
-        } catch {
-            New-TuneupResult -Item $item -Status 'failed' -ErrorText $_.Exception.Message
-            continue
-        }
-        try {
-            Add-TuneupJournalEntry -Path $journal -Tweak $tweak -State $state
-        } catch {
-            $journalError = $_.Exception.Message
-            New-TuneupResult -Item $item -Status 'skipped' -Reason 'journal-error' -ErrorText $journalError
-            continue
-        }
-        try {
-            # Set may report through New-TuneupOutcome that it changed something but could not finish
-            # (partial) or that Windows asked for a restart; any other output is ignored.
-            $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $tweak)
-            if ($outcome.refused) {
-                # A refusal is only believed when nothing changed: the state is read again and compared
-                # with the one that was journaled. If it differs, the tweak is not noted as needing no
-                # undo (-Undo can still restore it) and the run reports a failure.
-                if (Test-TuneupStateUnchanged -Tweak $tweak -Before $state) {
-                    # Its journal entry stays (it was written first), and the tweak is noted as needing
-                    # no undo, so -Undo never calls its restore.
-                    Add-TuneupRefusedMark -RunDir $RunDir -Tweak $tweak
-                    New-TuneupResult -Item $item -Status 'skipped' -Reason $outcome.reason -Detail $outcome.detail -Refused
-                } else {
-                    New-TuneupResult -Item $item -Status 'failed' -ErrorText 'refused after changing; undo can restore it' -Detail $outcome.detail
-                }
-                continue
+        $Results.Add($result)
+        $Progress.Current = $null
+        $Progress.Journaled = $false
+        $result
+    }
+}
+
+# One tweak: read its state, journal it, apply it and check it.
+function Invoke-TuneupPlanItem {
+    param([Parameter(Mandatory)]$Item, [Parameter(Mandatory)][string]$Journal, [Parameter(Mandatory)][string]$RunDir, [hashtable]$Progress)
+    $tweak = $Item.Tweak
+    try {
+        $state = Get-TuneupState -Tweak $tweak
+    } catch {
+        return (New-TuneupResult -Item $Item -Status 'failed' -ErrorText $_.Exception.Message)
+    }
+    try {
+        Add-TuneupJournalEntry -Path $Journal -Tweak $tweak -State $state
+    } catch {
+        return (New-TuneupResult -Item $Item -Status 'skipped' -Reason 'journal-error' -ErrorText $_.Exception.Message)
+    }
+    if ($null -ne $Progress) { $Progress.Journaled = $true }
+    try {
+        # Set may report through New-TuneupOutcome that it changed something but could not finish
+        # (partial) or that Windows asked for a restart; any other output is ignored.
+        $outcome = Get-TuneupOutcome -Output @(Set-TuneupDesired -Tweak $tweak)
+        if ($outcome.refused) {
+            # A refusal is only believed when nothing changed: the state is read again and compared
+            # with the one that was journaled. If it differs, the tweak is not noted as needing no
+            # undo (-Undo can still restore it) and the run reports a failure.
+            if (Test-TuneupStateUnchanged -Tweak $tweak -Before $state) {
+                # Its journal entry stays (it was written first), and the tweak is noted as needing
+                # no undo, so -Undo never calls its restore.
+                Add-TuneupRefusedMark -RunDir $RunDir -Tweak $tweak
+                return (New-TuneupResult -Item $Item -Status 'skipped' -Reason $outcome.reason -Detail $outcome.detail -Refused)
             }
-            if ($outcome.partial) {
-                $status = 'partial'
-            } elseif ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
-                $status = 'applied'
-            } else {
-                $status = 'not-applied'
-            }
-            New-TuneupResult -Item $item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
-        } catch {
-            New-TuneupResult -Item $item -Status 'failed' -ErrorText $_.Exception.Message
+            return (New-TuneupResult -Item $Item -Status 'failed' -ErrorText 'refused after changing; undo can restore it' -Detail $outcome.detail)
         }
+        if ($outcome.partial) {
+            $status = 'partial'
+        } elseif ((Test-TuneupState -Tweak $tweak) -eq 'applied') {
+            $status = 'applied'
+        } else {
+            $status = 'not-applied'
+        }
+        New-TuneupResult -Item $Item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
+    } catch {
+        New-TuneupResult -Item $Item -Status 'failed' -ErrorText $_.Exception.Message
     }
 }

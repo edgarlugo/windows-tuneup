@@ -225,6 +225,70 @@ Describe 'tuneup.ps1' {
         ($json.items | Where-Object { $_.id -eq 'test.two' }).status | Should -Be 'ok'
     }
 
+    It 're-applies what drifted with -Status -Reapply -Yes' {
+        Invoke-Tuneup @('-Yes', '-Json') | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $result = Invoke-Tuneup @('-Status', '-Reapply', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.source | Should -Be 'reapply'
+        Get-Ids $json.results | Should -Be 'test.one'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
+    It 'keeps the ids of result.json whatever the account is called, so -Status and -Reapply still work (<Name>)' -ForEach @(
+        @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
+    ) {
+        $previous = $env:USERNAME
+        $env:USERNAME = $Name
+        try {
+            $applied = ConvertFrom-PureJson (Invoke-Tuneup @('-Yes', '-Json')).Output
+            $text = [System.IO.File]::ReadAllText((Join-Path $applied.runDir 'result.json'))
+            Get-Ids ($text | ConvertFrom-Json).results | Should -Be 'test.one,test.two'
+            # The profile folder is written %USERPROFILE% (the state folder of the test is usually under it).
+            $text | Should -Not -Match ('(?i)' + [regex]::Escape($env:USERPROFILE.TrimEnd('\').Replace('\', '\\')))
+            if ($script:Root.StartsWith($env:USERPROFILE.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                ($text | ConvertFrom-Json).runDir | Should -Match '^%USERPROFILE%\\'
+            }
+            $status = ConvertFrom-PureJson (Invoke-Tuneup @('-Status', '-Json')).Output
+            ($status.items | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.one=ok,test.two=ok'
+            Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+            $reapply = Invoke-Tuneup @('-Status', '-Reapply', '-Yes', '-Json')
+            $reapply.ExitCode | Should -Be 0
+            Get-Ids (ConvertFrom-PureJson $reapply.Output).results | Should -Be 'test.one'
+            (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        } finally {
+            $env:USERNAME = $previous
+        }
+    }
+
+    It 'opens the menu without a command and reads the answers from standard input' {
+        # Optimize, only base, apply, back to the menu, exit.
+        $answers = @('1', '', 'y', '', '0')
+        $output = $answers | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') `
+            -CatalogPath (Join-Path $Fixtures 'catalog') -ProfilesPath (Join-Path $Fixtures 'profiles') `
+            -ActionsPath (Join-Path $Fixtures 'actions') -StateRoot $script:Root -Force -Lang en
+        $LASTEXITCODE | Should -Be 0
+        $text = $output -join "`n"
+        $text | Should -Match '1\. Optimize: choose profiles and apply them'
+        $text | Should -Match 'Applied: 2'
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
+    It 'does not open the menu with -NonInteractive, also with the input redirected, and says why' {
+        $output = @('2') | & $PowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en 2>&1
+        $LASTEXITCODE | Should -Be 1
+        $text = $output -join "`n"
+        $text | Should -Match 'PowerShell was started with -NonInteractive'
+        $text | Should -Not -Match 'Read-Host|NonInteractive mode'
+    }
+
+    It 'leaves the menu at the end of standard input' {
+        $output = @('2') | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en
+        $LASTEXITCODE | Should -Be 0
+        ($output -join "`n") | Should -Match 'windows-tuneup has not applied any tweak'
+    }
+
     It 'undoes the last run' {
         Invoke-Tuneup @('-Yes', '-Json') | Out-Null
         $result = Invoke-Tuneup @('-Undo', 'last', '-Json')
@@ -349,12 +413,37 @@ Describe 'tuneup.ps1' {
         @{ Arguments = @('-IdleSeconds', '5') }
         @{ Arguments = @('-Measure', '-Status') }
         @{ Arguments = @('-Measure', '-Yes') }
+        @{ Arguments = @('-Reapply') }
+        @{ Arguments = @('-Status', '-Yes') }
+        @{ Arguments = @('-Status', '-Reapply', '-Profile', 'extra') }
     ) {
         param($Arguments)
         $result = Invoke-Tuneup (@($Arguments) + '-Json')
         $result.ExitCode | Should -Be 1
         (ConvertFrom-PureJson $result.Output).message | Should -Match 'Invalid parameter combination'
         Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'rejects an unknown parameter <Arguments> with an error document, doing nothing' -TestCases @(
+        @{ Arguments = @('-Bogus'); Unknown = '-Bogus' }
+        @{ Arguments = @('-Profile', 'extra', '-Exlude', 'test.three', '-Yes'); Unknown = '-Exlude test.three' }
+        @{ Arguments = @('base', '-Yes'); Unknown = 'base' }
+    ) {
+        param($Arguments, $Unknown)
+        $result = Invoke-Tuneup (@($Arguments) + '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.message | Should -Match ('Unknown parameter or value without a parameter name: ' + [regex]::Escape($Unknown))
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:Root 'runs') | Should -BeFalse
+    }
+
+    It 'rejects a misspelled parameter without -Json before planning anything' {
+        $result = Invoke-Tuneup @('-Profile', 'extra', '-Exlude', 'test.three', '-WhatIf')
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'Unknown parameter or value without a parameter name: -Exlude test\.three'
+        $result.Output | Should -Not -Match 'Test one'
     }
 
     It 'refuses -Health without elevation' -Skip:$Elevated {
@@ -505,7 +594,7 @@ Describe 'tuneup.ps1' {
         Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak $policy -State ([pscustomobject]@{ exists = $false }) -Root 'custom'
         $result = Invoke-Tuneup @('-Undo', $run.Id, '-Json')
         $result.ExitCode | Should -Be 1
-        (ConvertFrom-PureJson $result.Output).message | Should -Match 'administrator'
+        (ConvertFrom-PureJson $result.Output).message | Should -Match "Run $([regex]::Escape($run.Id)) has system changes: undoing it needs PowerShell as administrator"
     }
 
     It 'refuses to undo a run with a machine-scope entry when not elevated' -Skip:$Elevated {
@@ -515,7 +604,7 @@ Describe 'tuneup.ps1' {
         $result.ExitCode | Should -Be 1
         $json = ConvertFrom-PureJson $result.Output
         $json.command | Should -Be 'error'
-        $json.message | Should -Match 'administrator'
+        $json.message | Should -Match 'undoing it needs PowerShell as administrator'
         Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test' | Should -BeFalse
     }
 }

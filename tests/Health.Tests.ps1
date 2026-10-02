@@ -480,6 +480,18 @@ Describe 'Invoke-TuneupHealth' {
         $report.recommendation | Should -Be 'run-repair'
     }
 
+    It 'repairs from the check of an earlier report without checking again' {
+        Mock -ModuleName Tuneup Read-TuneupCbsLog { if ($script:Phase -eq 'repair') { $script:Fixed } else { $script:Corrupt } }
+        $first = Invoke-TuneupHealth
+        $script:Phases = @()
+        $report = Invoke-TuneupHealth -Repair -Previous $first -OnPhase { param($Name) $script:Phases += $Name }
+        $script:Phases -join ',' | Should -Be 'dismRestore,sfcAgain'
+        $report.startedAt | Should -Be $first.startedAt
+        $report.before.componentStore.state | Should -Be 'repairable'
+        $report.after.componentStore.state | Should -Be 'repaired'
+        Should -Invoke Invoke-TuneupDism -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { $Operation -eq 'ScanHealth' }
+    }
+
     It 'reports each phase as it starts' {
         Mock -ModuleName Tuneup Read-TuneupCbsLog { if ($script:Phase -eq 'repair') { $script:Fixed } else { $script:Corrupt } }
         $script:Phases = @()

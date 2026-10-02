@@ -58,13 +58,19 @@ function New-TuneupPlan {
         [AllowEmptyCollection()][AllowNull()][string[]]$ProfileIds = @(),
         [AllowEmptyCollection()][AllowNull()][string[]]$Include = @(),
         [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
+        # Tweaks named like a profile names them, in this order and without being asked for: one that
+        # asks first or has high risk is left out as in a profile.
+        [AllowEmptyCollection()][AllowNull()][string[]]$Candidates = @(),
         [Parameter(Mandatory)]$Environment,
         [Parameter(Mandatory)][scriptblock]$TestState,
-        [switch]$Interactive
+        [switch]$Interactive,
+        # Only what -ProfileIds and -Include name, without the base profile: re-applying what drifted.
+        [switch]$NoBase
     )
     $ProfileIds = @(Get-TuneupCleanList $ProfileIds)
     $Include = @(Get-TuneupCleanList $Include)
     $Exclude = @(Get-TuneupCleanList $Exclude)
+    $Candidates = @(Get-TuneupCleanList $Candidates)
 
     # Hashtable lookups are case-insensitive; every id is canonicalized to the catalog's own spelling.
     $byId = @{}
@@ -73,16 +79,17 @@ function New-TuneupPlan {
         param([string]$TweakId)
         if ($byId.ContainsKey($TweakId)) { [string]$byId[$TweakId].id } else { $TweakId }
     }
-    foreach ($tweakId in @($Include) + @($Exclude)) {
+    foreach ($tweakId in @($Include) + @($Exclude) + @($Candidates)) {
         if (-not $byId.ContainsKey($tweakId)) { throw (Get-TuneupText -Key 'err.unknownTweak' -Format $tweakId) }
     }
     $Include = @($Include | ForEach-Object { & $canonical $_ })
     $Exclude = @($Exclude | ForEach-Object { & $canonical $_ })
+    $Candidates = @($Candidates | ForEach-Object { & $canonical $_ })
     $profilesById = @{}
     foreach ($profileData in $Profiles) { $profilesById[[string]$profileData.id] = $profileData }
 
     $selected = New-Object System.Collections.Generic.List[string]
-    foreach ($name in @('base') + @($ProfileIds)) {
+    foreach ($name in @($(if (-not $NoBase) { 'base' })) + @($ProfileIds)) {
         $profileId = Resolve-TuneupProfileId -Profiles $Profiles -Name $name
         if ($selected -notcontains $profileId) { $selected.Add($profileId) }
     }
@@ -95,6 +102,7 @@ function New-TuneupPlan {
         foreach ($tweakId in @($profileData.keep | Where-Object { $_ } | ForEach-Object { & $canonical $_ })) { if ($keep -notcontains $tweakId) { $keep.Add($tweakId) } }
     }
     foreach ($tweakId in $Include) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
+    foreach ($tweakId in $Candidates) { if ($wanted -notcontains $tweakId) { $wanted.Add($tweakId) } }
 
     foreach ($tweakId in $wanted) {
         $tweak = $byId[$tweakId]

@@ -34,6 +34,17 @@ Describe 'Write-TuneupJson' {
     }
 }
 
+Describe 'Add-TuneupJsonWarning' {
+    It 'adds the version of the tool and the warnings to a copy of the document' {
+        $document = [pscustomobject]@{ schemaVersion = 1; command = 'status' }
+        $copy = Add-TuneupJsonWarning -Document $document -Warnings @('careful')
+        $copy.toolVersion | Should -Be (Get-TuneupVersion)
+        @($copy.warnings) | Should -Be @('careful')
+        $document.PSObject.Properties.Name | Should -Not -Contain 'toolVersion'
+        Get-TuneupVersion | Should -Match '^\d+\.\d+\.\d+$'
+    }
+}
+
 Describe 'ConvertTo-TuneupEnvironmentView' {
     It 'uses camelCase keys' {
         $view = ConvertTo-TuneupEnvironmentView -Environment (New-TestEnvironment -Edition 'Home')
@@ -59,7 +70,7 @@ Describe 'New-TuneupApplyReport' {
         $report.summary.partial | Should -Be 1
         $report.summary.applied | Should -Be 1
         $report.rebootRequired | Should -BeTrue
-        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors'
+        $report.summary.PSObject.Properties.Name -join ',' | Should -Be 'applied,partial,notApplied,failed,skipped,refused,journalErrors,interrupted'
     }
 
     It 'counts the tweaks that refused to change anything apart from the skipped ones' {
@@ -103,6 +114,24 @@ Describe 'Get-TuneupApplyExitCode' {
     }
 }
 
+Describe 'Reports of a run stopped with Ctrl+C' {
+    It 'counts the tweaks left out apart and exits with 2 when something was applied' {
+        $report = New-TestReport @((New-TestResult -Status 'applied'), (New-TestResult -Status 'skipped' -Reason 'interrupted'), $PlanSkip)
+        $report.interrupted | Should -BeTrue
+        $report.summary.interrupted | Should -Be 1
+        $report.summary.skipped | Should -Be 1
+        Get-TuneupApplyExitCode -Report $report | Should -Be 2
+        $text = (Write-TuneupApplyReport -Report $report 6>&1 | Out-String)
+        $text | Should -Match 'Stopped with Ctrl\+C\. Tweaks not applied: 1'
+    }
+
+    It 'exits with 1 when it stopped before the first tweak' {
+        $report = New-TestReport @((New-TestResult -Status 'skipped' -Reason 'interrupted'), $PlanSkip)
+        Get-TuneupApplyExitCode -Report $report | Should -Be 1
+        (New-TestReport @((New-TestResult -Status 'applied'))).interrupted | Should -BeFalse
+    }
+}
+
 Describe 'Get-TuneupUndoExitCode' {
     It 'returns <Expected> for <Name>' -TestCases @(
         @{ Name = 'everything restored'; Results = @('restored', 'restored'); Expected = 0 }
@@ -132,8 +161,41 @@ Describe 'Save-TuneupApplyReport' {
         $saved.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
 
+    It 'hides the personal data of result.json only where it can be, never in ids, statuses, reasons or titles (<Name>)' -ForEach @(
+        @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
+    ) {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $profileDir = $env:USERPROFILE.TrimEnd('\')
+        $failed = New-TestResult -Status 'failed' -ErrorText "Access denied to $profileDir\x and D:\data\$Name\y"
+        $failed | Add-Member -NotePropertyName detail -NotePropertyValue "kept in D:\$Name"
+        $skipped = [pscustomobject]@{ id = "$Name.one"; title = "$Name apps for User"; status = 'skipped'; reason = 'already-applied'; error = $null; rebootRequired = $false }
+        $report = New-TuneupApplyReport -Run ([pscustomobject]@{ Id = '20250101-000000'; Dir = "$profileDir\runs\$Name" }) -Results @($failed, $skipped) `
+            -RestorePoint 'not-needed' -Environment (New-TestEnvironment) -Preflight @([pscustomobject]@{ id = 'untrusted-location'; message = "from $profileDir\$Name" })
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'custom' }
+        $previous = $env:USERNAME
+        $env:USERNAME = $Name
+        try {
+            Write-TuneupRunResult -Run $run -Report $report
+        } finally {
+            $env:USERNAME = $previous
+        }
+        $saved = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw | ConvertFrom-Json
+        $saved.runDir | Should -Be "%USERPROFILE%\runs\%USERNAME%"
+        $saved.preflight[0].id | Should -Be 'untrusted-location'
+        $saved.preflight[0].message | Should -Be 'from %USERPROFILE%\%USERNAME%'
+        $saved.results[0].error | Should -Be 'Access denied to %USERPROFILE%\x and D:\data\%USERNAME%\y'
+        $saved.results[0].detail | Should -Be 'kept in D:\%USERNAME%'
+        $saved.results[1].id | Should -Be "$Name.one"
+        $saved.results[1].title | Should -Be "$Name apps for User"
+        "$($saved.results[1].status)/$($saved.results[1].reason)" | Should -Be 'skipped/already-applied'
+        # What is written is a copy: the report shown by the command keeps the real values.
+        $report.runDir | Should -Be "$profileDir\runs\$Name"
+        $report.results[0].error | Should -Match ([regex]::Escape($profileDir))
+    }
+
     It 'warns instead of failing when result.json cannot be saved' {
-        Mock -ModuleName Tuneup Save-TuneupJson { throw [System.UnauthorizedAccessException]::new('Access denied') }
+        Mock -ModuleName Tuneup Write-TuneupRunResult { throw [System.UnauthorizedAccessException]::new('Access denied') }
         $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $TestDrive; Root = 'custom' }
         $saved = Save-TuneupApplyReport -Run $run -Report (New-TestReport @(New-TestResult -Status 'applied')) -WarningVariable warned -WarningAction SilentlyContinue
         $saved | Should -BeFalse
@@ -250,6 +312,18 @@ Describe 'Write-TuneupUndoReport' {
         $text | Should -Match 'Reinstalled for the current user'
         $text | Should -Match 'Restart the computer'
         (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($restored) -Json | ConvertFrom-Json).rebootRequired | Should -BeTrue
+    }
+
+    It 'shows how to restore a failed tweak by hand and asks to sign out again' {
+        $failed = [pscustomobject]@{ id = 'test.one'; title = 'One'; status = 'failed'; reason = $null; error = 'denied'; detail = $null; rebootRequired = $false; signOutRequired = $false; manual = @("Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'One'") }
+        $restored = [pscustomobject]@{ id = 'test.two'; title = 'Two'; status = 'restored'; reason = $null; error = $null; detail = $null; rebootRequired = $false; signOutRequired = $true; manual = @() }
+        $text = (Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) 6>&1 | Out-String)
+        $text | Should -Match 'To restore it by hand, run'
+        $text | Should -Match ([regex]::Escape("Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'One'"))
+        $text | Should -Match 'Sign out and sign in again'
+        $json = Write-TuneupUndoReport -RunId '20250101-000000' -Results @($failed, $restored) -Json | ConvertFrom-Json
+        $json.signOutRequired | Should -BeTrue
+        @($json.results[0].manual).Count | Should -Be 1
     }
 
     It 'shows skipped tweaks with their reason and counts them' {

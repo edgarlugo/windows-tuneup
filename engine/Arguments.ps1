@@ -2,7 +2,10 @@
 $script:CliCommands = @('Status', 'Undo', 'Health', 'Measure')
 $script:CliApplyOptions = @('Profile', 'Include', 'Exclude', 'WhatIf', 'Yes')
 # Options that only make sense with one command.
-$script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure' }
+$script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure'; Reapply = 'Status' }
+# Options of applying that an option of a command brings back: -Status -Reapply applies again what
+# drifted, so it takes -Yes and -WhatIf (and still not -Profile, -Include or -Exclude).
+$script:CliApplyingOptions = @{ Reapply = @('Yes', 'WhatIf') }
 
 function Get-TuneupArgumentConflict {
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Present)
@@ -13,7 +16,8 @@ function Get-TuneupArgumentConflict {
     $commands = @($script:CliCommands | Where-Object { $Present -contains $_ })
     if ($commands.Count -gt 1) { return (($commands | ForEach-Object { "-$_" }) -join ' ') }
     if ($commands.Count -eq 1) {
-        $extra = @($script:CliApplyOptions | Where-Object { $Present -contains $_ })
+        $allowed = @($script:CliApplyingOptions.Keys | Where-Object { $Present -contains $_ } | ForEach-Object { $script:CliApplyingOptions[$_] })
+        $extra = @($script:CliApplyOptions | Where-Object { $Present -contains $_ -and $allowed -notcontains $_ })
         if ($extra.Count) { return ((@($commands[0]) + $extra | ForEach-Object { "-$_" }) -join ' ') }
     }
 }

@@ -16,14 +16,19 @@ function Invoke-TuneupUndo {
     $foreign = @($journal.SkippedEntries)
     $newResult = {
         param($entry, [string]$status, $reason, $errorText, $outcome)
+        # A restored tweak that shows only after signing in again says so, like when it was applied. A
+        # failed one carries what a person can run to restore it by hand.
+        $signOut = $entry.tweak.PSObject.Properties['signOutRequired']
         [pscustomobject]@{
-            id             = $entry.id
-            title          = Get-TuneupTitle -Tweak $entry.tweak
-            status         = $status
-            reason         = $reason
-            error          = $errorText
-            detail         = $(if ($outcome) { $outcome.detail } else { $null })
-            rebootRequired = $(if ($outcome) { [bool]$outcome.rebootRequired } else { $false })
+            id              = $entry.id
+            title           = Get-TuneupTitle -Tweak $entry.tweak
+            status          = $status
+            reason          = $reason
+            error           = $errorText
+            detail          = $(if ($outcome) { $outcome.detail } else { $null })
+            rebootRequired  = $(if ($outcome) { [bool]$outcome.rebootRequired } else { $false })
+            signOutRequired = ($status -eq 'restored' -and $null -ne $signOut -and $signOut.Value -eq $true)
+            manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreLine -Tweak $entry.tweak -State $entry.state })
         }
     }
     if ($TweakId) {
@@ -68,7 +73,7 @@ function Invoke-TuneupUndo {
                 -Text (($restoredIds -join [Environment]::NewLine) + [Environment]::NewLine)
         }
     } catch {
-        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; reason = $null; error = "The undo could not be recorded: $($_.Exception.Message)"; detail = $null; rebootRequired = $false }
+        $results += [pscustomobject]@{ id = $null; title = "run $($Run.Id)"; status = 'failed'; reason = $null; error = "The undo could not be recorded: $($_.Exception.Message)"; detail = $null; rebootRequired = $false; signOutRequired = $false; manual = [string[]]@() }
     }
     $results
 }

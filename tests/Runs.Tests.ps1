@@ -80,6 +80,7 @@ Describe 'Run folders' {
         $run.UserSid | Should -Be $MeSid
         $info = Get-Content -LiteralPath (Join-Path $run.Dir 'run.json') -Raw | ConvertFrom-Json
         $info.schemaVersion | Should -Be 1
+        $info.toolVersion | Should -Be (Get-TuneupVersion)
         $info.userSid | Should -Be $MeSid
         $info.machine | Should -BeFalse
         $info.createdAt | Should -Not -BeNullOrEmpty

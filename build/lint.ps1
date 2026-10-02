@@ -5,9 +5,11 @@ $root = Split-Path $PSScriptRoot -Parent
 $settings = Join-Path $PSScriptRoot 'PSScriptAnalyzerSettings.psd1'
 $targets = @(
     (Join-Path $root 'tuneup.ps1'),
+    (Join-Path $root 'install.ps1'),
     (Join-Path $root 'engine'),
     (Join-Path $root 'actions'),
-    (Join-Path $root 'build')
+    (Join-Path $root 'build'),
+    (Join-Path $root 'tests\sandbox')
 ) | Where-Object { Test-Path -LiteralPath $_ }
 
 $findings = @(foreach ($target in $targets) {

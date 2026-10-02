@@ -42,6 +42,7 @@ function Add-TuneupJsonWarning {
     param([Parameter(Mandatory)]$Document, [AllowEmptyCollection()][string[]]$Warnings = @())
     # A copy, so the report saved in the run folder does not change.
     $copy = $Document | Select-Object -Property *
+    $copy | Add-Member -NotePropertyName toolVersion -NotePropertyValue (Get-TuneupVersion) -Force
     $copy | Add-Member -NotePropertyName warnings -NotePropertyValue ([string[]]@($Warnings)) -Force
     $copy
 }
@@ -51,7 +52,11 @@ function Write-TuneupPlanReport {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan,
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
-        [switch]$Json
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles',
+        [switch]$Json,
+        # The caller says it with its own line (the menu, when it stops a plan that needs administrator).
+        [switch]$NoAdminHint
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
@@ -60,8 +65,10 @@ function Write-TuneupPlanReport {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
             schemaVersion = 1
             command       = 'plan'
+            source        = $Source
             environment   = ConvertTo-TuneupEnvironmentView -Environment $Environment
             requiresAdmin = $requiresAdmin
+            preflight     = @($Preflight)
             items         = $items
             summary       = [pscustomobject]@{ apply = $toApply; skip = $items.Count - $toApply }
         }))
@@ -78,7 +85,8 @@ function Write-TuneupPlanReport {
         }
     }
     if (-not $toApply) { Write-Host (Get-TuneupText -Key 'nothing') -ForegroundColor Green }
-    if ($requiresAdmin -and -not $Environment.IsAdmin) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
+    if ($requiresAdmin -and -not $Environment.IsAdmin -and -not $NoAdminHint) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
+    Write-TuneupPreflight -Preflight $Preflight
 }
 
 function New-TuneupApplyReport {
@@ -86,21 +94,28 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)]$Run,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Results,
         [Parameter(Mandatory)][string]$RestorePoint,
-        [Parameter(Mandatory)]$Environment
+        [Parameter(Mandatory)]$Environment,
+        [AllowEmptyCollection()][object[]]$Preflight = @(),
+        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles'
     )
-    # A tweak left out because its backup could not be written was not done: it is counted apart.
-    # A tweak that refused to change anything is counted apart from the skips of the plan.
-    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' -and $_.refused -ne $true }).Count }
+    # A tweak left out because its backup could not be written was not done: it is counted apart, and
+    # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to
+    # change anything is counted apart from the skips of the plan.
+    $count = { param($status) @($Results | Where-Object { $_.status -eq $status -and $_.reason -ne 'journal-error' -and $_.reason -ne 'interrupted' -and $_.refused -ne $true }).Count }
+    $interrupted = @($Results | Where-Object { $_.reason -eq 'interrupted' }).Count
     [pscustomobject]@{
         schemaVersion  = 1
         command        = 'apply'
+        source         = $Source
         runId          = $Run.Id
         runDir         = $Run.Dir
         finishedAt     = (Get-Date).ToString('s')
         environment    = ConvertTo-TuneupEnvironmentView -Environment $Environment
+        preflight      = @($Preflight)
         restorePoint   = $RestorePoint
         rebootRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.rebootRequired }).Count -gt 0)
         signOutRequired = (@($Results | Where-Object { ($_.status -eq 'applied' -or $_.status -eq 'partial') -and $_.signOutRequired }).Count -gt 0)
+        interrupted    = ($interrupted -gt 0)
         summary        = [pscustomobject]@{
             applied       = & $count 'applied'
             partial       = & $count 'partial'
@@ -109,16 +124,53 @@ function New-TuneupApplyReport {
             skipped       = & $count 'skipped'
             refused       = @($Results | Where-Object { $_.status -eq 'skipped' -and $_.refused -eq $true }).Count
             journalErrors = @($Results | Where-Object { $_.reason -eq 'journal-error' }).Count
+            interrupted   = $interrupted
         }
         results        = $Results
     }
+}
+
+# A copy of an object with some of its fields changed; the object itself is left as it is.
+function Copy-TuneupObject {
+    param([Parameter(Mandatory)]$Object, [hashtable]$Change = @{})
+    $copy = [ordered]@{}
+    foreach ($property in $Object.PSObject.Properties) {
+        $copy[$property.Name] = $(if ($Change.ContainsKey($property.Name)) { $Change[$property.Name] } else { $property.Value })
+    }
+    [pscustomobject]$copy
+}
+
+# Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData)
+# field by field, only where they can appear: the run folder, the messages of the preflight and the
+# error and detail of each result. Ids, statuses, reasons and titles are written as they are: -Status
+# reads the ids of this file. The file is meant to be read and shared, and the run folder it names is
+# under the profile of the account. Fails when it cannot be written.
+function Write-TuneupRunResult {
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
+    $hide = { param($value) $(if ($value -is [string]) { Hide-TuneupPersonalData -Text $value } else { $value }) }
+    $change = @{}
+    if ($Report.PSObject.Properties['runDir']) { $change.runDir = & $hide $Report.runDir }
+    if ($Report.PSObject.Properties['preflight']) {
+        $change.preflight = @(foreach ($item in @($Report.preflight | Where-Object { $null -ne $_ })) {
+            $(if ($item.PSObject.Properties['message']) { Copy-TuneupObject -Object $item -Change @{ message = & $hide $item.message } } else { $item })
+        })
+    }
+    if ($Report.PSObject.Properties['results']) {
+        $change.results = @(foreach ($result in @($Report.results | Where-Object { $null -ne $_ })) {
+            $fields = @{}
+            foreach ($name in 'error', 'detail') { if ($result.PSObject.Properties[$name]) { $fields[$name] = & $hide $result.$name } }
+            Copy-TuneupObject -Object $result -Change $fields
+        })
+    }
+    $json = ConvertTo-Json -InputObject (Copy-TuneupObject -Object $Report -Change $change) -Depth 10
+    Write-TuneupStateFile -Path (Join-Path $Run.Dir 'result.json') -Text $json -Root $Run.Root
 }
 
 function Save-TuneupApplyReport {
     param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
     # The changes are already made; losing result.json must not hide the report of what was done.
     try {
-        Save-TuneupJson -Path (Join-Path $Run.Dir 'result.json') -Root $Run.Root -Object $Report
+        Write-TuneupRunResult -Run $Run -Report $Report
         $true
     } catch {
         Write-Warning "The result of run $($Run.Id) could not be saved: $($_.Exception.Message)"
@@ -130,13 +182,15 @@ function Save-TuneupApplyReport {
 # backup that could not be written after some change, or an unsaved result; read the summary).
 # A tweak that refused to change anything (summary.refused) is an omission, like any skip: if
 # everything else was done, the code stays 0 and the summary and the line of that tweak say why.
-# 1: nothing was changed because the backups could not be written.
+# 1: nothing was changed because the backups could not be written, or because Ctrl+C stopped the
+# run before its first tweak. Tweaks left out by Ctrl+C after others were touched count as not done (2).
 function Get-TuneupApplyExitCode {
     param([Parameter(Mandatory)]$Report, [switch]$ResultNotSaved)
     $summary = $Report.summary
+    $interrupted = $(if ($summary.PSObject.Properties['interrupted']) { [int]$summary.interrupted } else { 0 })
     $touched = $summary.applied + $summary.partial + $summary.notApplied + $summary.failed
-    if ($summary.journalErrors -and -not $touched) { return 1 }
-    if ($summary.partial -or $summary.notApplied -or $summary.failed -or $summary.journalErrors -or $ResultNotSaved) { return 2 }
+    if (($summary.journalErrors -or $interrupted) -and -not $touched) { return 1 }
+    if ($summary.partial -or $summary.notApplied -or $summary.failed -or $summary.journalErrors -or $interrupted -or $ResultNotSaved) { return 2 }
     0
 }
 
@@ -154,9 +208,12 @@ function Write-TuneupApplyReport {
     param(
         [Parameter(Mandatory)]$Report,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
-        [switch]$Json
+        [switch]$Json,
+        # Shown from the menu: what it says about undoing names the menu, not a parameter.
+        [switch]$FromMenu
     )
     if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Report -Warnings $Warnings); return }
+    $suffix = $(if ($FromMenu) { '.menu' } else { '' })
     $colors = @{ 'applied' = 'Green'; 'partial' = 'Yellow'; 'not-applied' = 'Yellow'; 'failed' = 'Red'; 'skipped' = 'Yellow' }
     foreach ($result in $Report.results) {
         if ($result.reason -eq 'journal-error') {
@@ -164,8 +221,8 @@ function Write-TuneupApplyReport {
             if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
             continue
         }
-        # Skips of the plan were already shown; a tweak that refused to change anything when it was
-        # applied is shown with its reason.
+        # Skips of the plan were already shown, and the tweaks left out by Ctrl+C are counted below; a
+        # tweak that refused to change anything when it was applied is shown with its reason.
         if ($result.status -eq 'skipped' -and $result.refused -ne $true) { continue }
         $line = Get-TuneupText -Key 'result.line' -Format (Get-TuneupText -Key "status.$($result.status)"), $result.title
         if ($result.status -eq 'skipped' -and $result.reason) { $line += ": $(Get-TuneupText -Key "reason.$($result.reason)")" }
@@ -176,8 +233,11 @@ function Write-TuneupApplyReport {
     $summary = $Report.summary
     Write-Host ''
     Write-Host (Get-TuneupText -Key 'summary' -Format $summary.applied, $summary.partial, $summary.notApplied, $summary.failed, $summary.skipped, $summary.refused)
+    if ($summary.PSObject.Properties['interrupted'] -and $summary.interrupted) {
+        Write-Host (Get-TuneupText -Key "interrupted.summary$suffix" -Format $summary.interrupted) -ForegroundColor Yellow
+    }
     Write-Host (Get-TuneupText -Key "restore.$($Report.restorePoint)")
-    Write-Host (Get-TuneupText -Key 'run.saved' -Format $Report.runId, $Report.runDir)
+    Write-Host (Get-TuneupText -Key "run.saved$suffix" -Format $Report.runId, $Report.runDir)
     if ($Report.rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
     # A restart also signs the user out, so the sign-out line is only needed without one.
     elseif ($Report.signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
@@ -212,14 +272,16 @@ function Write-TuneupUndoReport {
     $failed = @($Results | Where-Object { $_.status -eq 'failed' }).Count
     $skipped = @($Results | Where-Object { $_.status -eq 'skipped' }).Count
     $rebootRequired = @($Results | Where-Object { $_.rebootRequired }).Count -gt 0
+    $signOutRequired = @($Results | Where-Object { $_.PSObject.Properties['signOutRequired'] -and $_.signOutRequired }).Count -gt 0
     if ($Json) {
         Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
-            schemaVersion  = 1
-            command        = 'undo'
-            runId          = $RunId
-            rebootRequired = $rebootRequired
-            results        = $Results
-            summary        = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
+            schemaVersion   = 1
+            command         = 'undo'
+            runId           = $RunId
+            rebootRequired  = $rebootRequired
+            signOutRequired = $signOutRequired
+            results         = $Results
+            summary         = [pscustomobject]@{ restored = $restored; failed = $failed; skipped = $skipped }
         }))
         return
     }
@@ -231,9 +293,15 @@ function Write-TuneupUndoReport {
         Write-Host $line -ForegroundColor $colors[$result.status]
         if ($result.detail) { Write-Host "    $($result.detail)" -ForegroundColor DarkGray }
         if ($result.error) { Write-Host "    $($result.error)" -ForegroundColor Red }
+        $manual = @($(if ($result.PSObject.Properties['manual']) { $result.manual }) | Where-Object { $_ })
+        if ($manual.Count) {
+            Write-Host "    $(Get-TuneupText -Key 'undo.manual')"
+            foreach ($line in $manual) { Write-Host "      $line" }
+        }
     }
     Write-Host (Get-TuneupText -Key 'undo.summary' -Format $restored, $failed, $skipped)
     if ($rebootRequired) { Write-Host (Get-TuneupText -Key 'reboot') -ForegroundColor Yellow }
+    elseif ($signOutRequired) { Write-Host (Get-TuneupText -Key 'signOut') -ForegroundColor Yellow }
 }
 
 function Write-TuneupErrorReport {
