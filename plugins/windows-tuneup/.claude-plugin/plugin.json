@@ -1,0 +1,13 @@
+{
+  "name": "windows-tuneup",
+  "version": "0.1.0",
+  "description": "Optimize a Windows 10/11 PC by goal (development, gaming, privacy, laptop, old PC, work, lite) with windows-tuneup: plan first, explicit yes, UAC only when needed, everything reversible.",
+  "author": {
+    "name": "edgarlugo",
+    "url": "https://github.com/edgarlugo"
+  },
+  "homepage": "https://github.com/edgarlugo/windows-tuneup",
+  "repository": "https://github.com/edgarlugo/windows-tuneup",
+  "license": "MIT",
+  "keywords": ["windows", "optimization", "debloat", "privacy", "powershell"]
+}
