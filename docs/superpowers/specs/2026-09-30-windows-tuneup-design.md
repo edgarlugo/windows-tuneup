@@ -666,14 +666,15 @@ Reemplaza la ruta `claude/skills/windows-tuneup/` de la sección 8. El zip de la
 
 **Directo** ("aplica Base + Privacidad"): pasos 1, 4, 6 y 7; igual muestra el plan y espera el sí.
 
-**Otros pedidos:** "¿qué tengo aplicado?" → `-Status`; "deshaz lo último" → `-Undo last` (elevado solo si la corrida tiene cambios de sistema); salud → `-Health` (avisar que tarda); una actualización revirtió ajustes → `-Status` y `-Status -Reapply` con confirmación; la skill siempre pasa `-Include` con los ids que mostró y el usuario aceptó (13.2.6).
+**Otros pedidos:** "¿qué tengo aplicado?" → `-Status`; "deshaz lo último" → `-Undo last` (elevado solo si la corrida tiene cambios de sistema); salud → `-Health` (avisar que tarda); una actualización revirtió ajustes → `-Status` y `-Status -Reapply` con confirmación; la skill clasifica con `-Status -Reapply -WhatIf -Json` (sin `-Include`) y aplica con `-Include` y solo los ids que permite la barrera de `high` y `ask`, también para los `needs-admin` (`ask` y `risk` de `-List`) (13.2.6).
 
 ### 13.5 Barreras
 
 Las de la sección 8, más:
 - Ajustes `high` solo cuando el usuario los nombra; ajustes `ask` cuando los nombra o responde que sí a una pregunta sobre ese ajuste (una por ajuste). En ambos casos entran con `-Include`.
-- Reaplicar siempre con `-Status -Reapply -Include` y los ids que el usuario vio; antes del UAC, la skill lista los `needs-admin` de `-Status` (13.2.6).
-- Las corridas elevadas largas (`-Health`, aplicar con apps) se lanzan con el tiempo máximo de la herramienta o en segundo plano; el id se muestra antes del UAC; con `result-incomplete` o un comando vencido, la skill pregunta si la ventana elevada sigue abierta y vuelve a leer después, y mira `-Status` solo cuando se cerró.
+- Reaplicar: el motor toma cada id de `-Include` como pedido por nombre, así que la skill arma la lista con la clasificación de `-Status -Reapply -WhatIf -Json` (sin `-Include`): los `apply`, los `needs-confirmation` aceptados con una pregunta por ajuste y los `high-risk-not-requested` solo si el usuario los nombra; los `needs-admin` de `-Status` con la misma regla, según `ask` y `risk` de `-List -Json`, y listados antes del UAC. Nunca `-Yes` sin `-Include` (13.2.6).
+- Las corridas elevadas largas (`-Health`, aplicar o reaplicar con ítems `appx`, `capability` o `feature`) van en segundo plano por omisión: la tarea termina cuando sale el proceso elevado y entonces se lee una vez con `-ReadResult`. El id se muestra antes del UAC. Si un comando en primer plano vence, la skill pide que le avisen cuando la ventana elevada se cierre y lee una vez; nunca consulta en bucle ni espera con pausas, y mira `-Status` solo cuando el proceso terminó.
+- Desde un PowerShell de 32 bits en un Windows de 64 bits la skill no eleva (`elevation-refused`): da el comando para una PowerShell de administrador; `Sysnative` queda solo para las corridas sin elevar.
 - Antes de pedir permiso para instalar, la skill comprueba sin elevar si el equipo está administrado (dominio o MDM, la regla del motor) y avisa primero; el pedido menciona consultar a TI en un equipo de trabajo.
 - Nunca `-Force`, `-StateRoot`, `-CatalogPath` ni `-ActionsPath`.
 - Nunca eleva para leer; confirma antes de cada UAC.

@@ -50,14 +50,15 @@ El UAC no se puede probar en CI: este guion se corre a mano antes de cada releas
 ## Reaplicar lo que Windows revirtió
 
 1. Después de aplicar, revierte a mano uno de los ajustes aplicados (por ejemplo, vuelve a activar en Configuración algo que el plan desactivó) y pide "Windows revirtió mis ajustes, vuelve a aplicarlos".
-2. Esperado: `-Status -Json` sin UAC; muestra los `drift` y, si hay, los `needs-admin` (apps, capacidades y características que solo se revisan elevado); el plan con `-Status -Reapply -Include '<ids>' -WhatIf -Json` sin UAC. Antes del UAC lista por título los `needs-admin` y dice que cada uno se vuelve a aplicar solo si Windows lo revirtió.
-3. Esperado: la corrida elevada es `-Status -Reapply -Include '<ids>' -Yes -Json -ResultId <id>` con exactamente los ids que mostró y aceptaste (nunca `-Status -Reapply` sin `-Include`), y lee el resultado con `-ReadResult <id> -Json`. Ningún ajuste del perfil base que no se mostró aparece en el resultado.
+2. Esperado: `-Status -Json` sin UAC; muestra los `drift` y, si hay, los `needs-admin` (apps, capacidades y características que solo se revisan elevado); la clasificación con `-Status -Reapply -WhatIf -Json`, sin `-Include` y sin UAC.
+3. Revierte también un ajuste que pregunta antes (`ask`) y, si puedes, uno de riesgo alto que hayas aplicado nombrándolo. Esperado: los que el plan deja con `action` = `apply` entran sin preguntar; por el que pregunta antes hace una pregunta, solo de ese ajuste; el de riesgo alto no lo propone salvo que lo nombres. Por cada `needs-admin` mira `ask` y `risk` en `-List -Json` y sigue la misma regla. Antes del UAC lista por título los `needs-admin` que agregó y dice que cada uno se vuelve a aplicar solo si Windows lo revirtió.
+4. Esperado: la corrida elevada es `-Status -Reapply -Include '<ids>' -Yes -Json -ResultId <id>` con exactamente los ids que permiten esas reglas (nunca `-Yes` sin `-Include`), y lee el resultado con `-ReadResult <id> -Json`. Ningún ajuste del perfil base que no se mostró, ni uno que rechazaste o no nombraste, aparece en el resultado.
 
 ## Ventana elevada cerrada a mitad de camino
 
 1. Pide "revisa la salud de Windows", acepta el UAC y, cuando la ventana elevada empiece a mostrar SFC, ciérrala con la X.
-2. Esperado: la skill corre la plantilla elevada con el tiempo máximo de su herramienta o en segundo plano, y el `id` sale antes del UAC. Cuando la ventana se cierra corre `-ReadResult <id> -Json`, recibe `result-incomplete`, pregunta si la ventana elevada sigue abierta y, cuando dices que se cerró, dice que la corrida se cortó, mira `-Status -Json` y no informa ni éxito ni fallo de la revisión. El archivo `out\<id>.json` queda vacío (compruébalo como administrador).
-3. Repite el paso 1 sin cerrar la ventana y deja que pase el tiempo máximo del comando (la revisión tarda más de 10 minutos). Esperado: no abre otra ventana; pregunta si la ventana elevada sigue abierta, espera y vuelve a correr `-ReadResult <id> -Json` hasta que la ventana se cierre; no corre `-Status` mientras siga abierta.
+2. Esperado: la skill corre la plantilla elevada en segundo plano (`run_in_background`) y el `id` sale antes del UAC. Cuando la ventana se cierra, la tarea termina y la skill corre `-ReadResult <id> -Json` una vez, recibe `result-incomplete`, dice que la corrida se cortó, mira `-Status -Json` y no informa ni éxito ni fallo de la revisión. El archivo `out\<id>.json` queda vacío (compruébalo como administrador).
+3. Si la skill corrió una plantilla elevada en primer plano y el comando vence (por ejemplo, una aplicación con apps en un equipo lento): no abre otra ventana; te pide que avises cuando la ventana elevada se cierre y entonces corre `-ReadResult <id> -Json` una vez. Nunca consulta en bucle ni espera con pausas, y no corre `-Status` mientras la ventana siga abierta.
 
 ## Carpeta de máquina creada por otra cuenta
 

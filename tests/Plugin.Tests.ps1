@@ -142,14 +142,49 @@ Describe 'Skill' {
         $Commands | Should -Match "-Undo '<runId>'"
     }
 
-    It 'always re-applies with -Include, the ids the user saw' {
+    It 'applies a re-apply only with -Include, built from the classification and guardrail 2' {
         foreach ($line in $SkillLines) {
             $code = $(if ($line.Fenced) { @($line.Text) } else { @([regex]::Matches($line.Text, '`[^`]*`') | ForEach-Object { $_.Value }) })
             foreach ($text in $code) {
-                if ($text -match '(?i)-Reapply\b' -and $text -match '(?i)-(Yes|WhatIf)\b') { $text | Should -Match "-Include '<" -Because "$($line.File): $($line.Text)" }
+                # The plan of a re-apply only classifies; applying it carries the ids that were chosen.
+                if ($text -match '(?i)-Reapply\b' -and $text -match '(?i)-Yes\b') { $text | Should -Match "-Include '<" -Because "$($line.File): $($line.Text)" }
             }
         }
-        $Skill.Contains('list those `needs-admin` items by `title`') | Should -BeTrue
+        $Skill.Contains('`-Status -Reapply -WhatIf -Json`') | Should -BeTrue
+        $Commands.Contains('`-Status -Reapply -WhatIf -Json`') | Should -BeTrue
+        foreach ($phrase in 'The tool applies every id of `-Include` as asked for by name',
+            'every item of that plan with `action` = `apply`',
+            'one left out with `needs-confirmation` only after the user says yes to one question about that tweak',
+            'one left out with `high-risk-not-requested` only if the user names it',
+            'look up its `ask` and `risk` in `tweaks` of `-List -Json`',
+            'list the `needs-admin` items you added', 'Never `-Yes` without `-Include`') {
+            $Skill.Contains($phrase) | Should -BeTrue -Because $phrase
+        }
+    }
+
+    It 'runs long elevated runs in the background and never polls or sleeps' {
+        foreach ($term in 'run_in_background', 'Never poll and never sleep', 'ask the user to tell you when the elevated window has closed', '600000 ms') {
+            $Commands.Contains($term) | Should -BeTrue -Because $term
+        }
+        $Skill.Contains('run in the background by default') | Should -BeTrue
+        foreach ($line in $SkillLines) {
+            $line.Text | Should -Not -Match '(?i)\bStart-Sleep\b|\bsleep\s+\d' -Because "$($line.File): $($line.Text)"
+            if ($line.Text -match '(?i)\b(poll|sleep)') { $line.Text | Should -Match '(?i)\bnever\b' -Because "$($line.File): $($line.Text)" }
+        }
+    }
+
+    It 'never elevates from a 32-bit PowerShell on a 64-bit Windows' {
+        # Every snippet that starts an elevated process stops first when this PowerShell is 32-bit (WOW64).
+        $blocks = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value })
+        $elevating = @($blocks | Where-Object { $_.Contains('-Verb RunAs') })
+        $elevating.Count | Should -Be 2
+        foreach ($block in $elevating) {
+            $guard = $block.IndexOf("if (`$wow64) { throw 'elevation-refused")
+            $guard | Should -BeGreaterThan -1
+            $guard | Should -BeLessThan $block.IndexOf('Start-Process')
+        }
+        $Commands | Should -Match '(?m)^\$wow64 = \(-not \[Environment\]::Is64BitProcess\) -and \[Environment\]::Is64BitOperatingSystem\r?$'
+        $Skill.Contains('`elevation-refused`') | Should -BeTrue
     }
 
     It 'keeps the guardrail: <Phrase>' -TestCases @(
@@ -194,7 +229,7 @@ Describe 'Skill' {
             '-Verb RunAs -Wait -PassThru', '-ResultId', "-ReadResult '<id>' -Json", 'result-incomplete', 'result-untrusted', 'result-missing',
             '.windows-tuneup', 'ProgramW6432Dir', '[Environment]::SystemDirectory', 'Sysnative', "[Environment]::GetFolderPath('Windows')",
             '[Environment]::Is64BitProcess', "'MS DM Server'", 'PartOfDomain', '[int]$response.StatusCode -ne 404', 'has no $zipName',
-            'use-installed', 'IT department', '600000 ms', 'still open') {
+            'use-installed', 'IT department', '600000 ms') {
             $Commands.Contains($term) | Should -BeTrue -Because $term
         }
         # The installer runs only when its SHA256 is the one of its line in SHA256SUMS and the one approved.

@@ -14,14 +14,15 @@ $programFiles = $(if ($windows.ProgramW6432Dir) { $windows.ProgramW6432Dir } els
 $install = Join-Path $programFiles 'windows-tuneup'
 $tuneup = Join-Path $install 'tuneup.ps1'
 $marker = Join-Path $install '.windows-tuneup'
-$powershell = $(if (-not [Environment]::Is64BitProcess -and [Environment]::Is64BitOperatingSystem) {
+$wow64 = (-not [Environment]::Is64BitProcess) -and [Environment]::Is64BitOperatingSystem
+$powershell = $(if ($wow64) {
         Join-Path ([Environment]::GetFolderPath('Windows')) 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
     } else {
         Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
     })
 ```
 
-`ProgramW6432Dir` is the 64-bit Program Files, also from a 32-bit PowerShell. From a 32-bit PowerShell on a 64-bit Windows, `Sysnative` is the real 64-bit System32 (`System32` would be redirected to the 32-bit copy). The paths come from the registry of the machine and from Windows, not from environment variables, which any program of the user can change. The installed version:
+`ProgramW6432Dir` is the 64-bit Program Files, also from a 32-bit PowerShell. From a 32-bit PowerShell on a 64-bit Windows (`$wow64`), `Sysnative` is the real 64-bit System32 (`System32` would be redirected to the 32-bit copy), so the runs without elevation still use the 64-bit PowerShell. Elevating from there is refused: `Sysnative` only exists for 32-bit programs, and the program that starts an elevated process is not one, so the elevated snippets stop with `elevation-refused` before the UAC prompt. The paths come from the registry of the machine and from Windows, not from environment variables, which any program of the user can change. The installed version:
 
 ```powershell
 if (Test-Path -LiteralPath $marker) { 'installed=' + (Get-Content -LiteralPath $marker -Raw).Trim() } else { 'installed=none' }
@@ -45,19 +46,20 @@ Put the arguments of the table in place of `-Suggest -Json -Lang en`, always wit
 | What windows-tuneup applied | `-Status -Json` |
 | The plan | `-Profile '<ids>' -Include '<ids>' -Exclude '<ids>' -WhatIf -Json` (drop the options you do not need; `base` always applies) |
 | Apply a plan whose `requiresAdmin` is false | the same, with `-Yes -Json` in place of `-WhatIf -Json` |
-| The plan of a re-apply | `-Status -Reapply -Include '<drifted ids>' -WhatIf -Json` |
-| Re-apply when that plan has `requiresAdmin` false | `-Status -Reapply -Include '<ids shown and accepted>' -Yes -Json` |
+| How each drifted tweak would be re-applied (only a plan) | `-Status -Reapply -WhatIf -Json` |
+| Re-apply when that plan has `requiresAdmin` false and no `needs-admin` item was added | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json` |
 | Measure | `-Measure -IdleSeconds 120 -Json`, or `-Measure -IdleSeconds 120 -Compare '<id>' -Json` |
 | Undo a run (try this first) | `-Undo '<runId>' -Json`; one tweak with `-Tweak '<id>'`. The `runId` comes from `-Status -Json`, never `last`. An `error` with `reason` = `needs-admin`: run it elevated |
 | The result of an elevated run | `-ReadResult '<id>' -Json` (see "Read the result") |
 
-`-Status -Reapply` always gets `-Include`: with it, the tool applies again only those tweaks, and only if Windows reverted them. Without it, it would also apply again what `-Status` could not check without administrator and the user never saw.
+A re-apply with `-Yes` always gets `-Include`: the tool then applies again only those tweaks, only if Windows reverted them, and every one of them as asked for by name (a high-risk or ask-first tweak too). So the ids come from the classification of `-Status -Reapply -WhatIf -Json` (without `-Include`) and from the `needs-admin` items of `-Status`, filtered by guardrail 2 as SKILL.md, "Re-apply", says. Without `-Include` it would also apply again what `-Status` could not check without administrator and the user never saw.
 
 ## Run elevated
 
 Only after the user said yes to this UAC prompt. The snippet prints the `id` first, then a new window opens, runs the tool and closes; `-Wait` holds the snippet until that process has ended:
 
 ```powershell
+if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $id = [guid]::NewGuid().ToString()
 "id=$id"
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
@@ -77,7 +79,7 @@ try {
 |---|---|
 | Apply a plan whose `requiresAdmin` is true | `-Profile '<ids>' -Include '<ids>' -Exclude '<ids>' -Yes -Json -Lang <es or en>` |
 | Undo a run that needs administrator | `-Undo '<runId>' -Json -Lang <es or en>`, or with `-Tweak '<id>'` |
-| Re-apply what drifted, with system changes | `-Status -Reapply -Include '<ids shown and accepted>' -Yes -Json -Lang <es or en>` (the `drift` ids plus the `needs-admin` ids you listed before the UAC prompt) |
+| Re-apply what drifted, with system changes | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json -Lang <es or en>` (the ids of the classification plus the `needs-admin` ids you listed before the UAC prompt) |
 | Windows health | `-Health -Json -Lang <es or en>`; the repair: `-Health -Repair -Json -Lang <es or en>` |
 
 What the output means:
@@ -85,10 +87,13 @@ What the output means:
 - `id=<id>`: keep it before anything else; it is how the result is read, also if this command does not come back.
 - `exit=<n>`: keep it, then read the result (below) with the `id`.
 - `elevation-declined`: the user declined the UAC prompt or this PC does not allow elevation. Nothing ran. Go to "If UAC is declined".
+- `elevation-refused`: this PowerShell is 32-bit on a 64-bit Windows. Nothing ran and there was no UAC prompt. Tell the user, and give them the line of "If UAC is declined" for a PowerShell opened as administrator.
 
 ## Long runs
 
-`-Health` takes 15 minutes or more, and an apply or re-apply that removes or reinstalls apps can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those with the longest timeout your shell tool allows (600000 ms in Claude Code), or in the background and wait for it to end. If the command times out, the elevated window goes on by itself: do not start another one. Ask the user whether the elevated window is still open; while it is, wait and run `-ReadResult '<id>' -Json` again later (`result-incomplete` means it is still writing). Once the user says it closed, run `-ReadResult` again, and if it still says `result-incomplete`, the run was stopped: run `-Status -Json` then, never before.
+`-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
+
+Never poll and never sleep waiting for a result. If a foreground command times out, the elevated window goes on by itself: do not start another one; ask the user to tell you when the elevated window has closed, and then run `-ReadResult '<id>' -Json` once. `result-incomplete` after the process has ended means that the run was stopped: run `-Status -Json` then, never before.
 
 ## Read the result
 
@@ -103,7 +108,7 @@ Only after the elevated process has ended (the snippet above returned, or the us
 
 | `reason` | What happened | What to do |
 |---|---|---|
-| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed) | Ask whether the elevated window is still open ("Long runs"). Once it has closed and the result is still incomplete: run `-Status -Json` and report what is in place |
+| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed) | If the elevated process may still be running (a command that timed out), ask the user to tell you when its window has closed and read once more then ("Long runs"). Once it has ended and the result is still incomplete: run `-Status -Json` and report what is in place |
 | `result-untrusted` | The state folder of the machine can be changed by accounts that are not administrators | Stop. Tell the user its `message` (an administrator has to delete that folder). Do not retry and do not read the file by other means |
 | `result-missing` | No result. With exit `1` of the elevated run: it refused before it wrote (wrong id, untrusted state folder, the tool did not start). With exit `2`: Ctrl+C stopped it in its window, or it could not save its document | Exit `1`: give the user the command of "If UAC is declined" to run in a PowerShell as administrator, where they will see the message. Exit `2`: run `-Status -Json` |
 
@@ -174,6 +179,7 @@ $base = "https://github.com/$repository/releases/download/$tag"
 After the yes, with the tag and the SHA256 of `install.ps1` that the user saw:
 
 ```powershell
+if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $installScript = @'
 $ErrorActionPreference = 'Stop'
 try {

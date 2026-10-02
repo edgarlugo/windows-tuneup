@@ -30,7 +30,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 | `reason` | Meaning | Do |
 |---|---|---|
-| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed, the process was ended) | Ask the user whether the elevated window is still open. While it is, wait and run `-ReadResult` again later. Once it has closed and the result is still incomplete, run `-Status -Json` and report what is in place; do not assume success or failure |
+| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed, the process was ended) | If the elevated process may still be running (a command that timed out), ask the user to tell you when its window has closed, then run `-ReadResult` once more; never poll or sleep. Once it has ended and the result is still incomplete, run `-Status -Json` and report what is in place; do not assume success or failure |
 | `result-untrusted` | The result, or the state folder of the machine, could have been written by an account that is not an administrator | Stop and tell the user the `message`: an administrator has to delete that folder. Do not retry, and do not read the file by other means |
 | `result-missing` | There is no result with that id | After exit `1` of the elevated process: it refused before it wrote (the elevated window showed why): give the user the command for a PowerShell as administrator, so they can see the message. After exit `2`: run `-Status -Json`. When the user ran the command themselves: it did not run, or it was refused; ask what the window said |
 
