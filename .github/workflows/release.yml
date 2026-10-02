@@ -3,11 +3,12 @@ name: release
 # zip, install.ps1, SHA256SUMS and the notes. Publishing the draft is done by hand, after attaching the
 # end-to-end and measurement reports (docs/es/vm-checklist.md).
 #
-# Three jobs, so that no code from outside the repository runs where it could change what is released or
+# Four jobs, so that no code from outside the repository runs where it could change what is released or
 # with a token that can write: "package" builds the files from the commit with only git and the scripts
 # of the repository; "test" installs Pester and PSScriptAnalyzer (from the PowerShell Gallery, at fixed
-# versions) and runs lint and the suite, with a read-only token and no artifact; "release" has the only
-# token that can write, checks out nothing and runs nothing but gh on the files of "package".
+# versions) and runs lint and the suite, and "test-standard-user" runs the suite again with a
+# standard-user token, both with a read-only token and no artifact; "release" has the only token that
+# can write, checks out nothing and runs nothing but gh on the files of "package".
 # Actions are pinned to a commit; the comment says which tag that commit was.
 on:
   push:
@@ -62,8 +63,27 @@ jobs:
       - name: Test
         shell: powershell
         run: .\build\test.ps1
+  # The same suite with a standard-user token, as in ci.yml: the tests that only run without
+  # elevation (-Skip:$Elevated) also have to pass before a release.
+  test-standard-user:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Pester
+        shell: powershell
+        run: |
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+          Install-Module Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force -SkipPublisherCheck
+      - name: Test as a standard user
+        shell: powershell
+        run: .\build\test-standard-user.ps1 -TimeoutMinutes 50
   release:
-    needs: [package, test]
+    needs: [package, test, test-standard-user]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
