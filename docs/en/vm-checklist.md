@@ -12,7 +12,7 @@ Windows Sandbox (`tests/sandbox/Start-E2E.ps1`) tests every profile end to end, 
 
 ## Install the release candidate
 
-Copy the zip and `SHA256SUMS` of the draft release to the virtual machine (or build them with `build/package.ps1 -OutputPath <folder>`). In PowerShell as administrator:
+Copy the zip, `install.ps1` and `SHA256SUMS` of the draft release to a folder of the virtual machine (or build them with `build/package.ps1 -OutputPath <folder>`). In PowerShell as administrator, in that folder:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <folder> -Version <version> -Sha256 <hash of the zip>

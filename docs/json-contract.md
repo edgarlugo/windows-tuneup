@@ -31,7 +31,7 @@ Fields that several documents carry.
 | `schemaVersion` | number | `1`. |
 | `command` | string | Which document this is (see the table above). |
 | `toolVersion` | string | Version of windows-tuneup that wrote it (`major.minor.patch`). |
-| `warnings` | string[] | Warnings raised while running (untrusted state files ignored, action scripts that did not load, `-StateRoot` in use...). |
+| `warnings` | string[] | Warnings raised while running (untrusted state files ignored, action scripts that did not load, `-StateRoot` or `-ActionsPath` used while elevated...). |
 | `environment.build` | number | Windows build (`CurrentBuild`). |
 | `environment.ubr` | number | Update build revision. |
 | `environment.family` | string | `10` or `11`. |
