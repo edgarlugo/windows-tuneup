@@ -71,6 +71,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Health        
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Health -Repair         # + DISM /RestoreHealth si hace falta / if needed
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleSeconds 120                 # medir / measure
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleSeconds 120 -Compare last   # comparar / compare
+powershell -NoProfile -ExecutionPolicy Bypass -File .	uneup.ps1 -List                   # perfiles y ajustes para este equipo / profiles and tweaks for this PC
+powershell -NoProfile -ExecutionPolicy Bypass -File .	uneup.ps1 -Suggest                # perfiles sugeridos / suggested profiles
 ```
 
 `-ExecutionPolicy Bypass` solo afecta a ese proceso y permite ejecutar el script aunque la política de PowerShell sea `Restricted`; no cambia la configuración del equipo.
@@ -94,13 +96,17 @@ Without parameters, `tuneup.ps1` opens a menu in the console (Windows PowerShell
 | `-Undo <id\|last> [-Tweak <id>]` | Deshace una corrida o solo un ajuste de ella. / Undoes a run, or just one tweak of it. |
 | `-Health [-Repair]` | SFC + DISM `/ScanHealth`; con `-Repair`, DISM `/RestoreHealth` y SFC otra vez si hace falta. Administrador. / SFC + DISM `/ScanHealth`; with `-Repair`, DISM `/RestoreHealth` and SFC again if needed. Administrator. |
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>]` | Guarda una medición; `-Compare` la compara con una anterior; `-IdleSeconds` (0 a 3600) espera antes de medir. / Saves a measurement; `-Compare` compares it with an earlier one; `-IdleSeconds` (0 to 3600) waits before measuring. |
+| `-List` | Perfiles y ajustes que sirven a este equipo, y los que no con su motivo. Solo lectura. / Profiles and tweaks that suit this PC, and those that do not with their reason. Read only. |
+| `-Suggest` | Qué tiene el equipo (herramientas de desarrollo, juegos, batería, organización, equipo modesto, administrado) y los perfiles que le sirven. Solo lectura. / What the PC has (development tools, games, a battery, an organization, modest hardware, managed) and the profiles that fit it. Read only. |
 | `-Json` | Salida como un documento JSON (ver abajo). / Output as one JSON document (see below). |
+| `-ResultId <id>` | Con `-Json`, también escribe el documento en `out\<id>.json` de la carpeta de estado (de 8 a 64 letras, dígitos o guiones; lo usa la skill de Claude para lo que hizo un proceso elevado con UAC). / With `-Json`, also writes the document to `out\<id>.json` of the state folder (8 to 64 letters, digits or hyphens; the Claude skill uses it for what a process elevated with UAC did). |
+| `-ReadResult <id>` | Imprime tal cual el documento que guardó `-ResultId`, solo si lo escribió un administrador (o, sin elevar, una corrida sin elevar). No necesita administrador. / Prints as it is the document that `-ResultId` saved, only if an administrator wrote it (or, unelevated, an unelevated run). Needs no administrator. |
 | `-Lang es\|en` | Idioma de los mensajes. / Language of the messages. |
 | `-Force` | Permite Windows Server o builds no soportados. / Allows Windows Server or unsupported builds. |
 | `-StateRoot`, `-ActionsPath`, `-CatalogPath`, `-ProfilesPath` | Solo para pruebas y desarrollo (ver más abajo). / For testing and development only (see below). |
 
-`-Status`, `-Undo`, `-Health` y `-Measure` se excluyen entre sí y no se combinan con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` ni `-Yes` (salvo `-Status -Reapply`, que acepta `-Yes` y `-WhatIf`). `-Tweak` exige `-Undo`, `-Repair` exige `-Health`, `-Reapply` exige `-Status`, y `-Compare` e `-IdleSeconds` exigen `-Measure`. Una combinación inválida termina con código 1 antes de leer nada.
-`-Status`, `-Undo`, `-Health` and `-Measure` exclude each other and cannot be combined with `-Profile`, `-Include`, `-Exclude`, `-WhatIf` or `-Yes` (except `-Status -Reapply`, which takes `-Yes` and `-WhatIf`). `-Tweak` requires `-Undo`, `-Repair` requires `-Health`, `-Reapply` requires `-Status`, and `-Compare` and `-IdleSeconds` require `-Measure`. An invalid combination ends with code 1 before anything is read.
+`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest` y `-ReadResult` se excluyen entre sí y no se combinan con `-Profile`, `-Include`, `-Exclude`, `-WhatIf` ni `-Yes` (salvo `-Status -Reapply`, que acepta `-Yes` y `-WhatIf`). `-Tweak` exige `-Undo`, `-Repair` exige `-Health`, `-Reapply` exige `-Status`, `-Compare` e `-IdleSeconds` exigen `-Measure`, `-ResultId` exige `-Json`, y `-ReadResult` no se combina con `-ResultId`. Una combinación inválida termina con código 1 antes de leer nada.
+`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest` and `-ReadResult` exclude each other and cannot be combined with `-Profile`, `-Include`, `-Exclude`, `-WhatIf` or `-Yes` (except `-Status -Reapply`, which takes `-Yes` and `-WhatIf`). `-Tweak` requires `-Undo`, `-Repair` requires `-Health`, `-Reapply` requires `-Status`, `-Compare` and `-IdleSeconds` require `-Measure`, `-ResultId` requires `-Json`, and `-ReadResult` cannot be combined with `-ResultId`. An invalid combination ends with code 1 before anything is read.
 
 ## Tipos de ajuste y cómo se deshacen / Tweak types and how they are undone
 
@@ -176,6 +182,8 @@ Measurements are kept in `measurements\` inside the same state folder as the run
 | Aplicar / Apply | Todo hecho (o nada que aplicar). / Everything done (or nothing to apply). | No todo se completó: algún ajuste parcial, fallido o sin efecto, Ctrl+C después de algún cambio, o no se pudo guardar un respaldo o `result.json`; leer el resumen. / Not everything completed: some tweak was partial, failed or had no effect, Ctrl+C after some change, or a backup or `result.json` could not be saved; read the summary. | Abortado antes de cambiar nada (respuesta negativa, sin administrador, argumentos o catálogo inválidos, ningún respaldo se pudo escribir, Ctrl+C antes del primer ajuste), o un error inesperado a mitad de la corrida (el resultado queda guardado, con lo no alcanzado como `aborted`, y `-Undo last` lo deshace). / Aborted before changing anything (answered no, not administrator, invalid arguments or catalog, no backup could be written, Ctrl+C before the first tweak), or an unexpected error in the middle of the run (the result is saved, with what was not reached as `aborted`, and `-Undo last` undoes it). |
 | `-Undo` | Todo restaurado (lo ya deshecho no cuenta). / Everything restored (what was already undone does not count). | Restauración parcial: quedan fallos o ajustes de otro usuario. / Partly restored: failures or another user's tweaks remain. | Nada se restauró, o no se pudo empezar. / Nothing was restored, or it could not start. |
 | `-Status` | Siempre. / Always. | | Error al leer. / Read error. |
+| `-List`, `-Suggest` | Siempre. / Always. | | `-List`: Windows no soportado o catálogo con errores. / `-List`: unsupported Windows or a catalog with errors. |
+| `-ReadResult` | Documento leído (el código de la corrida es el de su proceso). / Document read (the code of the run is the one of its process). | | Falta, está incompleto o no es de confianza (`reason`). / Missing, incomplete or not trusted (`reason`). |
 | `-Health` | Sin problemas (`recommendation` = `none`). / No problems (`recommendation` = `none`). | Quedan problemas o no se pudo confirmar el resultado. / Problems remain or the result could not be confirmed. | Sin administrador. / Not administrator. |
 | `-Measure` | Medición guardada. / Measurement saved. | | No pudo medir o guardar, o `-Compare` no encontró la medición. / It could not measure or save, or `-Compare` did not find the measurement. |
 | Menú / Menu | Al salir. / On exit. | | |
@@ -193,13 +201,15 @@ Every document carries `schemaVersion` (currently `1`), `command`, `toolVersion`
 
 | `command` | Campos principales / Main fields |
 |---|---|
-| `plan` | `source` (`profiles`, `reapply`), `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `preflight` (`id`, `message`), `items` (`id`, `title`, `risk`, `scope`, `action`, `reason`, `rebootRequired`, `signOutRequired`, `requires`), `summary` (`apply`, `skip`) |
+| `plan` | `source` (`profiles`, `reapply`), `environment`, `requiresAdmin` (hay cambios de sistema / there are system changes), `preflight` (`id`, `message`), `items` (`id`, `title`, `why`, `risk`, `ask`, `scope`, `type`, `needsAdmin`, `action`, `reason`, `rebootRequired`, `signOutRequired`, `requires`), `summary` (`apply`, `skip`) |
 | `apply` | `source`, `runId`, `runDir`, `finishedAt`, `environment`, `preflight`, `restorePoint`, `rebootRequired`, `signOutRequired`, `interrupted`, `summary` (`applied`, `partial`, `notApplied`, `failed`, `skipped`, `refused`, `journalErrors`, `interrupted`), `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`, `refused`) |
 | `status` | `items` (`id`, `title`, `status`, `runId`) |
 | `undo` | `runId`, `rebootRequired`, `signOutRequired`, `results` (`id`, `title`, `status`, `reason`, `error`, `detail`, `rebootRequired`, `signOutRequired`, `manual`), `summary` (`restored`, `failed`, `skipped`) |
 | `health` | `startedAt`, `finishedAt`, `repairRequested`, `repairRan`, `before`, `after` (`sfc`, `componentStore`, `corruptComponents`), `recommendation`, `rebootRecommended` |
 | `measure` | `id`, `path`, `measurement` (`takenAt`, `idleSeconds`, `environment`, `metrics`, `notes`), `comparison` (`againstId`, `items` con `metric`, `before`, `after`, `delta`; nulo sin `-Compare` / null without `-Compare`) |
-| `error` | `message`, `details` |
+| `list` | `profiles` (`id`, `aliases`, `title`, `description`, `tweakCount`, `needsAdmin`), `tweaks` (`id`, `title`, `why`, `risk`, `ask`, `type`, `scope`, `needsAdmin`, `rebootRequired`, `requires`, `profiles`), `incompatible` (`id`, `reason`) |
+| `suggest` | `signals` (`id`, `detected`, `evidence`), `suggestions` (`profile`, `signals`), `questions` (`id`, `text`) |
+| `error` | `message`, `details`, `reason` (solo `-ReadResult` / only `-ReadResult`: `result-missing`, `result-incomplete`, `result-untrusted`) |
 
 Con `-Json`, Ctrl+C entre dos ajustes da el documento `apply` de siempre con `interrupted` verdadero y código 2; si detiene PowerShell mismo (corría DISM o winget) la salida queda vacía, el código es 2 y el documento es el `result.json` de la carpeta más nueva de `runs` (con la carpeta del perfil y el nombre de la cuenta ocultos). Detalle en [docs/json-contract.md](docs/json-contract.md).
 With `-Json`, Ctrl+C between two tweaks gives the usual `apply` document with `interrupted` true and code 2; if it stops PowerShell itself (DISM or winget was running) the output is empty, the code is 2 and the document is the `result.json` of the newest folder under `runs` (with the profile folder and the account name hidden). Details in [docs/json-contract.md](docs/json-contract.md).
@@ -222,8 +232,21 @@ With `-Json`, Ctrl+C between two tweaks gives the usual `apply` document with `i
   `powercfg` does not detect values enforced by group policy.
 - Deshacer ajustes sueltos fuera de orden puede dejar una clave de registro vacía que creó la corrida; solo deshacer en orden inverso la elimina.
   Undoing single tweaks out of order may leave an empty registry key that the run created; only undoing in reverse order removes it.
-- Todo queda local: no se envía nada a ningún servidor. La skill de Claude llega en un plan posterior.
-  Everything stays local: nothing is sent to any server. The Claude skill comes in a later plan.
+- Todo queda local: no se envía nada a ningún servidor.
+  Everything stays local: nothing is sent to any server.
+
+## Skill de Claude / Claude skill
+
+Este repositorio también es un marketplace de plugins de Claude Code. En Claude Code:
+This repository is also a Claude Code plugin marketplace. In Claude Code:
+
+```
+/plugin marketplace add edgarlugo/windows-tuneup
+/plugin install windows-tuneup@windows-tuneup
+```
+
+Después pide "optimiza este PC" (modo asistido: ve qué usas con `-Suggest`, propone perfiles y pregunta solo lo que no puede deducir) o "aplica base y privacidad" (modo directo). La skill no trae ajustes propios: usa la copia instalada en `%ProgramFiles%\windows-tuneup` y, si no está, pide permiso (con la URL, el tamaño y el SHA256) para instalar la release con un solo UAC. Lee sin elevar (`-List`, `-Suggest`, `-WhatIf`, `-Status`, `-Measure`), muestra el plan, pide un sí explícito y avisa antes de cada UAC; lo que hizo el proceso elevado (`-ResultId`) lo lee después, sin elevar, con `-ReadResult`, que comprueba que lo escribió un administrador. Nunca aplica la lista negra ni ajustes de riesgo alto que no nombres, nunca usa `-Force`, y en un equipo administrado avisa antes que nada. El zip de la release no lleva el plugin. Guion de prueba manual: [docs/es/skill-checklist.md](docs/es/skill-checklist.md).
+Then ask "optimize this PC" (assisted mode: it sees what you use with `-Suggest`, proposes profiles and asks only what it cannot deduce) or "apply base and privacy" (direct mode). The skill has no tweaks of its own: it uses the copy installed in `%ProgramFiles%\windows-tuneup` and, if there is none, asks for permission (with the URL, the size and the SHA256) to install the release with a single UAC prompt. It reads without elevation (`-List`, `-Suggest`, `-WhatIf`, `-Status`, `-Measure`), shows the plan, asks for an explicit yes and warns before every UAC prompt; it reads what the elevated process did (`-ResultId`) afterwards, without elevation, with `-ReadResult`, which checks that an administrator wrote it. It never applies the blacklist or high-risk tweaks you did not name, never uses `-Force`, and on a managed PC it warns before anything else. The release zip does not include the plugin. Manual test script: [docs/en/skill-checklist.md](docs/en/skill-checklist.md).
 
 ## Desarrollo / Development
 

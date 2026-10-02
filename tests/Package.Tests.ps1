@@ -103,7 +103,7 @@ Describe 'build/package.ps1' {
             'actions/onedrive.ps1', 'docs/es/profiles.md', 'docs/en/catalog.md', 'docs/json-contract.md') {
             $names | Should -Contain $expected
         }
-        foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/') {
+        foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/', 'plugins/', '.claude-plugin/') {
             @($names | Where-Object { $_.StartsWith($folder) }).Count | Should -Be 0 -Because $folder
         }
         @($names | Where-Object { $_ -match '^docs/[^/]+$' }) -join ',' | Should -Be 'docs/json-contract.md'

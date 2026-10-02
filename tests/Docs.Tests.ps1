@@ -41,6 +41,19 @@ Describe 'Virtual machine checklist' {
     }
 }
 
+Describe 'Skill checklist' {
+    It 'covers installing the plugin, the modes, undo, a declined UAC prompt, reading results and a managed PC, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'skill-checklist.md'
+            foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
+                '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
+                'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+}
+
 Describe 'Documentation in both languages' {
     It 'has <Name> in Spanish and English, in UTF-8 without a byte order mark' -TestCases @(
         @{ Name = 'blacklist.md' }
@@ -48,6 +61,7 @@ Describe 'Documentation in both languages' {
         @{ Name = 'measuring.md' }
         @{ Name = 'catalog.md' }
         @{ Name = 'vm-checklist.md' }
+        @{ Name = 'skill-checklist.md' }
     ) {
         param($Name)
         foreach ($lang in 'es', 'en') {
