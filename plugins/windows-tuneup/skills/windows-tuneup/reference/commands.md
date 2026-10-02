@@ -63,7 +63,8 @@ if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Wi
 $id = [guid]::NewGuid().ToString()
 "id=$id"
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
-$command = "& '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
+$modules = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules'
+$command = "[Environment]::SetEnvironmentVariable('PSModulePath', '$modules', 'Process'); & '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
 try {
     $process = Start-Process -FilePath $powershell -ArgumentList "-NoProfile -ExecutionPolicy Bypass -EncodedCommand $encoded" -Verb RunAs -Wait -PassThru
@@ -72,6 +73,8 @@ try {
     "elevation-declined: $($_.Exception.Message)"
 }
 ```
+
+Before anything else, the elevated process takes its modules only from the folder of Windows, which only administrators can change: the module path of the account (`Documents\WindowsPowerShell\Modules`, and what its environment adds) can be changed by any program of the user, and a module there named like one of Windows would run as administrator. The tool and `install.ps1` do the same.
 
 `$toolArguments` by purpose (always `-Json` and `-Lang`; `-Yes` only to apply or re-apply, because `-Undo` and `-Health` refuse it):
 
@@ -182,6 +185,7 @@ After the yes, with the tag and the SHA256 of `install.ps1` that the user saw:
 if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $installScript = @'
 $ErrorActionPreference = 'Stop'
+[Environment]::SetEnvironmentVariable('PSModulePath', [IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules'), 'Process')
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $base = 'https://github.com/edgarlugo/windows-tuneup/releases/download/<tag>'

@@ -219,6 +219,61 @@ Describe 'State root initialization' {
     }
 }
 
+Describe 'Temporary folder of an elevated run' {
+    BeforeEach {
+        $script:Temp, $script:Tmp = $env:TEMP, $env:TMP
+        $script:Folder = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+    }
+
+    AfterEach {
+        $env:TEMP, $env:TMP = $Temp, $Tmp
+        Reset-TestTrust
+    }
+
+    It 'leaves TEMP and TMP alone without elevation' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup Initialize-TuneupStateRoot { }
+        Use-TuneupElevatedTemp
+        $env:TEMP | Should -Be $Temp
+        $env:TMP | Should -Be $Tmp
+        Should -Invoke Initialize-TuneupStateRoot -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'leaves TEMP and TMP alone with -StateRoot, which is for development only' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        Mock -ModuleName Tuneup Initialize-TuneupStateRoot { }
+        Use-TuneupElevatedTemp -StateRoot $Folder
+        $env:TEMP | Should -Be $Temp
+        $env:TMP | Should -Be $Tmp
+        Should -Invoke Initialize-TuneupStateRoot -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'points TEMP and TMP, elevated, to tmp of the machine state folder, and Add-Type compiles through it' {
+        Use-CurrentUserAsTrusted
+        $root = New-TestMachineRoot
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        Mock -ModuleName Tuneup Set-Acl { }
+        Use-TuneupElevatedTemp -MachineRoot $root
+        $tmp = Join-Path $root 'tmp'
+        $env:TEMP | Should -Be $tmp
+        $env:TMP | Should -Be $tmp
+        $acl = Get-Acl -LiteralPath $tmp
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $MeSid
+        $name = 'TuneupTempTest' + [guid]::NewGuid().ToString('N')
+        Add-Type -TypeDefinition "public static class $name { public static int Value() { return 7; } }"
+        ($name -as [type])::Value() | Should -Be 7
+    }
+
+    It 'refuses, changing neither TEMP nor TMP, when the machine state folder cannot be trusted' {
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        { Use-TuneupElevatedTemp -MachineRoot (Join-Path $Folder 'windows-tuneup') } | Should -Throw '*is not trusted*'
+        $env:TEMP | Should -Be $Temp
+        $env:TMP | Should -Be $Tmp
+    }
+}
+
 Describe 'Trust checks' {
     BeforeEach {
         $script:Item = Join-Path $TestDrive ([guid]::NewGuid().ToString())

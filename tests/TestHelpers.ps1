@@ -163,3 +163,25 @@ function New-TestIo {
     $write = { param([AllowEmptyString()][string]$Text, [switch]$NoNewline) $output.Add($Text) }.GetNewClosure()
     [pscustomobject]@{ PSTypeName = 'Tuneup.Io'; Read = $read; Write = $write; Output = $output; Pending = $queue }
 }
+
+# A folder of modules named like the ones of Windows, each with functions named like their cmdlets: one
+# that PowerShell loaded writes its name into $Marker. A program of the user could put such a folder first
+# in PSModulePath (HKCU\Environment), which an elevated process inherits.
+function New-PlantedModuleFolder([string]$Folder, [string]$Marker) {
+    $modules = @{
+        'Microsoft.PowerShell.Utility'  = @('Sort-Object', 'Select-Object', 'New-Object', 'ConvertTo-Json', 'ConvertFrom-Json', 'Add-Member', 'Add-Type', 'Get-Date', 'Write-Host', 'Read-Host', 'Out-String')
+        'Microsoft.PowerShell.Security' = @('Get-Acl', 'Set-Acl')
+        'CimCmdlets'                    = @('Get-CimInstance', 'Invoke-CimMethod')
+        'ScheduledTasks'                = @('Get-ScheduledTask')
+        'Appx'                          = @('Get-AppxPackage')
+        'Dism'                          = @('Get-WindowsOptionalFeature', 'Get-WindowsCapability')
+        'Storage'                       = @('Get-Partition', 'Get-PhysicalDisk')
+    }
+    foreach ($name in $modules.Keys) {
+        $path = Join-Path $Folder $name
+        New-Item -ItemType Directory -Path $path -Force | Out-Null
+        $text = "[System.IO.File]::AppendAllText('$Marker', '$name ')`r`n"
+        foreach ($command in $modules[$name]) { $text += "function $command { [System.IO.File]::AppendAllText('$Marker', '$command ') }`r`n" }
+        [System.IO.File]::WriteAllText((Join-Path $path "$name.psm1"), $text)
+    }
+}

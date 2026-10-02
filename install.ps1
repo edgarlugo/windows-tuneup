@@ -36,6 +36,8 @@
 # param() of the script would set $Version, $Destination... in the session of whoever runs it. With -File the
 # arguments arrive in $args and @args passes them on by name. Everything runs in that block's own scope and
 # errors are thrown, never "exit", which would close the session; the try makes a wrong argument fail too.
+# PSModulePath of the session comes back at the end (see the block); only .NET runs outside the block.
+$windowsTuneupCallerModulePath = $env:PSModulePath
 try {
     & {
         [CmdletBinding()]
@@ -47,6 +49,12 @@ try {
         )
         $ErrorActionPreference = 'Stop'
         $ProgressPreference = 'SilentlyContinue'
+        # Modules load only from the folder of this PowerShell, which only administrators can change.
+        # PSModulePath starts with Documents\WindowsPowerShell\Modules and takes what HKCU\Environment adds,
+        # which any program of the account can change: a module there named like Microsoft.PowerShell.Utility
+        # would run as administrator the first time New-Object or Get-Acl is used. Nothing has been loaded
+        # from that path up to here.
+        $env:PSModulePath = [System.IO.Path]::Combine($PSHOME, 'Modules')
 
         # Gives the reason a file or folder cannot be trusted to hold code that runs as administrator, or
         # nothing. With -Recurse every file and folder in it is checked too (links are reported, never followed).
@@ -354,4 +362,7 @@ try {
     } @args
 } catch {
     throw
+} finally {
+    $env:PSModulePath = $windowsTuneupCallerModulePath
+    $ExecutionContext.SessionState.PSVariable.Remove('windowsTuneupCallerModulePath')
 }

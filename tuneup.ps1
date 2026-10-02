@@ -86,9 +86,21 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
     }
     # What could not be bound goes as it came, so Windows PowerShell rejects it with its report.
     $argumentList += @($_Rest)
-    & (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') @argumentList
+    & ([System.IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\powershell.exe')) @argumentList
     exit $LASTEXITCODE
 }
+
+# Modules load only from the folders of Windows and of Program Files, which only administrators can
+# change. PSModulePath starts with Documents\WindowsPowerShell\Modules and takes what HKCU\Environment
+# adds, which any program of the account can change and an elevated process inherits: a module there
+# named like ScheduledTasks or Microsoft.PowerShell.Utility would run as administrator the first time one
+# of its commands is used. Only .NET is used up to here, so nothing has been loaded from that path.
+# Microsoft.PowerShell.Management is loaded with PowerShell itself, from its own folder. TEMP and TMP
+# change elevated (Use-TuneupElevatedTemp): the three come back at the end, for a session that ran
+# this script without -File.
+$callerEnvironment = @{ PSModulePath = $env:PSModulePath; TEMP = $env:TEMP; TMP = $env:TMP }
+$env:PSModulePath = [System.IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' +
+    [System.IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
 
 Import-Module (Join-Path $PSScriptRoot 'engine\Tuneup.psm1') -Force
 Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
@@ -122,6 +134,14 @@ try {
         Write-TuneupCommandError -Context $context -Message (Get-TuneupText -Key 'err.badArgs' -Format '-ReadResult -ResultId')
         return
     }
+    # Elevated, Add-Type, DISM and winget write through tmp of the machine state folder, never through the
+    # TEMP of the account; a machine state folder that cannot be trusted stops the run here.
+    try {
+        Use-TuneupElevatedTemp -StateRoot $StateRoot
+    } catch {
+        Write-TuneupCommandError -Context $context -Message $_.Exception.Message
+        return
+    }
     if ($PSBoundParameters.ContainsKey('ResultId')) {
         $problem = Get-TuneupResultIdProblem -Id $ResultId -Json:$Json
         if (-not $problem) {
@@ -144,5 +164,6 @@ try {
     if ($null -ne $resultFile -and -not (Close-TuneupResultFile -File $resultFile -Text ($document -join [Environment]::NewLine)) -and $context.ExitCode -eq 0) {
         $context.ExitCode = 2
     }
+    foreach ($name in $callerEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $callerEnvironment[$name], 'Process') }
     exit $context.ExitCode
 }

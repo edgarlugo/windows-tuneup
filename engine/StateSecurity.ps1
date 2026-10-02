@@ -294,3 +294,19 @@ function Initialize-TuneupStateRoot {
         if ($existed) { Set-TuneupStateSecurity -Path $folder }
     }
 }
+
+# Elevated, TEMP and TMP of this process go to tmp of the machine state folder, which only administrators
+# can change. Add-Type compiles C# with csc.exe through files in TEMP, and DISM and winget work there:
+# the TEMP of the account is a folder that its programs without elevation can change, so one could swap
+# the compiled library or a downloaded installer between its writing and its use, and run it as
+# administrator. Throws, changing nothing, when that folder cannot be trusted. Without elevation, and with
+# -StateRoot (development only), nothing changes.
+function Use-TuneupElevatedTemp {
+    param([string]$StateRoot, [string]$MachineRoot)
+    if ($StateRoot -or -not (Test-TuneupAdmin)) { return }
+    if (-not $MachineRoot) { $MachineRoot = Get-TuneupStateRoot -Machine }
+    Initialize-TuneupStateRoot -Path $MachineRoot -Children @('tmp')
+    $folder = Join-Path $MachineRoot 'tmp'
+    $env:TEMP = $folder
+    $env:TMP = $folder
+}

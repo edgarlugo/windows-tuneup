@@ -63,6 +63,34 @@ Describe 'tuneup.ps1' {
         $json.requiresAdmin | Should -BeTrue
     }
 
+    It 'loads modules only from the folders of Windows, not from a folder put first in PSModulePath' {
+        $planted = Join-Path $TestDrive 'planted-modules'
+        $marker = Join-Path $TestDrive 'planted-module-loaded.txt'
+        New-PlantedModuleFolder -Folder $planted -Marker $marker
+        $modulePath = $env:PSModulePath
+        $env:PSModulePath = "$planted;$modulePath"
+        try {
+            $result = Invoke-Tuneup @('-List', '-Json')
+        } finally {
+            $env:PSModulePath = $modulePath
+        }
+        $loaded = $(if (Test-Path -LiteralPath $marker) { [System.IO.File]::ReadAllText($marker) } else { '' })
+        $loaded | Should -BeNullOrEmpty
+        $result.ExitCode | Should -Be 0 -Because $result.Output
+        (ConvertFrom-PureJson $result.Output).command | Should -Be 'list'
+    }
+
+    It 'gives PSModulePath back to a session that runs it without -File' {
+        $script = Join-Path $TestDrive 'in-session.ps1'
+        [System.IO.File]::WriteAllText($script, @"
+`$before = `$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP
+& '$(Join-Path $Repo 'tuneup.ps1')' -List -Json -StateRoot '$(Join-Path $TestDrive 'in-session-state')' -CatalogPath '$(Join-Path $Fixtures 'catalog')' -ProfilesPath '$(Join-Path $Fixtures 'profiles')' -Force | Out-Null
+'same=' + (`$before -eq (`$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP))
+"@)
+        $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
+        $output | Should -Be 'same=True'
+    }
+
     It 'lists the profiles and the tweaks that suit this machine' {
         $result = Invoke-Tuneup @('-List', '-Json')
         $result.ExitCode | Should -Be 0

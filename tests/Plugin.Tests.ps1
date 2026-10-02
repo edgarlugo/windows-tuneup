@@ -187,6 +187,19 @@ Describe 'Skill' {
         $Skill.Contains('`elevation-refused`') | Should -BeTrue
     }
 
+    It 'starts every elevated process with the modules of Windows only, before it uses any command' {
+        $blocks = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value })
+        $reset = "[Environment]::SetEnvironmentVariable('PSModulePath', "
+        # The text that runs elevated: $command and $installScript.
+        $Commands | Should -Match "(?m)^\`$modules = Join-Path \(\[Environment\]::SystemDirectory\) 'WindowsPowerShell\\v1\.0\\Modules'\r?$"
+        $Commands | Should -Match ([regex]::Escape("`$command = `"$reset'`$modules', 'Process'); & '`$tuneup'"))
+        $install = @($blocks | Where-Object { $_.Contains('$installScript = @''') })
+        $install.Count | Should -Be 1
+        $text = $install[0].Substring($install[0].IndexOf('$installScript = @'''))
+        $text.IndexOf($reset + "[IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules'), 'Process')") | Should -BeGreaterThan 0
+        $text.IndexOf($reset) | Should -BeLessThan $text.IndexOf('New-Object')
+    }
+
     It 'keeps the guardrail: <Phrase>' -TestCases @(
         @{ Phrase = 'Never propose a change from the blacklist' }
         @{ Phrase = 'blacklist.md' }
