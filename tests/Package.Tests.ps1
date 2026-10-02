@@ -62,8 +62,9 @@ BeforeAll {
     function New-TrustedParent {
         $name = 'windows-tuneup-test-' + [guid]::NewGuid().ToString('N')
         $candidates = @((Join-Path ($env:SystemDrive + '\') $name), (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $name))
-        $path = @($candidates | Where-Object { -not (Get-InstallParentProblem -Path (Join-Path $_ 'child')) } | Select-Object -First 1)[0]
-        if (-not $path) { throw "No folder that only administrators can change was found for the test: $(Get-InstallParentProblem -Path (Join-Path $candidates[0] 'child'))" }
+        # The folders above a candidate decide (the candidate itself is created with the installer's access list).
+        $path = @($candidates | Where-Object { -not (Get-InstallParentProblem -Path $_) } | Select-Object -First 1)[0]
+        if (-not $path) { throw "No folder that only administrators can change was found for the test: $(Get-InstallParentProblem -Path $candidates[0])" }
         New-InstallFolder -Path $path -Security (New-InstallFolderSecurity)
         $script:TrustedParents += $path
         $path
@@ -172,7 +173,7 @@ Describe 'build/package.ps1' {
             [System.IO.File]::AppendAllText((Join-Path $Checkout 'engine\Tuneup.psm1'), "`r`n# changed`r`n")
             $output = Invoke-Package (Join-Path $TestDrive 'dist-dirty') -From $Checkout -Release
             $LASTEXITCODE | Should -Not -Be 0
-            $output | Should -Match 'not committed'
+            Get-Flat $output | Should -Match 'notcommitted'
             Test-Path -LiteralPath (Join-Path $TestDrive "dist-dirty\$Top.zip") | Should -BeFalse
             $output = Invoke-Package (Join-Path $TestDrive 'dist-dirty-not-release') -From $Checkout
             $LASTEXITCODE | Should -Be 0 -Because $output
@@ -181,7 +182,7 @@ Describe 'build/package.ps1' {
         It 'refuses -Release outside a git checkout' {
             $output = Invoke-Package (Join-Path $TestDrive 'dist-not-git-release') -From $NotGit -Release
             $LASTEXITCODE | Should -Not -Be 0
-            $output | Should -Match 'git checkout'
+            Get-Flat $output | Should -Match 'gitcheckout'
         }
     }
 }
