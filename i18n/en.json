@@ -227,5 +227,20 @@
   "list.tweaks": "Tweaks for this PC:",
   "list.tweak": "  {0} - {1} [{2}]{3}",
   "list.incompatible": "Not for this PC:",
-  "list.incompatibleLine": "  {0}: {1}"
+  "list.incompatibleLine": "  {0}: {1}",
+  "suggest.signals": "Signals found on this PC:",
+  "suggest.detected": "  [x] {0}: {1}",
+  "suggest.notDetected": "  [ ] {0}",
+  "suggest.signal.dev": "Development tools",
+  "suggest.signal.gaming": "Games",
+  "suggest.signal.laptop": "Battery (laptop)",
+  "suggest.signal.work": "Joined to an organization (domain, Entra ID or MDM)",
+  "suggest.signal.legacy": "Modest hardware (less than 8 GB of RAM or a hard disk)",
+  "suggest.signal.managed": "Managed by an organization (policies or MDM)",
+  "suggest.profiles": "Suggested profiles: {0}",
+  "suggest.try": "To see the plan: .\\tuneup.ps1 -Profile {0} -WhatIf",
+  "suggest.questions": "Only you can decide:",
+  "suggest.question.privacy": "Do you also want the privacy profile (less data sent to Microsoft: activity history, location, Copilot and AI, Bing in search, telemetry tasks)?",
+  "suggest.question.lite": "Do you want the lite profile (it removes what Windows LTSC does not have: preinstalled apps, Widgets, Copilot, Xbox, Phone Link, and asks about OneDrive)? It is the deepest cut.",
+  "suggest.managed": "This PC is managed by an organization: ask its administrators before changing it. windows-tuneup leaves its policies alone."
 }

@@ -227,5 +227,20 @@
   "list.tweaks": "Ajustes para este equipo:",
   "list.tweak": "  {0} - {1} [{2}]{3}",
   "list.incompatible": "No son para este equipo:",
-  "list.incompatibleLine": "  {0}: {1}"
+  "list.incompatibleLine": "  {0}: {1}",
+  "suggest.signals": "Señales de este equipo:",
+  "suggest.detected": "  [x] {0}: {1}",
+  "suggest.notDetected": "  [ ] {0}",
+  "suggest.signal.dev": "Herramientas de desarrollo",
+  "suggest.signal.gaming": "Juegos",
+  "suggest.signal.laptop": "Batería (portátil)",
+  "suggest.signal.work": "Unido a una organización (dominio, Entra ID o MDM)",
+  "suggest.signal.legacy": "Equipo modesto (menos de 8 GB de RAM o disco duro mecánico)",
+  "suggest.signal.managed": "Administrado por una organización (directivas o MDM)",
+  "suggest.profiles": "Perfiles sugeridos: {0}",
+  "suggest.try": "Para ver el plan: .\\tuneup.ps1 -Profile {0} -WhatIf",
+  "suggest.questions": "Solo tú puedes decidir:",
+  "suggest.question.privacy": "¿Quieres también el perfil de privacidad (menos datos enviados a Microsoft: historial de actividad, ubicación, Copilot e IA, Bing en la búsqueda, tareas de telemetría)?",
+  "suggest.question.lite": "¿Quieres el perfil liviano (quita lo que Windows LTSC no trae: apps preinstaladas, Widgets, Copilot, Xbox, Vínculo móvil, y pregunta por OneDrive)? Es el recorte más profundo.",
+  "suggest.managed": "Este equipo lo administra una organización: pregunta a sus administradores antes de cambiarlo. windows-tuneup no toca sus directivas."
 }

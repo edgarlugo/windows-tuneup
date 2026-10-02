@@ -234,6 +234,16 @@ function Invoke-TuneupListCommand {
     $Context.ExitCode = 0
 }
 
+# -Suggest: the signals of this machine and the profiles that fit them. It reads no catalog and changes
+# nothing; a detector that fails is a warning inside the document.
+function Invoke-TuneupSuggestCommand {
+    param([Parameter(Mandatory)]$Context)
+    $document = Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupSuggestion }
+    $Context.Result = $document
+    Write-TuneupSuggestReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 0
+}
+
 # Windows Server and builds older than 19041 are refused unless -Force; Server then plans like
 # Enterprise, which supports every policy that Server supports. Gives the message of the refusal, or
 # nothing. Helpers like this one return values and never write a report: with -Json the report is
