@@ -36,6 +36,28 @@ Guía de cada perfil / Guide to each profile: [docs/es/profiles.md](docs/es/prof
 - Ejecutar `windows-tuneup` desde una carpeta donde solo escriban administradores (por ejemplo bajo `Program Files`): quien pueda modificar `actions/` o `engine/` ejecuta código con los permisos de quien aplica los ajustes. La revisión de las acciones (solo se leen definiciones de funciones, sin ejecutar nada al cargar) es defensa en profundidad, no sustituye ese permiso de carpeta.
 - Run `windows-tuneup` from a folder that only administrators can write to (for example under `Program Files`): anyone who can change `actions/` or `engine/` runs code with the rights of whoever applies the tweaks. The check of action scripts (only function definitions are read, nothing runs while loading) is defense in depth, not a substitute for that folder permission.
 
+## Instalación / Installation
+
+Abre PowerShell **como administrador** e instala una versión fija (nunca `main`) en `%ProgramFiles%\windows-tuneup`, que solo los administradores pueden cambiar:
+Open PowerShell **as administrator** and install a fixed version (never `main`) in `%ProgramFiles%\windows-tuneup`, which only administrators can change:
+
+```powershell
+irm https://github.com/edgarlugo/windows-tuneup/releases/download/v0.1.0/install.ps1 | iex
+```
+
+- El `install.ps1` de cada release trae dentro su versión y el SHA256 de su zip: descarga el zip a memoria (nunca a una carpeta), comprueba el SHA256 y extrae esos mismos bytes, o no instala nada. `irm | iex` ejecuta lo que descarga sin mostrarlo; si prefieres revisarlo antes, descarga `install.ps1` de la release, compara su SHA256 con el de `SHA256SUMS` y las notas de la release, léelo y córrelo con `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1`.
+  The `install.ps1` of each release carries its version and the SHA256 of its zip: it downloads the zip into memory (never to a folder), checks the SHA256 and extracts those same bytes, or installs nothing. `irm | iex` runs what it downloads without showing it; if you prefer to review it first, download `install.ps1` from the release, compare its SHA256 with the one in `SHA256SUMS` and in the release notes, read it and run it with `powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1`.
+- La copia nueva se arma junto al destino, en una carpeta que solo los administradores pueden cambiar desde que se crea, y reemplaza a la anterior de una vez: si algo falla (por ejemplo, una consola tiene su carpeta actual dentro de la copia), la anterior queda como estaba. Como administrador se niega a instalar bajo una carpeta que otra cuenta pueda renombrar o borrar (con `-Destination`, elige una que solo los administradores puedan cambiar), en una carpeta de red, o a reemplazar una copia que otra cuenta pueda cambiar.
+  The new copy is built next to the destination, in a folder that only administrators can change from the moment it is created, and replaces the earlier one at once: if anything fails (for example, a console has its current folder inside the copy), the earlier one stays as it was. As administrator it refuses to install under a folder that another account can rename or delete (with `-Destination`, pick one that only administrators can change), on a network folder, or to replace a copy that another account can change.
+- Sin elevar, `install.ps1` instala la versión en la carpeta actual (`windows-tuneup-<versión>`): esa copia la pueden cambiar los programas de tu cuenta, así que sirve para los ajustes de tu usuario y no debe correrse como administrador. `-Destination <carpeta>` elige otra carpeta.
+  Without elevation, `install.ps1` installs the version into the current folder (`windows-tuneup-<version>`): programs of your account can change that copy, so it is for the tweaks of your user and must not be run as administrator. `-Destination <folder>` picks another folder.
+- Necesita Windows PowerShell 5.1 o PowerShell 7 en modo de lenguaje completo: con Constrained Language Mode (App Control o AppLocker) no funciona.
+  It needs Windows PowerShell 5.1 or PowerShell 7 in Full Language mode: it does not work under Constrained Language Mode (App Control or AppLocker).
+- A mano: descarga `windows-tuneup-<versión>.zip` y `SHA256SUMS` de la release, compara `(Get-FileHash .\windows-tuneup-<versión>.zip).Hash` con la línea del zip, extráelo y quita la marca de descarga del navegador con `Get-ChildItem -Recurse | Unblock-File`; para los ajustes de sistema, cópialo en `%ProgramFiles%\windows-tuneup` como administrador.
+  By hand: download `windows-tuneup-<version>.zip` and `SHA256SUMS` from the release, compare `(Get-FileHash .\windows-tuneup-<version>.zip).Hash` with the line of the zip, extract it and clear the browser's download mark with `Get-ChildItem -Recurse | Unblock-File`; for system tweaks, copy it to `%ProgramFiles%\windows-tuneup` as administrator.
+- Corrido como administrador desde una carpeta que otras cuentas pueden cambiar, el plan lo avisa (`untrusted-location`).
+  Run as administrator from a folder that other accounts can change, the plan warns about it (`untrusted-location`).
+
 ## Uso / Usage
 
 ```powershell
@@ -194,5 +216,10 @@ Tests use Pester 5 and lint uses PSScriptAnalyzer (over `tuneup.ps1`, `engine/`,
 
 `-StateRoot`, `-ActionsPath`, `-CatalogPath` y `-ProfilesPath` son solo para pruebas y desarrollo. `-StateRoot <carpeta>` guarda corridas y mediciones en otra carpeta, sin la protección de la carpeta de máquina (no usarlo en un equipo real). `-ActionsPath <carpeta>` carga scripts de acción de otra carpeta, que corren con tus permisos (con administrador si estás elevado): usar solo una carpeta de confianza.
 `-StateRoot`, `-ActionsPath`, `-CatalogPath` and `-ProfilesPath` are for testing and development only. `-StateRoot <folder>` keeps runs and measurements in another folder, without the protection of the machine folder (do not use it on a real machine). `-ActionsPath <folder>` loads action scripts from another folder, which run with your rights (administrator when elevated): use only a folder you trust.
+
+### Releases
+
+Una etiqueta `v<versión>` (igual a la de `engine/Version.ps1`) hace que GitHub Actions corra el lint y las pruebas, arme con `build/package.ps1 -Release` el zip, `install.ps1` y `SHA256SUMS` desde el commit, y deje un borrador de release. Son trabajos separados: el que arma el paquete y el que crea el borrador no corren módulos de terceros, y solo el último puede escribir en el repositorio. Se publica a mano, después de adjuntar `e2e-report.md`, la lista de la máquina virtual y la medición de Liviano frente a LTSC. Quien mantiene el repositorio activa en GitHub las releases inmutables (Settings > General > Releases: nadie puede cambiar los archivos de una release publicada) y una regla de etiquetas (Settings > Rules > Rulesets) que solo le permita a él crear, mover o borrar `v*`; el repositorio no las configura.
+A tag `v<version>` (equal to the one in `engine/Version.ps1`) makes GitHub Actions run lint and tests, build the zip, `install.ps1` and `SHA256SUMS` from the commit with `build/package.ps1 -Release`, and leave a draft release. They are separate jobs: the one that builds the package and the one that creates the draft run no third-party modules, and only the latter can write to the repository. It is published by hand, after attaching `e2e-report.md`, the virtual machine checklist and the Lite versus LTSC measurement. Whoever maintains the repository turns on immutable releases in GitHub (Settings > General > Releases: nobody can change the files of a published release) and a tag rule (Settings > Rules > Rulesets) that lets only them create, move or delete `v*`; the repository does not set them.
 
 Licencia / License: MIT
