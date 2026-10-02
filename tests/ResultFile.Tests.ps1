@@ -3,7 +3,7 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Id = '3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12'
-    $script:InvalidText = '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, such as a GUID. Nothing was done.'
+    $script:InvalidText = '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was done.'
     # Old results in out, oldest first, one minute apart.
     function New-OldResult([string]$Dir, [int]$Count) {
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
@@ -35,6 +35,7 @@ Describe 'Get-TuneupResultIdProblem' {
         @{ Name = 'a GUID'; Id = '3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12' }
         @{ Name = 'eight characters'; Id = 'abcd1234' }
         @{ Name = 'sixty-four characters'; Id = ('a' * 64) }
+        @{ Name = 'a digit first and hyphens after it'; Id = '7-------' }
         @{ Name = 'letters of both cases and hyphens'; Id = 'Run-2026-A' }
     ) {
         param($Id)
@@ -49,6 +50,7 @@ Describe 'Get-TuneupResultIdProblem' {
         @{ Name = 'a space'; Id = 'abcd 1234' }
         @{ Name = 'a line break at the end'; Id = "abcd1234`n" }
         @{ Name = 'a letter outside A-Z'; Id = "abcd1234$([char]0x00E9)" }
+        @{ Name = 'a hyphen first (PowerShell would take it as a parameter name)'; Id = '-abcd1234' }
         @{ Name = 'nothing'; Id = '' }
     ) {
         param($Id)
@@ -155,6 +157,29 @@ Describe 'Result files' {
         }
     }
 
+    It 'never counts nor removes the file just created, however old the others look' {
+        $dir = Join-Path $Root 'out'
+        New-OldResult -Dir $dir -Count 50
+        # The old results look newer than the one being created, which is held open until it is closed.
+        foreach ($old in Get-ChildItem -LiteralPath $dir -File) { [System.IO.File]::SetLastWriteTimeUtc($old.FullName, $old.LastWriteTimeUtc.AddDays(2)) }
+        $opened = Split-WarningOutput @(Open-TuneupResultFile -Id $Id -UserRoot $Root 3>&1)
+        try {
+            $opened.Warnings.Count | Should -Be 0
+            Test-Path -LiteralPath (Join-Path $dir 'old-00000001.json') | Should -BeFalse
+            @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File).Count | Should -Be 50
+        } finally {
+            Close-TuneupResultFile -File $opened.Value -Text '{}' | Out-Null
+        }
+        Test-Path -LiteralPath (Join-Path $dir "$Id.json") | Should -BeTrue
+    }
+
+    It 'writes the document as it was outside the machine folder, personal paths included' {
+        $text = '{"message":"' + ($env:USERPROFILE -replace '\\', '\\') + '"}'
+        $file = Open-TuneupResultFile -Id $Id -UserRoot $Root
+        Close-TuneupResultFile -File $file -Text $text | Should -BeTrue
+        [System.IO.File]::ReadAllText($file.Path) | Should -Be $text
+    }
+
     It 'warns instead of failing when an old result cannot be removed' {
         $dir = Join-Path $Root 'out'
         New-OldResult -Dir $dir -Count 50
@@ -193,8 +218,41 @@ Describe 'Machine result files' {
             (Get-Acl -LiteralPath $path).AreAccessRulesProtected | Should -BeTrue -Because $path
         }
         $rules = @((Get-Acl -LiteralPath $file.Path).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]))
-        @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and $_.AccessControlType -eq 'Allow' }).Count | Should -Be 1
+        $users = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' -and $_.AccessControlType -eq 'Allow' })
+        $users.Count | Should -Be 1
+        $writeRights = InModuleScope Tuneup { $script:WriteRights }
+        ([int]$users[0].FileSystemRights -band $writeRights) | Should -Be 0
         [System.IO.File]::ReadAllText($file.Path) | Should -Be '{"command":"apply"}'
+    }
+
+    It 'hides the profile folder and the account name in the machine folder, field by field, leaving ids alone' {
+        $profileFolder = $env:USERPROFILE
+        $name = $env:USERNAME
+        # A path under the profile, the account name as a folder of another path, and ids that hold the
+        # name without a path around it.
+        $document = [pscustomobject]@{
+            schemaVersion = 1; command = 'undo'; toolVersion = '0.0.0'; runId = "$name-run"
+            warnings = [string[]]@("Ignoring untrusted state file $profileFolder\AppData\Local\windows-tuneup\runs\x\run.json")
+            results = @([pscustomobject]@{
+                id = "$name.tweak"; title = "Title $name"; status = 'failed'; reason = $null
+                error = "Cannot write D:\Data\$name\file.txt"; detail = $null
+                manual = [string[]]@("Set-ItemProperty -LiteralPath 'HKCU:\Software\X' -Name P -Value '$profileFolder\x'")
+            })
+        }
+        $text = ConvertTo-Json -InputObject $document -Depth 10
+        $file = Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot
+        Close-TuneupResultFile -File $file -Text $text | Should -BeTrue
+        $saved = [System.IO.File]::ReadAllText($file.Path)
+        $saved | Should -Not -Match ([regex]::Escape($profileFolder.Replace('\', '\\')))
+        $json = $saved | ConvertFrom-Json
+        $json.warnings[0] | Should -Be 'Ignoring untrusted state file %USERPROFILE%\AppData\Local\windows-tuneup\runs\x\run.json'
+        $json.results[0].error | Should -Be 'Cannot write D:\Data\%USERNAME%\file.txt'
+        @($json.results[0].manual).Count | Should -Be 1
+        $json.results[0].manual[0] | Should -Be "Set-ItemProperty -LiteralPath 'HKCU:\Software\X' -Name P -Value '%USERPROFILE%\x'"
+        $json.results[0].id | Should -Be "$name.tweak"
+        $json.results[0].title | Should -Be "Title $name"
+        $json.runId | Should -Be "$name-run"
+        $json.results[0].status | Should -Be 'failed'
     }
 
     It 'needs an elevated process for the machine folder' {

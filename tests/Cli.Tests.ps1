@@ -154,7 +154,7 @@ Describe 'tuneup.ps1' {
         param($Arguments)
         $result = Invoke-Tuneup $Arguments
         $result.ExitCode | Should -Be 1
-        (ConvertFrom-PureJson $result.Output).message | Should -Be '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, such as a GUID. Nothing was done.'
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was done.'
         Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
     }
 
@@ -176,6 +176,38 @@ Describe 'tuneup.ps1' {
         [System.IO.File]::ReadAllText($existing) | Should -Be 'old'
         Test-Path -LiteralPath $Key | Should -BeFalse
         Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
+    It 'puts an old result that could not be removed in the warnings of the document' {
+        $dir = Join-Path $Root 'out'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $start = [datetime]::UtcNow.AddDays(-1)
+        for ($i = 1; $i -le 50; $i++) {
+            $path = Join-Path $dir ('old-{0:D8}.json' -f $i)
+            [System.IO.File]::WriteAllText($path, '{}')
+            [System.IO.File]::SetLastWriteTimeUtc($path, $start.AddMinutes($i))
+        }
+        $id = [guid]::NewGuid().ToString()
+        $lock = [System.IO.File]::Open((Join-Path $dir 'old-00000001.json'), [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            $result = Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)
+        } finally {
+            $lock.Dispose()
+        }
+        $result.ExitCode | Should -Be 0
+        @((ConvertFrom-PureJson $result.Output).warnings) -join "`n" | Should -Match 'Could not remove the old result file .*old-00000001\.json'
+        @((ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $dir "$id.json")))).warnings) -join "`n" | Should -Match 'old-00000001\.json'
+    }
+
+    It 'exits with 2 instead of 0 when the result file cannot be saved' {
+        # In this process, so that saving can fail: tuneup.ps1 then uses the module this file loaded.
+        Mock Import-Module { }
+        Mock Close-TuneupResultFile { $File.Stream.Dispose(); $false }
+        $id = [guid]::NewGuid().ToString()
+        $output = & (Join-Path $Repo 'tuneup.ps1') -StateRoot $Root -Lang en -Status -Json -ResultId $id
+        $LASTEXITCODE | Should -Be 2
+        (ConvertFrom-PureJson ($output -join "`n")).command | Should -Be 'status'
+        Should -Invoke Close-TuneupResultFile -Times 1 -Exactly
     }
 
     It 'reports an actions folder script that runs code as a warning and keeps -Status working' {

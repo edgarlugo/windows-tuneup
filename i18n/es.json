@@ -247,6 +247,6 @@
   "suggest.unsupported": "Este Windows no está soportado por windows-tuneup (Windows Server, una compilación anterior a la 19041 o una edición que no conoce): los perfiles de abajo necesitarían -Force, y tuneup.ps1 los rechaza sin él.",
   "suggest.managed": "Este equipo lo administra una organización: pregunta a sus administradores antes de cambiarlo. windows-tuneup no toca sus directivas.",
   "err.resultIdNeedsJson": "-ResultId necesita -Json: el archivo de resultado guarda el documento JSON. No se hizo nada.",
-  "err.resultIdInvalid": "-ResultId lleva de 8 a 64 letras (A-Z), dígitos o guiones, como un GUID. No se hizo nada.",
+  "err.resultIdInvalid": "-ResultId lleva de 8 a 64 letras (A-Z), dígitos o guiones, y empieza por una letra o un dígito, como un GUID. No se hizo nada.",
   "err.resultIdExists": "El resultado {0} ya existe: usa otro -ResultId. No se hizo nada."
 }
