@@ -70,6 +70,24 @@ Describe 'docs/json-contract.md' {
         $health = [pscustomobject]@{ schemaVersion = 1; command = 'health'; startedAt = 's'; finishedAt = 'f'; repairRequested = $true; repairRan = $true
             before = $scan; after = $scan; recommendation = 'manual-repair'; rebootRecommended = $false }
         $Documents.health = Write-TuneupHealthReport -Report $health -Json | ConvertFrom-Json
+        # One tweak that does not suit the machine, so incompatible has an entry to check.
+        $listDefinition = [pscustomobject]@{
+            Catalog  = @(Import-TuneupCatalog -Path (Join-Path $Fixtures 'catalog')) + @(New-TestTweak -Id 'test.later' -MinBuild 99999)
+            Profiles = @(Import-TuneupProfileSet -Path (Join-Path $Fixtures 'profiles'))
+            Problems = [string[]]@()
+        }
+        $Documents.list = Write-TuneupListReport -Document (Get-TuneupListDocument -Definition $listDefinition -Environment (New-TestEnvironment)) -Json | ConvertFrom-Json
+        # Every signal found, so every field of the document has a value.
+        Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { 'Steam', 'Git' }
+        Mock -ModuleName Tuneup Get-TuneupUserAppxName { 'Microsoft.GamingServices' }
+        Mock -ModuleName Tuneup Test-TuneupSuggestBattery { $true }
+        Mock -ModuleName Tuneup Get-TuneupComputerSystem { [pscustomobject]@{ PartOfDomain = $true; TotalPhysicalMemory = [double]4GB } }
+        Mock -ModuleName Tuneup Get-TuneupInstalledMemoryByte { [double]4GB }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $true }
+        Mock -ModuleName Tuneup Test-TuneupSuggestMdm { $true }
+        Mock -ModuleName Tuneup Get-TuneupSystemDiskMediaType { 'HDD' }
+        Mock -ModuleName Tuneup Get-TuneupOsSupport { [pscustomobject]@{ Build = 26100; Edition = 'Pro'; IsServer = $false } }
+        $Documents.suggest = Invoke-TuneupSuggestCommand -Context $context | ConvertFrom-Json
     }
 
     AfterAll {
@@ -92,6 +110,12 @@ Describe 'docs/json-contract.md' {
         $paths.health | Should -Contain 'after.componentStore.operationResult'
         $paths.health | Should -Contain 'before.corruptComponents[].files'
         $paths.error | Should -Contain 'details'
+        $paths.list | Should -Contain 'profiles[].needsAdmin'
+        $paths.list | Should -Contain 'tweaks[].profiles'
+        $paths.list | Should -Contain 'incompatible[].reason'
+        $paths.suggest | Should -Contain 'signals[].evidence'
+        $paths.suggest | Should -Contain 'suggestions[].signals'
+        $paths.suggest | Should -Contain 'questions[].text'
     }
 
     It 'catches a field that the page does not name' {
@@ -106,6 +130,8 @@ Describe 'docs/json-contract.md' {
         @{ Command = 'undo' }
         @{ Command = 'measure' }
         @{ Command = 'health' }
+        @{ Command = 'list' }
+        @{ Command = 'suggest' }
         @{ Command = 'error' }
     ) {
         param($Command)

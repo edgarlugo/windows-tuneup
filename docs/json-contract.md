@@ -9,7 +9,8 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 - The exit code completes the document: `0` everything done, `2` not everything was done (read the document), `1` nothing was done or it could not start (the document is usually an `error`).
 - An unknown or misspelled parameter, or a value without its parameter name (parameters are never positional), ends in an `error` document (exit `1`) and nothing is done. A value PowerShell cannot take (a `-Lang` other than `es`/`en`, an `-IdleSeconds` that is not a number) is rejected by PowerShell itself: no JSON document, exit code `1`.
 - `-Json` never asks anything. Applying needs `-Yes` (or `-WhatIf` to only see the plan); without either, a plan with changes ends in an `error` (exit `1`), `-Json` alone included. Without a command and without `-Json` the tool opens the menu, which has no JSON output.
-- Texts meant for people (`title`, `message`, `detail`, `error`, `warnings`) follow `-Lang`; ids, statuses and reasons never change with the language.
+- Texts meant for people (`title`, `why`, `description`, `message`, `detail`, `error`, `text`, `warnings`) follow `-Lang`; ids, statuses, reasons and `evidence` never change with the language.
+- `-ResultId <id>` (with `-Json` only, any command) also writes the document to `out\<id>.json` under the state folder: `%ProgramData%\windows-tuneup` when elevated (only administrators can write there; users can read; the folder and `out` are checked like the rest of the machine state, and one that other accounts can change, or that is a junction, is refused), `%LOCALAPPDATA%\windows-tuneup` otherwise (`-StateRoot` in tests and development, as for the runs). It is for a program that starts the tool elevated with UAC and cannot read its standard output. The id is 8 to 64 characters among `A-Z`, `a-z`, `0-9` and `-` (a GUID fits); the caller never gives a path. An invalid id, `-ResultId` without `-Json`, or an id whose file already exists (whatever it is, a link included: it is never replaced) ends in an `error` on the standard output (exit `1`, nothing done, no file written). The file is created before the command runs and gets, when it ends, the same text as the standard output, `error` documents included (an unknown parameter too, when the id is valid); `out` keeps the 50 newest results (only files named like a result id count: folders and links are left alone, and a result that cannot be removed is a warning in the document). No file after the process ended means the document could not be written (the exit code is then `2` if it would have been `0`) or Ctrl+C stopped PowerShell itself (see `apply`).
 
 | Command line | `command` of the document |
 |---|---|
@@ -20,6 +21,8 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 | `-Undo <id\|last> [-Tweak <id>] -Json` | `undo` |
 | `-Health [-Repair] -Json` | `health` |
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>] -Json` | `measure` |
+| `-List -Json` | `list` |
+| `-Suggest -Json` | `suggest` |
 | any refusal or failure before the work | `error` |
 
 ## `shared`
@@ -209,6 +212,52 @@ Exit code: `0` everything restored, `2` some left, `1` nothing restored.
 | `rebootRecommended` | boolean | Something was repaired. |
 
 Exit code: `0` no problems (`recommendation` = `none`), `2` problems remain or the result could not be confirmed, `1` not elevated.
+
+## `list`
+
+What the catalog and the profiles offer on this machine. Read only, no elevation needed. Exit code `0`, or `1` with an `error` (an unsupported Windows without `-Force`, or a catalog or profiles with errors). The blacklist is not data of the tool: it is `docs/es/blacklist.md` and `docs/en/blacklist.md` of the installed copy.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `profiles` | object[] | Every profile, `base` first. |
+| `profiles[].id` | string | Profile id: what `-Profile` takes. |
+| `profiles[].aliases` | string[] | Other names `-Profile` takes (`privacidad`, `juegos`...). |
+| `profiles[].title` | string | Title in the language of the run. |
+| `profiles[].description` | string | What the profile does, in the language of the run. |
+| `profiles[].tweakCount` | number | Tweaks of the profile that suit this machine (the ones not in `incompatible`). |
+| `profiles[].needsAdmin` | boolean | Some of those tweaks need elevation. |
+| `tweaks` | object[] | Every tweak of the catalog that suits this machine, in catalog order. |
+| `tweaks[].id` | string | Tweak id: what `-Include` and `-Exclude` take. |
+| `tweaks[].title` | string | Title in the language of the run. |
+| `tweaks[].why` | string | What it does and why, in the language of the run. |
+| `tweaks[].risk` | string | `low`, `medium` or `high` (`high` is never in a profile: only `-Include` applies it). |
+| `tweaks[].ask` | boolean | It asks before it is applied: a profile alone leaves it out; `-Include <id>` asks for it. |
+| `tweaks[].type` | string | `registry`, `service`, `task`, `appx`, `capability`, `feature`, `powercfg` or `action`. |
+| `tweaks[].scope` | string | `user` or `machine`. |
+| `tweaks[].needsAdmin` | boolean | Applying it needs elevation. |
+| `tweaks[].rebootRequired` | boolean | It needs a restart once applied. |
+| `tweaks[].requires` | string[] | Hardware it is meant for: `battery`, `no-battery`; empty for any. |
+| `tweaks[].profiles` | string[] | Ids of the profiles that include it; empty for one that is only applied by name. |
+| `incompatible` | object[] | Tweaks that do not suit this machine, with the reason the plan would give. |
+| `incompatible[].id` | string | Tweak id. |
+| `incompatible[].reason` | string | `incompatible` (Windows version or edition), `not-applicable-hardware` (its `requires` does not match this machine) or `managed-device` (a policy, on a device joined to a domain or enrolled in MDM, where the plan leaves policies alone). |
+
+## `suggest`
+
+What this machine has and the profiles that fit it. Read only, no elevation needed, nothing is sent anywhere. Exit code `0` (`1` with an `error` only for parameters it does not take). It reads no catalog, profiles, actions, state or environment of the tool, so `-CatalogPath`, `-ProfilesPath`, `-ActionsPath` and `-StateRoot` do not change it (`-StateRoot` only places the `-ResultId` file), and a broken system query cannot turn it into an `error`. A source that cannot be read (a detector that fails) leaves out what it would have found and adds a warning; the document is still written. On a Windows the tool does not support (Server, a build older than 19041 or an edition it does not know) a warning says that the profiles would need `-Force`: it is advice only, the document is the same and the exit code is still `0`; a Windows whose version cannot be read gives no warning.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `signals` | object[] | Always six, in this order: `dev`, `gaming`, `laptop`, `work`, `legacy`, `managed`. |
+| `signals[].id` | string | `dev`: Visual Studio, Visual Studio Code, a JetBrains IDE, Android Studio, Git, Node.js, Python, a JDK or WSL installed. `gaming`: Steam, Epic Games Launcher, EA app, or Xbox Gaming Services (the Xbox app installs it to play Game Pass; the Xbox app and the Game Bar that come with Windows do not count). `laptop`: a battery on a portable chassis. `work`: joined to a domain or to Entra ID, or enrolled in MDM. `legacy`: less than 8 GB of RAM (the installed modules; when they cannot be read, what Windows reports rounded to the nearest GB, because it reports a little less than what is installed) or a system disk that is a hard disk. `managed`: joined to a domain or enrolled in MDM, the same rule as `environment.isManaged`; it suggests no profile, it is there to warn before changing anything. |
+| `signals[].detected` | boolean | Something was found. |
+| `signals[].evidence` | string[] | What was found. `battery`, `domain`, `Entra ID`, `MDM`, `HDD` and `RAM <n> GB` (`<n>` a whole number) are stable tokens: they never change with the language (the text for people translates them). Anything else is a product name: `Visual Studio`, `Visual Studio Code`, `JetBrains`, `Android Studio`, `Git`, `Node.js`, `Python`, `JDK`, `WSL`, `Steam`, `Epic Games Launcher`, `EA app` or `Xbox Gaming Services`. Never a path, the display name of an installer or the account. |
+| `suggestions` | object[] | Profiles to propose: `base` first (always, with no signals), then one per detected signal except `managed`, in the order of `signals`. |
+| `suggestions[].profile` | string | Profile id. |
+| `suggestions[].signals` | string[] | Ids of the signals behind it. |
+| `questions` | object[] | What only the user can decide: `privacy` and `lite` are never suggested. |
+| `questions[].id` | string | The profile it asks about: `privacy` or `lite`. |
+| `questions[].text` | string | The question, in the language of the run. |
 
 ## `error`
 
