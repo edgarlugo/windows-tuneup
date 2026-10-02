@@ -1,4 +1,6 @@
 name: ci
+# Actions are pinned to a commit (the comment says which tag that commit was) and the modules from the
+# PowerShell Gallery to a version; the checkout keeps no token.
 on:
   push:
     branches: [main]
@@ -8,13 +10,16 @@ permissions:
 jobs:
   test:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install Pester and PSScriptAnalyzer
         shell: powershell
         run: |
           Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          Install-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
       - name: Lint
         shell: powershell
@@ -26,13 +31,16 @@ jobs:
   # that only run without elevation (-Skip:$Elevated) run in CI too.
   test-standard-user:
     runs-on: windows-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install Pester
         shell: powershell
         run: |
           Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          Install-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force -SkipPublisherCheck
       - name: Test as a standard user
         shell: powershell
-        run: .\build\test-standard-user.ps1
+        run: .\build\test-standard-user.ps1 -TimeoutMinutes 50

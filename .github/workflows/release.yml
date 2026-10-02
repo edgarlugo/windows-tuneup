@@ -2,42 +2,84 @@ name: release
 # A tag v<version> builds the release files, checks them like CI and leaves a draft release with the
 # zip, install.ps1, SHA256SUMS and the notes. Publishing the draft is done by hand, after attaching the
 # end-to-end and measurement reports (docs/es/vm-checklist.md).
+#
+# Three jobs, so that no code from outside the repository runs where it could change what is released or
+# with a token that can write: "package" builds the files from the commit with only git and the scripts
+# of the repository; "test" installs Pester and PSScriptAnalyzer (from the PowerShell Gallery, at fixed
+# versions) and runs lint and the suite, with a read-only token and no artifact; "release" has the only
+# token that can write, checks out nothing and runs nothing but gh on the files of "package".
+# Actions are pinned to a commit; the comment says which tag that commit was.
 on:
   push:
     tags: ['v*']
-permissions:
-  contents: write
+permissions: {}
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
-  release:
+  package:
     runs-on: windows-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      - name: Install Pester and PSScriptAnalyzer
-        shell: powershell
-        run: |
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
-          Install-Module Pester -MinimumVersion 5.6.0 -MaximumVersion 5.99.99 -Scope CurrentUser -Force -SkipPublisherCheck
-          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Tag and version agree
         shell: powershell
         run: |
           Import-Module .\engine\Tuneup.psm1
           $expected = "v$(Get-TuneupVersion)"
           if ($env:GITHUB_REF_NAME -cne $expected) { throw "Tag $env:GITHUB_REF_NAME does not match the version of the engine ($expected)" }
+      - name: Package
+        shell: powershell
+        run: .\build\package.ps1 -OutputPath dist -Release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Pester and PSScriptAnalyzer
+        shell: powershell
+        run: |
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+          Install-Module Pester -RequiredVersion 5.9.1 -Scope CurrentUser -Force -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
       - name: Lint
         shell: powershell
         run: .\build\lint.ps1
       - name: Test
         shell: powershell
         run: .\build\test.ps1
-      - name: Package
-        shell: powershell
-        run: .\build\package.ps1 -OutputPath dist
+  release:
+    needs: [package, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
       - name: Draft release
-        shell: powershell
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          $zip = "dist\windows-tuneup-$($env:GITHUB_REF_NAME.Substring(1)).zip"
-          gh release create $env:GITHUB_REF_NAME $zip dist\install.ps1 dist\SHA256SUMS --draft --verify-tag --title "windows-tuneup $env:GITHUB_REF_NAME" --notes-file dist\release-notes.md
-          if ($LASTEXITCODE) { throw "gh release create failed with exit code $LASTEXITCODE" }
+          set -euo pipefail
+          cd dist
+          sha256sum --check --strict SHA256SUMS
+          gh release create "$TAG" "windows-tuneup-${TAG#v}.zip" install.ps1 SHA256SUMS --draft --verify-tag --title "windows-tuneup $TAG" --notes-file release-notes.md
