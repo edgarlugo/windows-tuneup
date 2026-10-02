@@ -98,6 +98,86 @@ Describe 'tuneup.ps1' {
         (ConvertFrom-PureJson $result.Output).message | Should -Be 'Invalid parameter combination: -List -Profile'
     }
 
+    It 'also writes the JSON document to out\<id>.json with -ResultId' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        ($saved -replace "`r`n", "`n").Trim() | Should -Be $result.Output.Trim()
+        (ConvertFrom-PureJson $saved).command | Should -Be 'status'
+    }
+
+    It 'writes the -Suggest document to the result file too, though -Suggest reads no state' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Suggest', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        ($saved -replace "`r`n", "`n").Trim() | Should -Be $result.Output.Trim()
+        (ConvertFrom-PureJson $saved).command | Should -Be 'suggest'
+    }
+
+    It 'puts the result file next to the runs of a relative -StateRoot' {
+        $script:Root = [guid]::NewGuid().ToString()
+        $id = [guid]::NewGuid().ToString()
+        Push-Location -LiteralPath $TestDrive
+        try {
+            $result = Invoke-Tuneup @('-Yes', '-Json', '-ResultId', $id)
+        } finally {
+            Pop-Location
+        }
+        $result.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $result.Output).runDir | Should -BeLike (Join-Path $TestDrive "$Root\runs\*")
+        Test-Path -LiteralPath (Join-Path $TestDrive "$Root\out\$id.json") | Should -BeTrue
+    }
+
+    It 'writes an error document to the result file too' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Profile', 'nope', '-WhatIf', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json")))).command | Should -Be 'error'
+    }
+
+    It 'writes the error of an unknown parameter to the result file' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Exlude', 'test.three', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        $saved = ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json")))
+        $saved.message | Should -Match 'Unknown parameter or value without a parameter name: -Exlude test\.three'
+    }
+
+    It 'refuses -ResultId <Case> with an error document and writes no file' -TestCases @(
+        @{ Case = 'that is too short'; Arguments = @('-Status', '-Json', '-ResultId', 'abc') }
+        @{ Case = 'that is a path'; Arguments = @('-Status', '-Json', '-ResultId', '..\..\escape-1') }
+        @{ Case = 'that is a relative path, with -List'; Arguments = @('-ResultId', '../x', '-Json', '-List') }
+        @{ Case = 'that is invalid, with an unknown parameter too'; Arguments = @('-Bogus', '-Json', '-ResultId', 'abc') }
+    ) {
+        param($Arguments)
+        $result = Invoke-Tuneup $Arguments
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, such as a GUID. Nothing was done.'
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
+    It 'refuses -ResultId without -Json' {
+        $result = Invoke-Tuneup @('-Status', '-ResultId', [guid]::NewGuid().ToString())
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match '-ResultId needs -Json'
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
+    It 'refuses an id whose file exists and changes nothing' {
+        $id = [guid]::NewGuid().ToString()
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        $existing = Join-Path $Root "out\$id.json"
+        [System.IO.File]::WriteAllText($existing, 'old')
+        $result = Invoke-Tuneup @('-Yes', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be "The result $id already exists: use a new -ResultId. Nothing was done."
+        [System.IO.File]::ReadAllText($existing) | Should -Be 'old'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
     It 'reports an actions folder script that runs code as a warning and keeps -Status working' {
         $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $actions | Out-Null
@@ -569,7 +649,8 @@ Describe 'tuneup.ps1' {
     }
 
     It 'carries every JSON document a warnings array' {
-        foreach ($arguments in @(@('-WhatIf', '-Json'), @('-Yes', '-Json'), @('-Status', '-Json'), @('-Undo', 'last', '-Json'), @('-Profile', 'nope', '-Json'))) {
+        foreach ($arguments in @(@('-WhatIf', '-Json'), @('-Yes', '-Json'), @('-Status', '-Json'), @('-Undo', 'last', '-Json'), @('-Profile', 'nope', '-Json'),
+                @('-List', '-Json'), @('-Suggest', '-Json'), @('-Status', '-Json', '-ResultId', 'short'))) {
             $json = ConvertFrom-PureJson (Invoke-Tuneup $arguments).Output
             $json.PSObject.Properties.Name | Should -Contain 'warnings' -Because ($arguments -join ' ')
         }
