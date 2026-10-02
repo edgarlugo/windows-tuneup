@@ -223,7 +223,7 @@
   "menu.measure.range": "Type a number between {0} and {1}.",
   "menu.nonInteractive": "The menu needs to be able to ask questions, and PowerShell was started with -NonInteractive, which does not let it read answers (not even from a redirected input). Open it without that option, or use a command (for example -WhatIf or -Status).",
   "list.profiles": "Profiles:",
-  "list.profile": "  {0} - {1}: {2} tweaks for this PC{3}",
+  "list.profile": "  {0} - {1} (tweaks for this PC: {2}){3}",
   "list.tweaks": "Tweaks for this PC:",
   "list.tweak": "  {0} - {1} [{2}]{3}",
   "list.incompatible": "Not for this PC:",
@@ -242,5 +242,8 @@
   "suggest.questions": "Only you can decide:",
   "suggest.question.privacy": "Do you also want the privacy profile (less data sent to Microsoft: activity history, location, Copilot and AI, Bing in search, telemetry tasks)?",
   "suggest.question.lite": "Do you want the lite profile (it removes what Windows LTSC does not have: preinstalled apps, Widgets, Copilot, Xbox, Phone Link, and asks about OneDrive)? It is the deepest cut.",
+  "suggest.evidence.battery": "battery",
+  "suggest.evidence.domain": "domain",
+  "suggest.unsupported": "This Windows is not supported by windows-tuneup (Windows Server, a build older than 19041 or an edition it does not know): the profiles below would need -Force, and tuneup.ps1 refuses them otherwise.",
   "suggest.managed": "This PC is managed by an organization: ask its administrators before changing it. windows-tuneup leaves its policies alone."
 }

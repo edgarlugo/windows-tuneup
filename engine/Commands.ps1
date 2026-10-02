@@ -571,6 +571,13 @@ function Invoke-TuneupCli {
         return
     }
 
+    # -Suggest reads no catalog, state or environment of the tool (what it needs it reads itself and
+    # tolerates failing), so a broken system query cannot turn it into an error.
+    if ($Suggest) {
+        Invoke-TuneupSuggestCommand -Context $Context
+        return
+    }
+
     # Relative paths follow the current PowerShell location, not the process folder that .NET uses.
     $pathApi = $ExecutionContext.SessionState.Path
     $Context.Force = [bool]$Force
@@ -602,7 +609,6 @@ function Invoke-TuneupCli {
         return
     }
     if ($List) { Invoke-TuneupListCommand -Context $Context; return }
-    if ($Suggest) { Invoke-TuneupSuggestCommand -Context $Context; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

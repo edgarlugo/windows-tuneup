@@ -355,6 +355,25 @@ Describe 'Invoke-TuneupCli' {
         $context.ExitCode | Should -Be 1
     }
 
+    It 'runs -Suggest without reading the environment, so a broken system query does not turn it into an error' {
+        Mock -ModuleName Tuneup Get-TuneupEnvironment { throw 'WMI is broken' }
+        Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { @() }
+        Mock -ModuleName Tuneup Get-TuneupUserAppxName { @() }
+        Mock -ModuleName Tuneup Test-TuneupSuggestBattery { $false }
+        Mock -ModuleName Tuneup Get-TuneupComputerSystem { [pscustomobject]@{ PartOfDomain = $false; TotalPhysicalMemory = [double]16GB } }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Mock -ModuleName Tuneup Test-TuneupSuggestMdm { $false }
+        Mock -ModuleName Tuneup Get-TuneupSystemDiskMediaType { 'SSD' }
+        Mock -ModuleName Tuneup Get-TuneupInstalledMemoryByte { $null }
+        Mock -ModuleName Tuneup Get-TuneupOsSupport { [pscustomobject]@{ Build = 26100; Edition = 'Pro'; IsServer = $false } }
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -Suggest -StateRoot $Root })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'suggest'
+        $context.ExitCode | Should -Be 0
+        Should -Invoke Get-TuneupEnvironment -ModuleName Tuneup -Times 0 -Exactly
+    }
+
     It 'resolves the folders into the context and runs the command they name' {
         $context = New-TuneupContext -Json
         $documents = @(Get-JsonOutput {

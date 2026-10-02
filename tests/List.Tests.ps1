@@ -106,6 +106,36 @@ Describe 'Get-TuneupListDocument' {
     }
 }
 
+Describe 'Get-TuneupListDocument on a managed PC' {
+    BeforeAll {
+        function New-ManagedDefinition {
+            $policy = New-TestTweak -Id 'test.policy' `
+                -Set ([pscustomobject]@{ path = 'HKCU:\Software\Policies\windows-tuneup-test'; name = 'Sample'; kind = 'DWord'; value = 1 })
+            [pscustomobject]@{
+                Catalog = @((New-TestTweak -Id 'test.user'), $policy)
+                Profiles = @((New-TestProfile -Id 'base' -Include @('test.user', 'test.policy')))
+                Problems = [string[]]@()
+            }
+        }
+    }
+
+    It 'lists a policy tweak apart as managed-device, so the profile does not count it or ask for administrator because of it' {
+        $document = Get-TuneupListDocument -Definition (New-ManagedDefinition) -Environment (New-TestEnvironment -IsManaged $true)
+        @($document.tweaks | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.user'
+        @($document.incompatible | ForEach-Object { "$($_.id):$($_.reason)" }) -join ',' | Should -Be 'test.policy:managed-device'
+        $document.profiles[0].tweakCount | Should -Be 1
+        $document.profiles[0].needsAdmin | Should -BeFalse
+    }
+
+    It 'lists the same policy tweak, needing administrator, on a PC that is not managed' {
+        $document = Get-TuneupListDocument -Definition (New-ManagedDefinition) -Environment (New-TestEnvironment -IsManaged $false)
+        @($document.tweaks | ForEach-Object { $_.id }) -join ',' | Should -Be 'test.user,test.policy'
+        @($document.incompatible).Count | Should -Be 0
+        $document.profiles[0].tweakCount | Should -Be 2
+        $document.profiles[0].needsAdmin | Should -BeTrue
+    }
+}
+
 Describe 'Invoke-TuneupListCommand' {
     It 'writes one list document and exits with 0' {
         $context = New-TestContext -Json
@@ -123,7 +153,7 @@ Describe 'Invoke-TuneupListCommand' {
         $context = New-TestContext
         $text = (Invoke-TuneupListCommand -Context $context 6>&1 | Out-String)
         $text | Should -Match 'Profiles:'
-        $text | Should -Match 'system - System: 1 tweaks for this PC \(administrator\)'
+        $text | Should -Match 'system - System \(tweaks for this PC: 1\) \(administrator\)'
         $text | Should -Match 'test\.one - Test one \[low risk\]'
         $context.ExitCode | Should -Be 0
     }

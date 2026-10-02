@@ -13,6 +13,7 @@ function Get-TuneupListDocument {
         $reason = $null
         if (-not (Test-TuneupCompatible -Tweak $tweak -Environment $Environment)) { $reason = 'incompatible' }
         elseif (-not (Test-TuneupHardwareMatch -Tweak $tweak -Environment $Environment)) { $reason = 'not-applicable-hardware' }
+        elseif ($Environment.IsManaged -and (Test-TuneupPolicyTweak -Tweak $tweak)) { $reason = 'managed-device' }
         if ($reason) { $notHere[[string]$tweak.id] = $reason }
     }
     $profileSet = @(@($Definition.Profiles | Where-Object { $_.id -eq 'base' }) + @($Definition.Profiles | Where-Object { $_.id -ne 'base' }))
