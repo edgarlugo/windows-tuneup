@@ -533,7 +533,9 @@ function Invoke-TuneupCli {
         [switch]$Repair,
         [switch]$Measure,
         [string]$Compare,
-        [int]$IdleSeconds = 0
+        [int]$IdleSeconds = 0,
+        [switch]$List,
+        [switch]$Suggest
     )
     $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
     $Include = @(Get-TuneupCleanList ($Include -split ','))
@@ -555,6 +557,8 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('Measure') -and $Measure) { $present += 'Measure' }
     if ($PSBoundParameters.ContainsKey('Compare') -and $Compare) { $present += 'Compare' }
     if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
+    if ($PSBoundParameters.ContainsKey('List') -and $List) { $present += 'List' }
+    if ($PSBoundParameters.ContainsKey('Suggest') -and $Suggest) { $present += 'Suggest' }
     $conflict = Get-TuneupArgumentConflict -Present $present
     if ($conflict) {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.badArgs' -Format $conflict)
@@ -597,6 +601,8 @@ function Invoke-TuneupCli {
         Invoke-TuneupMenu -Context $Context
         return
     }
+    if ($List) { Invoke-TuneupListCommand -Context $Context; return }
+    if ($Suggest) { Invoke-TuneupSuggestCommand -Context $Context; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

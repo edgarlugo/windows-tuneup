@@ -41,6 +41,8 @@ param(
     [switch]$Measure,
     [string]$Compare,
     [int]$IdleSeconds = 0,
+    [switch]$List,
+    [switch]$Suggest,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$_Rest = @()
 )
 

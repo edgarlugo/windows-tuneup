@@ -63,6 +63,41 @@ Describe 'tuneup.ps1' {
         $json.requiresAdmin | Should -BeTrue
     }
 
+    It 'lists the profiles and the tweaks that suit this machine' {
+        $result = Invoke-Tuneup @('-List', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'list'
+        @($json.profiles | ForEach-Object { $_.id }) -join ',' | Should -Be 'base,extra,nested,system'
+        ($json.profiles | Where-Object { $_.id -eq 'system' }).needsAdmin | Should -BeTrue
+        @(($json.tweaks | Where-Object { $_.id -eq 'test.three' }).profiles) -join ',' | Should -Be 'extra'
+        $json.PSObject.Properties.Name | Should -Contain 'warnings'
+    }
+
+    It 'shows the list for people in the chosen language' {
+        $result = Invoke-Tuneup @('-List') -Lang 'es'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Perfiles:'
+        $result.Output | Should -Match 'test\.one - Prueba uno'
+    }
+
+    It 'suggests profiles, always with every signal and base first' {
+        $result = Invoke-Tuneup @('-Suggest', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'suggest'
+        # What the runner has installed is not checked: only the shape of the document.
+        @($json.signals | ForEach-Object { $_.id }) -join ',' | Should -Be 'dev,gaming,laptop,work,legacy,managed'
+        $json.suggestions[0].profile | Should -Be 'base'
+        @($json.questions | ForEach-Object { $_.id }) -join ',' | Should -Be 'privacy,lite'
+    }
+
+    It 'rejects -List with the options of applying, before reading anything' {
+        $result = Invoke-Tuneup @('-List', '-Profile', 'extra', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'Invalid parameter combination: -List -Profile'
+    }
+
     It 'reports an actions folder script that runs code as a warning and keeps -Status working' {
         $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $actions | Out-Null
