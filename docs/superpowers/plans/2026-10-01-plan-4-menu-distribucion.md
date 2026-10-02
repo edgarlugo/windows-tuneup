@@ -10057,7 +10057,8 @@ try {
         $base = $profileSet | Where-Object { $_.id -eq 'base' }
         $ask = @(@($base.include) + @($profileData.include) | Where-Object { $_ } | Sort-Object -Unique |
             Where-Object { $id = $_; $tweak = $catalog | Where-Object { $_.id -eq $id }; $tweak.ask -and $left -notcontains $id })
-        $arguments = @('-Profile', $profileId, '-Exclude', ($left -join ','), '-Yes')
+        $arguments = @('-Profile', $profileId, '-Yes')
+        if ($left.Count) { $arguments += @('-Exclude', ($left -join ',')) }
         if ($ask.Count) { $arguments += @('-Include', ($ask -join ',')) }
         $apply = Invoke-E2ETuneup $arguments
         $status = Invoke-E2ETuneup @('-Status')
