@@ -245,5 +245,8 @@
   "suggest.evidence.battery": "battery",
   "suggest.evidence.domain": "domain",
   "suggest.unsupported": "This Windows is not supported by windows-tuneup (Windows Server, a build older than 19041 or an edition it does not know): the profiles below would need -Force, and tuneup.ps1 refuses them otherwise.",
-  "suggest.managed": "This PC is managed by an organization: ask its administrators before changing it. windows-tuneup leaves its policies alone."
+  "suggest.managed": "This PC is managed by an organization: ask its administrators before changing it. windows-tuneup leaves its policies alone.",
+  "err.resultIdNeedsJson": "-ResultId needs -Json: the result file holds the JSON document. Nothing was done.",
+  "err.resultIdInvalid": "-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, such as a GUID. Nothing was done.",
+  "err.resultIdExists": "The result {0} already exists: use a new -ResultId. Nothing was done."
 }
