@@ -405,6 +405,9 @@ Describe 'An apply that stops before it ends' {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
         Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+        # No Ctrl+C trap and so no hint about it: where the tests run with a console of their own (the
+        # standard-user job of CI), the hint would be in the text these tests read.
+        Mock -ModuleName Tuneup Enable-TuneupInterruptTrap { $null }
         $script:stop = @{ Journaled = $true }
         $stop = $script:stop
         Mock -ModuleName Tuneup Invoke-TuneupPlan {

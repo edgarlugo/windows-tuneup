@@ -26,8 +26,12 @@ BeforeAll {
         } finally {
             Pop-Location
         }
-        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = ($output | Out-String) }
+        $text = $output | Out-String
+        # Flat: the output without any whitespace. An error that comes through a console is wrapped at
+        # its width (even inside a word), so messages are matched against it (Get-Flat on both sides).
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $text; Flat = (Get-Flat $text) }
     }
+    function Get-Flat([string]$Text) { $Text -replace '\s+', '' }
     function Get-ZipEntry([string]$Path) {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
         try { @($archive.Entries | ForEach-Object { $_.FullName }) } finally { $archive.Dispose() }
@@ -51,9 +55,15 @@ BeforeAll {
     function Get-Leftover([string]$Destination) {
         @(Get-ChildItem -LiteralPath (Split-Path $Destination -Parent) -Force | Where-Object { $_.Name -like "$(Split-Path $Destination -Leaf).new-*" -or $_.Name -like "$(Split-Path $Destination -Leaf).old-*" })
     }
-    # Elevated, a destination must be under folders only administrators can change: TestDrive is not.
+    # Elevated, a destination must be under folders only administrators can change: TestDrive is not,
+    # and neither is %SystemRoot%\Temp on a GitHub runner (Users can rename or delete it there). The
+    # folder goes at the root of the system drive, or under Program Files when the root is not trusted,
+    # with the access list the installer gives its own folders; AfterAll removes it.
     function New-TrustedParent {
-        $path = Join-Path $env:SystemRoot ('Temp\windows-tuneup-test-' + [guid]::NewGuid().ToString('N'))
+        $name = 'windows-tuneup-test-' + [guid]::NewGuid().ToString('N')
+        $candidates = @((Join-Path ($env:SystemDrive + '\') $name), (Join-Path ([Environment]::GetFolderPath('ProgramFiles')) $name))
+        $path = @($candidates | Where-Object { -not (Get-InstallParentProblem -Path (Join-Path $_ 'child')) } | Select-Object -First 1)[0]
+        if (-not $path) { throw "No folder that only administrators can change was found for the test: $(Get-InstallParentProblem -Path (Join-Path $candidates[0] 'child'))" }
         New-InstallFolder -Path $path -Security (New-InstallFolderSecurity)
         $script:TrustedParents += $path
         $path
@@ -176,12 +186,13 @@ Describe 'install.ps1' {
         $destination = Get-TestDestination 'installed'
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
         $run.ExitCode | Should -Be 0 -Because $run.Output
-        $run.Output | Should -Match "SHA256 checked: $($Built.ZipSha256.ToUpperInvariant())"
+        $run.Flat | Should -Match (Get-Flat "SHA256 checked: $($Built.ZipSha256.ToUpperInvariant())")
         Test-Path -LiteralPath (Join-Path $destination 'engine\Tuneup.psm1') | Should -BeTrue
         [System.IO.File]::ReadAllText((Join-Path $destination '.windows-tuneup')).Trim() | Should -Be $Version
         Get-Leftover $destination | Should -BeNullOrEmpty
-        $plan = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $destination 'tuneup.ps1') -StateRoot (Join-Path $TestDrive 'state') -WhatIf -Json
-        $LASTEXITCODE | Should -Be 0
+        # -Force: on Windows Server (a GitHub runner) the tool refuses to plan without it.
+        $plan = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $destination 'tuneup.ps1') -StateRoot (Join-Path $TestDrive 'state') -Force -WhatIf -Json
+        $LASTEXITCODE | Should -Be 0 -Because ($plan | Out-String)
         ($plan | Out-String | ConvertFrom-Json).toolVersion | Should -Be $Version
     }
 
@@ -214,7 +225,7 @@ Describe 'install.ps1' {
         [System.IO.File]::WriteAllText((Join-Path $other 'keep.txt'), 'mine')
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $other)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'is not a copy of windows-tuneup'
+        $run.Flat | Should -Match (Get-Flat 'is not a copy of windows-tuneup')
         Test-Path -LiteralPath (Join-Path $other 'keep.txt') | Should -BeTrue
         Get-Leftover $other | Should -BeNullOrEmpty
     }
@@ -242,7 +253,7 @@ Describe 'install.ps1' {
             $holder.WaitForExit()
         }
         $run.ExitCode | Should -Be 1
-        ($run.Output -replace '\s+', ' ') | Should -Match 'could not be moved aside .* Nothing was installed\. The earlier copy in .* is as it was'
+        $run.Flat | Should -Match (Get-Flat 'could not be moved aside .* Nothing was installed\. The earlier copy in .* is as it was')
         @(Get-ChildItem -LiteralPath $destination -Recurse -Force).Count | Should -Be $before
         Get-Leftover $destination | Should -BeNullOrEmpty
         (Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)).ExitCode | Should -Be 0
@@ -270,14 +281,14 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
     It 'fails on a parameter it does not have' {
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destinaton', (Join-Path $TestDrive 'typo'))
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'Destinaton'
+        $run.Flat | Should -Match (Get-Flat 'Destinaton')
     }
 
     It 'installs nothing when the SHA256 does not match' {
         $destination = Get-TestDestination 'mismatch'
         $run = Invoke-Installer (Join-Path $Repo 'install.ps1') @('-Version', $Version, '-Sha256', ('0' * 64), '-Source', $Dist, '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'it is not that release. Nothing was installed.'
+        $run.Flat | Should -Match (Get-Flat 'it is not that release. Nothing was installed.')
         Test-Path -LiteralPath $destination | Should -BeFalse
         Get-Leftover $destination | Should -BeNullOrEmpty
     }
@@ -285,14 +296,14 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
     It 'asks for a version and a SHA256 when it is the copy of the repository' {
         $run = Invoke-Installer (Join-Path $Repo 'install.ps1') @('-Source', $Dist, '-Destination', (Join-Path $TestDrive 'none'))
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'has no release in it'
+        $run.Flat | Should -Match (Get-Flat 'has no release in it')
     }
 
     It 'only downloads over HTTPS' {
         $destination = Join-Path $TestDrive 'plain-http'
         $run = Invoke-Installer $Built.Installer @('-Source', 'http://example.invalid/releases', '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'only downloads over HTTPS'
+        $run.Flat | Should -Match (Get-Flat 'only downloads over HTTPS')
         Test-Path -LiteralPath $destination | Should -BeFalse
     }
 
@@ -309,7 +320,7 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         $destination = Get-TestDestination ('out-' + [guid]::NewGuid().ToString('N'))
         $run = Invoke-Installer (Join-Path $Repo 'install.ps1') @('-Version', '9.9.9', '-Sha256', $hash, '-Source', $source, '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match $Message
+        $run.Flat | Should -Match (Get-Flat $Message)
         Test-Path -LiteralPath $destination | Should -BeFalse
         Get-Leftover $destination | Should -BeNullOrEmpty
     }
@@ -320,7 +331,7 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         $destination = Get-TestDestination 'not-a-release-out'
         $run = Invoke-Installer (Join-Path $Repo 'install.ps1') @('-Version', '9.9.9', '-Sha256', $hash, '-Source', $source, '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'is not a release of windows-tuneup'
+        $run.Flat | Should -Match (Get-Flat 'is not a release of windows-tuneup')
         Test-Path -LiteralPath $destination | Should -BeFalse
         Get-Leftover $destination | Should -BeNullOrEmpty
     }
@@ -330,7 +341,7 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         New-Item -ItemType Directory -Path $folder | Out-Null
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist) -WorkingFolder $folder
         $run.ExitCode | Should -Be 0
-        $run.Output | Should -Match 'never as administrator'
+        $run.Flat | Should -Match (Get-Flat 'never as administrator')
         Test-Path -LiteralPath (Join-Path $folder "$Top\tuneup.ps1") | Should -BeTrue
     }
 
@@ -371,7 +382,7 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         }
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        $run.Output | Should -Match 'cannot be trusted'
+        $run.Flat | Should -Match (Get-Flat 'cannot be trusted')
         Get-Leftover $destination | Should -BeNullOrEmpty
     }
 
@@ -379,7 +390,7 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         $destination = Join-Path $TestDrive 'elevated-in-user-folder'
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
         $run.ExitCode | Should -Be 1
-        ($run.Output -replace '\s+', ' ') | Should -Match 'The folders above .* cannot be trusted'
+        $run.Flat | Should -Match (Get-Flat 'The folders above .* cannot be trusted')
         Test-Path -LiteralPath $destination | Should -BeFalse
         Get-Leftover $destination | Should -BeNullOrEmpty
     }
