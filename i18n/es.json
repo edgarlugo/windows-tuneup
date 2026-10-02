@@ -238,7 +238,7 @@
   "suggest.signal.laptop": "Batería (portátil)",
   "suggest.signal.work": "Unido a una organización (dominio, Entra ID o MDM)",
   "suggest.signal.legacy": "Equipo modesto (menos de 8 GB de RAM o disco duro mecánico)",
-  "suggest.signal.managed": "Administrado por una organización (directivas o MDM)",
+  "suggest.signal.managed": "Administrado por una organización (unido a un dominio o MDM)",
   "suggest.profiles": "Perfiles sugeridos: {0}",
   "suggest.try": "Para ver el plan: .\\tuneup.ps1 -Profile {0} -WhatIf",
   "suggest.questions": "Solo tú puedes decidir:",
@@ -252,7 +252,7 @@
   "err.resultIdInvalid": "-ResultId lleva de 8 a 64 letras (A-Z), dígitos o guiones, y empieza por una letra o un dígito, como un GUID. No se hizo nada.",
   "err.resultIdExists": "El resultado {0} ya existe: usa otro -ResultId. No se hizo nada.",
   "err.readResultInvalid": "-ReadResult lleva de 8 a 64 letras (A-Z), dígitos o guiones, y empieza por una letra o un dígito, como un GUID. No se leyó nada.",
-  "err.readResultMissing": "No hay un resultado {0}. Si una ventana elevada corrió el comando, se negó antes de empezar: corre el mismo comando en PowerShell como administrador para ver por qué.",
+  "err.readResultMissing": "No hay un resultado {0}. Si una ventana elevada corrió el comando, se negó antes de empezar (código de salida 1: corre el mismo comando en PowerShell como administrador para ver por qué) o se detuvo antes de escribirlo, con Ctrl+C o porque no pudo guardar su documento (código de salida 2: revisa con -Status lo que quedó aplicado).",
   "err.readResultIncomplete": "El resultado {0} no está completo: el comando sigue corriendo o se cortó antes de terminar (se cerró su ventana). Revisa lo aplicado con -Status.",
   "err.readResultUntrusted": "No se leyó el resultado {0}: el archivo, o la carpeta {1} que lo guarda, no está protegido como el estado del equipo, así que una cuenta que no es administradora pudo escribirlo. Borra {1} como administrador y vuelve a correr el comando."
 }

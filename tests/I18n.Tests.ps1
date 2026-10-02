@@ -41,6 +41,18 @@ Describe 'i18n' {
         }
     }
 
+    It 'says what the rule of a managed PC is and why a result can be missing, in both languages' {
+        $es = Get-Content -LiteralPath (Join-Path $I18nRoot 'es.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $en = Get-Content -LiteralPath (Join-Path $I18nRoot 'en.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        # managed = joined to a domain or enrolled in MDM (the rule of environment.isManaged).
+        $es.'suggest.signal.managed' | Should -Match 'dominio o MDM'
+        $en.'suggest.signal.managed' | Should -Match 'domain or MDM'
+        # No result: refused before it started, or stopped (Ctrl+C, exit 2) before it wrote.
+        $es.'err.readResultMissing' | Should -Match 'Ctrl\+C'
+        $en.'err.readResultMissing' | Should -Match 'Ctrl\+C'
+        $en.'err.readResultMissing' | Should -Match 'exit code 2'
+    }
+
     It 'formats texts with arguments' {
         Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
         Get-TuneupText -Key 'plan.header' -Format 3, 1 | Should -Be 'Plan: 3 to apply, 1 skipped'
