@@ -10350,6 +10350,28 @@ Describe 'docs/json-contract.md' {
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
+    It 'builds documents with the nested fields that matter, so the check is not empty' {
+        $paths = @{}
+        foreach ($name in $Documents.Keys) { $paths[$name] = @(Get-JsonPath $Documents[$name]) }
+        $paths.plan | Should -Contain 'preflight[].id'
+        $paths.plan | Should -Contain 'items[].signOutRequired'
+        $paths.apply | Should -Contain 'results[].refused'
+        $paths.apply | Should -Contain 'summary.interrupted'
+        $paths.apply | Should -Contain 'environment.pendingReboot'
+        $paths.undo | Should -Contain 'results[].signOutRequired'
+        $paths.undo | Should -Contain 'results[].manual'
+        $paths.measure | Should -Contain 'comparison.items[].afterNote'
+        $paths.measure | Should -Contain 'measurement.notes.bootDurationMs'
+        $paths.health | Should -Contain 'after.componentStore.operationResult'
+        $paths.health | Should -Contain 'before.corruptComponents[].files'
+        $paths.error | Should -Contain 'details'
+    }
+
+    It 'catches a field that the page does not name' {
+        $document = [pscustomobject]@{ schemaVersion = 1; command = 'error'; toolVersion = '0'; warnings = @(); message = 'x'; details = @(); invented = 1 }
+        @(Get-UndocumentedPath 'error' $document) -join ',' | Should -Be 'error: invented'
+    }
+
     It 'names every field of the <Command> document' -TestCases @(
         @{ Command = 'plan' }
         @{ Command = 'apply' }
@@ -10407,10 +10429,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <carpe
 - [ ] `tuneup.ps1 -Status`: no hay ajustes aplicados.
 - [ ] Reiniciar, iniciar sesión y correr `tuneup.ps1 -Measure -IdleSeconds 120`.
 - [ ] `tuneup.ps1` sin parámetros abre el menú, en la consola clásica de Windows PowerShell y en Windows Terminal; cada opción se recorre solo con el teclado.
-- [ ] Menú > Optimizar > `lite`: aparece el aviso de Restaurar sistema desactivado; responder sí lo activa (comprobar en Propiedades del sistema) y la corrida informa "Punto de restauración creado".
+- [ ] Menú > Optimizar > `lite`: antes de confirmar aparece el aviso "Restaurar sistema está desactivado en el disco del sistema…"; confirmada la corrida, la pregunta de activarla se responde que sí, se comprueba en Propiedades del sistema y la corrida informa "Punto de restauración creado.". Repetir respondiendo que no: sigue sin punto de restauración y con el respaldo de la herramienta.
 - [ ] Las apps que preguntan se responden una por una (sí a todas menos una); las elegidas desaparecen de `Get-AppxPackage -AllUsers` y la otra queda con el motivo "dijiste que no".
 - [ ] OneDrive con Escritorio, Documentos o Imágenes en OneDrive: `apps.onedrive` queda negado (`onedrive-known-folders`); sin esas carpetas pero con archivos solo en la nube, negado (`onedrive-online-only-files`); sin nada de eso, se desinstala.
-- [ ] Ctrl+C durante una corrida larga de `lite`: termina el ajuste en curso, el resumen dice "Detenido con Ctrl+C" y el código de salida es 2.
+- [ ] Ctrl+C durante una corrida larga de `lite` (línea de comandos): termina el ajuste en curso, el resumen dice "Detenido con Ctrl+C" y el código de salida es 2; `tuneup.ps1 -Undo last` restaura lo aplicado.
+- [ ] Ctrl+C mientras corre un programa nativo (por ejemplo winget al deshacer apps) y con `-Json`: la salida estándar queda vacía, el código de salida es 2 y el documento está en `result.json` de la carpeta más nueva de `runs` (`docs/json-contract.md`, sección `apply`).
+- [ ] `transcript.log` de la carpeta de la corrida cuenta lo que se vio y no contiene el nombre de la cuenta ni la carpeta del perfil.
 - [ ] Reiniciar; `tuneup.ps1 -Status` muestra todo `ok`; `tuneup.ps1 -Measure -IdleSeconds 120 -Compare last` da la diferencia.
 - [ ] `tuneup.ps1 -Undo last` (las veces que haga falta, hasta "No hay corridas para deshacer"): las apps se reinstalan con winget (motivo "reinstalada desde Microsoft Store para el usuario actual"), OneDrive se reinstala y `-Status` queda vacío.
 - [ ] Contra la instantánea: las apps volvieron (su versión puede ser otra) y OneDrive sincroniza otra vez después de iniciar sesión.
@@ -10454,10 +10478,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <folde
 - [ ] `tuneup.ps1 -Status`: no tweak is applied.
 - [ ] Restart, sign in and run `tuneup.ps1 -Measure -IdleSeconds 120`.
 - [ ] `tuneup.ps1` without parameters opens the menu, in the classic Windows PowerShell console and in Windows Terminal; every option works with the keyboard only.
-- [ ] Menu > Optimize > `lite`: the warning about System Restore being off appears; answering yes turns it on (check in System Properties) and the run reports `Restore point created`.
+- [ ] Menu > Optimize > `lite`: before confirming, the warning "System Restore is turned off on the system drive..." appears; once the run is confirmed, answer yes to the question about turning it on, check it in System Properties, and the run reports "Restore point created.". Repeat answering no: it goes on without a restore point, with the backup of the tool only.
 - [ ] The apps that ask first are answered one by one (yes to all but one); the chosen ones disappear from `Get-AppxPackage -AllUsers` and the other one stays with the reason "you said no".
 - [ ] OneDrive with Desktop, Documents or Pictures in OneDrive: `apps.onedrive` is refused (`onedrive-known-folders`); without those folders but with files only in the cloud, refused (`onedrive-online-only-files`); with neither, it is uninstalled.
-- [ ] Ctrl+C during a long `lite` run: the tweak in progress finishes, the summary says "Stopped with Ctrl+C" and the exit code is 2.
+- [ ] Ctrl+C during a long `lite` run (command line): the tweak in progress finishes, the summary says "Stopped with Ctrl+C" and the exit code is 2; `tuneup.ps1 -Undo last` restores what was applied.
+- [ ] Ctrl+C while a native program runs (for example winget when undoing apps) and with `-Json`: the standard output stays empty, the exit code is 2 and the document is the `result.json` of the newest folder under `runs` (`docs/json-contract.md`, section `apply`).
+- [ ] `transcript.log` in the run folder tells what was shown and holds neither the account name nor the profile folder.
 - [ ] Restart; `tuneup.ps1 -Status` shows everything `ok`; `tuneup.ps1 -Measure -IdleSeconds 120 -Compare last` gives the difference.
 - [ ] `tuneup.ps1 -Undo last` (as many times as needed, until "There are no runs to undo"): the apps are reinstalled with winget (reason "reinstalled from the Microsoft Store"), OneDrive is reinstalled and `-Status` is empty.
 - [ ] Against the snapshot: the apps are back (their version may differ) and OneDrive syncs again after signing in.
@@ -10485,7 +10511,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 - Every document has `schemaVersion` (`1`), `command`, `toolVersion` and `warnings`. A field is never removed or renamed within a `schemaVersion`; new fields can appear, so readers ignore what they do not know.
 - The exit code completes the document: `0` everything done, `2` not everything was done (read the document), `1` nothing was done or it could not start (the document is usually an `error`).
 - An unknown parameter or a `-Lang` other than `es`/`en` is rejected by PowerShell itself: no JSON document, exit code `1`.
-- `-Json` never asks anything. Applying needs `-Yes`; without it a plan with changes ends in an `error` (exit `1`). Without a command and without `-Json` the tool opens the menu, which has no JSON output.
+- `-Json` never asks anything. Applying needs `-Yes` (or `-WhatIf` to only see the plan); without either, a plan with changes ends in an `error` (exit `1`), `-Json` alone included. Without a command and without `-Json` the tool opens the menu, which has no JSON output.
 - Texts meant for people (`title`, `message`, `detail`, `error`, `warnings`) follow `-Lang`; ids, statuses and reasons never change with the language.
 
 | Command line | `command` of the document |
@@ -10493,7 +10519,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 | `-WhatIf -Json`, or nothing to apply | `plan` |
 | `-Yes -Json` | `apply` (or `plan` when there was nothing to apply) |
 | `-Status -Json` | `status` |
-| `-Status -Reapply -Json` with `-WhatIf` or `-Yes` | `plan` or `apply`, with `source` = `reapply` |
+| `-Status -Reapply -WhatIf -Json` or `-Status -Reapply -Yes -Json` | `plan` or `apply`, with `source` = `reapply` (a `plan` with no items when nothing drifted; without `-WhatIf` or `-Yes`, something to apply ends in an `error`) |
 | `-Undo <id\|last> [-Tweak <id>] -Json` | `undo` |
 | `-Health [-Repair] -Json` | `health` |
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>] -Json` | `measure` |
@@ -10512,7 +10538,7 @@ Fields that several documents carry.
 | `environment.build` | number | Windows build (`CurrentBuild`). |
 | `environment.ubr` | number | Update build revision. |
 | `environment.family` | string | `10` or `11`. |
-| `environment.edition` | string | `Home`, `Pro`, `Enterprise`, `Education` or `Server` (`Server` plans as `Enterprise` with `-Force`). |
+| `environment.edition` | string | `Home`, `Pro`, `Enterprise`, `Education`, `Server` or `Unknown`. `Server` and `Unknown` are refused with an `error` unless `-Force`; a Server then plans as `Enterprise` and the document says `Enterprise`. |
 | `environment.isServer` | boolean | Windows Server. |
 | `environment.isManaged` | boolean | Joined to a domain or enrolled in MDM (Intune): policies are skipped. |
 | `environment.isAdmin` | boolean | The process is elevated. |
@@ -10581,7 +10607,7 @@ Also saved, without `warnings` and `toolVersion`, as `result.json` in the run fo
 
 Exit code: `0` everything applied (refusals and skips included); `2` something partial, not applied, failed, interrupted after a change, or a backup or `result.json` not saved; `1` nothing changed (no backup could be written, or Ctrl+C before the first tweak).
 
-Ctrl+C with `-Json`: when it reaches the console as a key (between two tweaks, with a console of its own) the usual `apply` document comes out, with `interrupted` true and the exit code above. When it stops PowerShell itself (a native program such as DISM or winget was running) nothing is written to the standard output: the exit code is `2` and the document is the `result.json` of the newest folder under `runs` of the state folder (the tweak that was cut is `failed`, with its journal entry, so `-Undo last` restores it; the ones not reached are `interrupted`). A caller must read an empty output with exit code `2` as "look at `result.json`". A failure that is not Ctrl+C leaves the same `result.json` with the tweaks not reached as `aborted`, and the error report on the standard output.
+Ctrl+C with `-Json`: when it reaches the console as a key (between two tweaks, with a console of its own) the usual `apply` document comes out, with `interrupted` true and the exit code above. When it stops PowerShell itself (a native program such as DISM or winget was running) nothing is written to the standard output: the exit code is `2` and the document is the `result.json` of the newest folder under `runs` of the state folder (the tweak that was cut is `failed`, with its journal entry, so `-Undo last` restores it; the ones not reached are `interrupted`). A caller must read an empty output with exit code `2` as "look at `result.json`". A failure that is not Ctrl+C (an unexpected error in the middle of the run) leaves the same `result.json`, with the tweaks not reached as `aborted`, and the standard output has an `error` document with exit code `1`.
 
 ## `status`
 
@@ -10691,6 +10717,19 @@ Exit code: `0` no problems (`recommendation` = `none`), `2` problems remain or t
 | `details` | string[] | More lines (for example, each problem of the catalog). |
 
 Exit code: `1`.
+
+## Run folder
+
+Not a document of the standard output, but what a caller reads after a run: `runs\<runId>` under the state folder (`%ProgramData%\windows-tuneup` when elevated, `%LOCALAPPDATA%\windows-tuneup` otherwise). Every `.json` file is UTF-8.
+
+| File | What it holds |
+|---|---|
+| `run.json` | `schemaVersion`, `toolVersion`, `userSid`, `machine` (the run is in the protected machine folder), `createdAt`. |
+| `plan.json` | The plan that was confirmed: an array with the fields of `items[]` of `plan`. |
+| `snapshot.jsonl` | The journal: one JSON line per tweak with its `id`, the tweak itself and the state before the change, written before each change. `-Undo` restores from it. |
+| `result.json` | The `apply` document (see `apply`). |
+| `transcript.log` | What was shown to people, without the account name; each `-Undo` adds its own section. |
+| `undone.json`, `undone-tweaks.txt` | The run was undone (`undoneAt` and the `results` of the undo), or the tweaks of it already restored one by one. |
 ```
 
 - [ ] **Step 5: Verificar que pasan**
@@ -10699,7 +10738,7 @@ Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path t
 Expected: PASS (`Tests Passed: 12, Failed: 0`).
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/JsonContract.Tests.ps1`
-Expected: PASS (`Tests Passed: 7, Failed: 0`). Si falla, el mensaje lista cada campo sin nombrar (`apply: summary.interrupted`): agregarlo a la sección de ese comando.
+Expected: PASS (`Tests Passed: 9, Failed: 0`: los siete documentos más una prueba de que el chequeo no está vacío y otra de que detecta un campo sin nombrar). Si falla, el mensaje lista cada campo sin nombrar (`apply: summary.interrupted`): agregarlo a la sección de ese comando.
 
 - [ ] **Step 6: Commit**
 
@@ -10802,7 +10841,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tuneup.ps1 -Measure -IdleS
 
 ### Menú / Menu
 
-Sin parámetros, `tuneup.ps1` abre un menú en la consola (Windows PowerShell o Windows Terminal), solo con el teclado: cada respuesta es un número o una letra y Enter. Optimizar elige los perfiles (marca `(administrador)` los que lo necesitan), ofrece aparte los ajustes de riesgo alto (hay que escribir `si` completo para agregarlos), pregunta uno por uno los ajustes que preguntan antes (`s`, `n`, `t` = sí a todos los que quedan, `x` = no a todos los que quedan), muestra el plan con sus avisos y pide confirmación. También: Estado (y volver a aplicar lo que Windows revirtió), Deshacer (una corrida o un ajuste, elegidos de una lista), Salud (y reparar si hace falta) y Medir.
+Sin parámetros, `tuneup.ps1` abre un menú en la consola (Windows PowerShell o Windows Terminal), solo con el teclado: cada respuesta es un número o una letra y Enter. Optimizar elige los perfiles (marca `(administrador)` los que lo necesitan), ofrece aparte los ajustes de riesgo alto (hay que escribir `sí` completo para agregarlos), pregunta uno por uno los ajustes que preguntan antes (`s`, `n`, `t` = sí a todos los que quedan, `x` = no a todos los que quedan), muestra el plan con sus avisos y pide confirmación. También: Estado (y volver a aplicar lo que Windows revirtió), Deshacer (una corrida o un ajuste, elegidos de una lista), Salud (y reparar si hace falta) y Medir.
 Without parameters, `tuneup.ps1` opens a menu in the console (Windows PowerShell or Windows Terminal), keyboard only: every answer is a number or a letter and Enter. Optimize picks the profiles (it marks with `(administrator)` the ones that need it), offers the high-risk tweaks apart (typing `yes` in full adds them), asks one by one about the tweaks that ask first (`y`, `n`, `a` = yes to all the rest, `x` = no to all the rest), shows the plan with its warnings and asks for confirmation. Also: Status (and apply again what Windows reverted), Undo (a run or one tweak, picked from a list), Health (and repair when needed) and Measure.
 
 ### Parámetros / Parameters
@@ -10897,7 +10936,7 @@ Measurements are kept in `measurements\` inside the same state folder as the run
 
 | Comando / Command | 0 | 2 | 1 |
 |---|---|---|---|
-| Aplicar / Apply | Todo hecho (o nada que aplicar). / Everything done (or nothing to apply). | No todo se completó: algún ajuste parcial, fallido o sin efecto, Ctrl+C después de algún cambio, o no se pudo guardar un respaldo o `result.json`; leer el resumen. / Not everything completed: some tweak was partial, failed or had no effect, Ctrl+C after some change, or a backup or `result.json` could not be saved; read the summary. | Abortado antes de cambiar nada (respuesta negativa, sin administrador, argumentos o catálogo inválidos, ningún respaldo se pudo escribir, Ctrl+C antes del primer ajuste). / Aborted before changing anything (answered no, not administrator, invalid arguments or catalog, no backup could be written, Ctrl+C before the first tweak). |
+| Aplicar / Apply | Todo hecho (o nada que aplicar). / Everything done (or nothing to apply). | No todo se completó: algún ajuste parcial, fallido o sin efecto, Ctrl+C después de algún cambio, o no se pudo guardar un respaldo o `result.json`; leer el resumen. / Not everything completed: some tweak was partial, failed or had no effect, Ctrl+C after some change, or a backup or `result.json` could not be saved; read the summary. | Abortado antes de cambiar nada (respuesta negativa, sin administrador, argumentos o catálogo inválidos, ningún respaldo se pudo escribir, Ctrl+C antes del primer ajuste), o un error inesperado a mitad de la corrida (el resultado queda guardado, con lo no alcanzado como `aborted`, y `-Undo last` lo deshace). / Aborted before changing anything (answered no, not administrator, invalid arguments or catalog, no backup could be written, Ctrl+C before the first tweak), or an unexpected error in the middle of the run (the result is saved, with what was not reached as `aborted`, and `-Undo last` undoes it). |
 | `-Undo` | Todo restaurado (lo ya deshecho no cuenta). / Everything restored (what was already undone does not count). | Restauración parcial: quedan fallos o ajustes de otro usuario. / Partly restored: failures or another user's tweaks remain. | Nada se restauró, o no se pudo empezar. / Nothing was restored, or it could not start. |
 | `-Status` | Siempre. / Always. | | Error al leer. / Read error. |
 | `-Health` | Sin problemas (`recommendation` = `none`). / No problems (`recommendation` = `none`). | Quedan problemas o no se pudo confirmar el resultado. / Problems remain or the result could not be confirmed. | Sin administrador. / Not administrator. |
@@ -10924,6 +10963,9 @@ Every document carries `schemaVersion` (currently `1`), `command`, `toolVersion`
 | `health` | `startedAt`, `finishedAt`, `repairRequested`, `repairRan`, `before`, `after` (`sfc`, `componentStore`, `corruptComponents`), `recommendation`, `rebootRecommended` |
 | `measure` | `id`, `path`, `measurement` (`takenAt`, `idleSeconds`, `environment`, `metrics`, `notes`), `comparison` (`againstId`, `items` con `metric`, `before`, `after`, `delta`; nulo sin `-Compare` / null without `-Compare`) |
 | `error` | `message`, `details` |
+
+Con `-Json`, Ctrl+C entre dos ajustes da el documento `apply` de siempre con `interrupted` verdadero y código 2; si detiene PowerShell mismo (corría DISM o winget) la salida queda vacía, el código es 2 y el documento es el `result.json` de la carpeta más nueva de `runs` (con la carpeta del perfil y el nombre de la cuenta ocultos). Detalle en [docs/json-contract.md](docs/json-contract.md).
+With `-Json`, Ctrl+C between two tweaks gives the usual `apply` document with `interrupted` true and code 2; if it stops PowerShell itself (DISM or winget was running) the output is empty, the code is 2 and the document is the `result.json` of the newest folder under `runs` (with the profile folder and the account name hidden). Details in [docs/json-contract.md](docs/json-contract.md).
 
 ## Limitaciones conocidas / Known limitations
 
