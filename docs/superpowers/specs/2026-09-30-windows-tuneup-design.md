@@ -359,10 +359,12 @@ otra carpeta.
 Con `-Json` la salida estándar es un solo documento JSON en ASCII (todo carácter no ASCII va
 como `\uXXXX`, así que la página de códigos de la consola no lo altera), con las claves en
 camelCase y el arreglo `warnings`. El plan indica `requiresAdmin` cuando tiene cambios de
-sistema; sin `-Json` y sin elevar, `-WhatIf` lo recuerda con una línea. Un error anterior a que
-el script cargue su módulo y sus textos (por ejemplo, un parámetro desconocido o un `-Lang`
-fuera de `es`/`en`) lo informa PowerShell por la salida de errores, sin documento JSON, con
-código `1`.
+sistema; sin `-Json` y sin elevar, `-WhatIf` lo recuerda con una línea. Un parámetro
+desconocido o mal escrito, o un valor sin el nombre de su parámetro (los parámetros nunca son
+posicionales), termina con un error (en JSON con `-Json`) y código `1`, sin hacer nada (sección
+12, revisión final). Un valor que PowerShell no acepta (un `-Lang` fuera de `es`/`en`, un
+`-IdleSeconds` que no es un número) lo informa PowerShell por la salida de errores, sin
+documento JSON, con código `1`.
 
 ### Medición
 

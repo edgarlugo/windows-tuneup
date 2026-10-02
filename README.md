@@ -180,8 +180,8 @@ Measurements are kept in `measurements\` inside the same state folder as the run
 | `-Measure` | Medición guardada. / Measurement saved. | | No pudo medir o guardar, o `-Compare` no encontró la medición. / It could not measure or save, or `-Compare` did not find the measurement. |
 | Menú / Menu | Al salir. / On exit. | | |
 
-Un parámetro desconocido o un `-Lang` fuera de `es`/`en` lo informa PowerShell por la salida de errores, sin documento JSON, con código 1.
-An unknown parameter or a `-Lang` other than `es`/`en` is reported by PowerShell on the error stream, without a JSON document, with code 1.
+Un parámetro desconocido o mal escrito, o un valor sin el nombre de su parámetro (los parámetros nunca son posicionales), termina con un error (en JSON con `-Json`) y código 1, sin hacer nada. Un valor que PowerShell no acepta (un `-Lang` fuera de `es`/`en`, un `-IdleSeconds` que no es un número) lo informa PowerShell por la salida de errores, sin documento JSON, con código 1.
+An unknown or misspelled parameter, or a value without its parameter name (parameters are never positional), ends with an error (in JSON with `-Json`) and code 1, doing nothing. A value PowerShell does not take (a `-Lang` other than `es`/`en`, an `-IdleSeconds` that is not a number) is reported by PowerShell on the error stream, without a JSON document, with code 1.
 
 ## Salida JSON / JSON output
 

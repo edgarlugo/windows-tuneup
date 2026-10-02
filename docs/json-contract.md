@@ -7,7 +7,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 - Standard output is **one** JSON document, ASCII only (every non-ASCII character is `\uXXXX`), with camelCase keys. Nothing else is printed around it; warnings go inside it.
 - Every document has `schemaVersion` (`1`), `command`, `toolVersion` and `warnings`. A field is never removed or renamed within a `schemaVersion`; new fields can appear, so readers ignore what they do not know.
 - The exit code completes the document: `0` everything done, `2` not everything was done (read the document), `1` nothing was done or it could not start (the document is usually an `error`).
-- An unknown parameter or a `-Lang` other than `es`/`en` is rejected by PowerShell itself: no JSON document, exit code `1`.
+- An unknown or misspelled parameter, or a value without its parameter name (parameters are never positional), ends in an `error` document (exit `1`) and nothing is done. A value PowerShell cannot take (a `-Lang` other than `es`/`en`, an `-IdleSeconds` that is not a number) is rejected by PowerShell itself: no JSON document, exit code `1`.
 - `-Json` never asks anything. Applying needs `-Yes` (or `-WhatIf` to only see the plan); without either, a plan with changes ends in an `error` (exit `1`), `-Json` alone included. Without a command and without `-Json` the tool opens the menu, which has no JSON output.
 - Texts meant for people (`title`, `message`, `detail`, `error`, `warnings`) follow `-Lang`; ids, statuses and reasons never change with the language.
 

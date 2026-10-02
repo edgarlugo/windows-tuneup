@@ -416,6 +416,28 @@ Describe 'tuneup.ps1' {
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
 
+    It 'rejects an unknown parameter <Arguments> with an error document, doing nothing' -TestCases @(
+        @{ Arguments = @('-Bogus'); Unknown = '-Bogus' }
+        @{ Arguments = @('-Profile', 'extra', '-Exlude', 'test.three', '-Yes'); Unknown = '-Exlude test.three' }
+        @{ Arguments = @('base', '-Yes'); Unknown = 'base' }
+    ) {
+        param($Arguments, $Unknown)
+        $result = Invoke-Tuneup (@($Arguments) + '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.message | Should -Match ('Unknown parameter or value without a parameter name: ' + [regex]::Escape($Unknown))
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $script:Root 'runs') | Should -BeFalse
+    }
+
+    It 'rejects a misspelled parameter without -Json before planning anything' {
+        $result = Invoke-Tuneup @('-Profile', 'extra', '-Exlude', 'test.three', '-WhatIf')
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match 'Unknown parameter or value without a parameter name: -Exlude test\.three'
+        $result.Output | Should -Not -Match 'Test one'
+    }
+
     It 'refuses -Health without elevation' -Skip:$Elevated {
         $result = Invoke-Tuneup @('-Health', '-Json')
         $result.ExitCode | Should -Be 1

@@ -10,6 +10,7 @@
   "err.runNotFound": "Run {0} does not exist.",
   "err.runAlreadyUndone": "Run {0} was already undone.",
   "err.badArgs": "Invalid parameter combination: {0}",
+  "err.unknownArgs": "Unknown parameter or value without a parameter name: {0}. Nothing was done; the parameters are in the README (Usage).",
   "err.actionsPathMissing": "The actions folder {0} does not exist.",
   "err.actionsPathNotFolder": "{0} is not a folder: -ActionsPath expects the actions folder.",
   "undo.none": "There are no runs to undo.",
