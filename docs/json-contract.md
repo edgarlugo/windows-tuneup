@@ -55,8 +55,12 @@ Fields that several documents carry.
 | `items` | object[] | One per tweak considered, in order. |
 | `items[].id` | string | Tweak id. |
 | `items[].title` | string | Tweak title in the language of the run. |
+| `items[].why` | string | What the tweak does and why, in the language of the run. |
 | `items[].risk` | string | `low`, `medium` or `high`. |
+| `items[].ask` | boolean | The tweak asks before it is applied: a profile alone leaves it out (`needs-confirmation`); `-Include <id>` asks for it by name. |
 | `items[].scope` | string | `user` or `machine`. |
+| `items[].type` | string | Kind of change: `registry`, `service`, `task`, `appx`, `capability`, `feature`, `powercfg` or `action`. |
+| `items[].needsAdmin` | boolean | Applying it needs elevation: a machine change, or a policy under `HKCU`. |
 | `items[].action` | string | `apply` or `skip`. |
 | `items[].reason` | string or null | Why it is skipped: `excluded`, `kept-by-profile`, `incompatible`, `not-applicable-hardware`, `managed-device`, `session-user`, `already-applied`, `not-present`, `state-unreadable`, `high-risk-not-requested`, `needs-confirmation`, `declined` (menu only). An item to apply can carry `unverified-needs-admin` (its state is checked when applied). |
 | `items[].rebootRequired` | boolean | The tweak needs a restart once applied. |

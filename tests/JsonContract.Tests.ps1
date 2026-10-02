@@ -81,6 +81,7 @@ Describe 'docs/json-contract.md' {
         foreach ($name in $Documents.Keys) { $paths[$name] = @(Get-JsonPath $Documents[$name]) }
         $paths.plan | Should -Contain 'preflight[].id'
         $paths.plan | Should -Contain 'items[].signOutRequired'
+        $paths.plan | Should -Contain 'items[].needsAdmin'
         $paths.apply | Should -Contain 'results[].refused'
         $paths.apply | Should -Contain 'summary.interrupted'
         $paths.apply | Should -Contain 'environment.pendingReboot'
