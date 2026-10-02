@@ -206,7 +206,7 @@ function Test-TuneupMenuBlockedByAdministrator {
     if ($environment.IsAdmin) { return $false }
     $needsAdmin = @($Plan | Where-Object { $_.Action -eq 'apply' -and $Ignore -notcontains $_.Id -and (Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak) }).Count
     if (-not $needsAdmin) { return $false }
-    Write-TuneupPlanReport -Plan $Plan -Environment $environment
+    Write-TuneupPlanReport -Plan $Plan -Environment $environment -NoAdminHint
     Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.optimize.needsAdmin')
     $Context.Pause = $true
     $true

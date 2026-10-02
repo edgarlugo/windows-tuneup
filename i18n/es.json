@@ -3,6 +3,7 @@
   "err.server": "windows-tuneup no está pensado para Windows Server. Usa -Force solo si sabes lo que haces.",
   "err.unsupported": "Esta versión de Windows no está soportada (mínimo Windows 10 20H1, build 19041). Usa -Force bajo tu responsabilidad.",
   "err.notAdmin": "Hay cambios de sistema en el plan: abre PowerShell como administrador.",
+  "err.undoNeedsAdmin": "La corrida {0} tiene cambios de sistema: deshacerla necesita PowerShell como administrador.",
   "err.jsonNeedsYes": "Con -Json hay que confirmar con -Yes (o revisar primero con -WhatIf).",
   "err.unknownProfile": "Perfil desconocido: {0}",
   "err.unknownTweak": "Ajuste desconocido: {0}",

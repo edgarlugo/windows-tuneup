@@ -65,6 +65,7 @@ Describe 'Invoke-TuneupMenu' {
         Invoke-Menu $context
         $context.ExitCode | Should -Be 0
         Get-Output $context | Should -Match ' 1\. Optimize: choose profiles and apply them'
+        Get-Output $context | Should -Match ' 4\. Windows health \(SFC and DISM\)'
         Get-Output $context | Should -Match 'Not running as administrator'
         $context = New-MenuContext @($null)
         Invoke-Menu $context
@@ -115,6 +116,7 @@ Describe 'Invoke-TuneupMenu' {
         $context = New-MenuContext @('1', '5', '', 'n', '', '0')
         $text = (Invoke-TuneupMenu -Context $context 3>$null 6>&1 | Out-String)
         $text | Should -Match 'System test'
+        $text | Should -Not -Match 'To apply the system changes'
         Get-Output $context | Should -Match 'This plan has system changes: open PowerShell as administrator'
         Test-Path -LiteralPath $Key | Should -BeFalse
     }
@@ -149,6 +151,22 @@ Describe 'Invoke-TuneupMenu' {
         Get-Value 'High' | Should -Be 5
         Get-Value 'Ask' | Should -Be 1
         Get-Value 'One' | Should -Be 1
+        $context.Io.Pending.Count | Should -Be 0
+    }
+
+    It 'stops applying again what needs administrator before asking anything, like Optimize' {
+        # Two reverted tweaks in a run: one of the system and one that asks first.
+        New-RunFolder -Root $Root -Id '20250101-000000' -Tweaks @((New-TestMachineTweak),
+            (New-TestTweak -Id 'menu.ask' -Ask $true -Set ([pscustomobject]@{ path = $Key; name = 'Ask'; kind = 'DWord'; value = 1 }))) | Out-Null
+        $context = New-MenuContext @('2', 'r', '', '0')
+        $hostText = (Invoke-TuneupMenu -Context $context 3>$null 6>&1 | Out-String)
+        $text = Get-Output $context
+        $text | Should -Match 'This plan has system changes: open PowerShell as administrator'
+        $text | Should -Not -Match 'Title menu\.ask \[low risk\]'
+        # The plan is shown once, with one line about administrator (the menu's, not the plan's).
+        $hostText | Should -Match 'System test'
+        $hostText | Should -Not -Match 'To apply the system changes'
+        Test-Path -LiteralPath 'HKLM:\SOFTWARE\windows-tuneup-test' | Should -BeFalse
         $context.Io.Pending.Count | Should -Be 0
     }
 

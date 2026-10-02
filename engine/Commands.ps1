@@ -120,6 +120,11 @@ function Invoke-TuneupReapply {
     # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those.
     $confirmed = @()
     if ($Interactive) {
+        # Like Optimize: a plan that needs administrator is stopped before any question, unless only
+        # tweaks still to be asked about (that ask first, or of high risk) need it.
+        $preview = @(New-TuneupContextPlan -Context $Context -Definition $definition -Candidates $ids -NoBase -Interactive)
+        $toAsk = @($preview | Where-Object { $_.Action -eq 'apply' -and $_.Tweak.ask } | ForEach-Object { [string]$_.Id })
+        if (Test-TuneupMenuBlockedByAdministrator -Context $Context -Plan $preview -Ignore $toAsk) { return }
         $confirmed = Confirm-TuneupMenuReappliedHighRisk -Context $Context -Catalog $definition.Catalog -Ids $ids
         if ($null -eq $confirmed) { return }
     }
@@ -130,6 +135,7 @@ function Invoke-TuneupReapply {
         $plan = @(foreach ($id in $ids) { $plan | Where-Object { $_.Id -eq $id } })
         $declined = Request-TuneupMenuAskedTweak -Context $Context -Plan $plan -Requested $confirmed
         if ($null -eq $declined) { return }
+        if (Test-TuneupMenuBlockedByAdministrator -Context $Context -Plan $plan) { return }
     }
     $request = New-TuneupApplyRequest -Source 'reapply' -Include $ids -Exclude $declined
     if ($Yes -and -not $PlanOnly -and -not $Context.Json) {
@@ -158,7 +164,7 @@ function Invoke-TuneupUndoCommand {
             Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.tweak }).Count -gt 0
     }
     if ($needsAdmin -and -not $environment.IsAdmin) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.notAdmin')
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.undoNeedsAdmin' -Format $run.Id)
         return
     }
     # Arguments of a step go in a table: PSScriptAnalyzer does not see a parameter used only inside it.

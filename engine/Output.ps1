@@ -54,7 +54,9 @@ function Write-TuneupPlanReport {
         [AllowEmptyCollection()][string[]]$Warnings = @(),
         [AllowEmptyCollection()][object[]]$Preflight = @(),
         [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles',
-        [switch]$Json
+        [switch]$Json,
+        # The caller says it with its own line (the menu, when it stops a plan that needs administrator).
+        [switch]$NoAdminHint
     )
     $items = @(ConvertTo-TuneupPlanView -Plan $Plan)
     $toApply = @($items | Where-Object { $_.action -eq 'apply' }).Count
@@ -83,7 +85,7 @@ function Write-TuneupPlanReport {
         }
     }
     if (-not $toApply) { Write-Host (Get-TuneupText -Key 'nothing') -ForegroundColor Green }
-    if ($requiresAdmin -and -not $Environment.IsAdmin) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
+    if ($requiresAdmin -and -not $Environment.IsAdmin -and -not $NoAdminHint) { Write-Host (Get-TuneupText -Key 'plan.needsAdmin') -ForegroundColor Yellow }
     Write-TuneupPreflight -Preflight $Preflight
 }
 

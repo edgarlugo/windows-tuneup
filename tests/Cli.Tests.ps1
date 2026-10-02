@@ -594,7 +594,7 @@ Describe 'tuneup.ps1' {
         Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak $policy -State ([pscustomobject]@{ exists = $false }) -Root 'custom'
         $result = Invoke-Tuneup @('-Undo', $run.Id, '-Json')
         $result.ExitCode | Should -Be 1
-        (ConvertFrom-PureJson $result.Output).message | Should -Match 'administrator'
+        (ConvertFrom-PureJson $result.Output).message | Should -Match "Run $([regex]::Escape($run.Id)) has system changes: undoing it needs PowerShell as administrator"
     }
 
     It 'refuses to undo a run with a machine-scope entry when not elevated' -Skip:$Elevated {
@@ -604,7 +604,7 @@ Describe 'tuneup.ps1' {
         $result.ExitCode | Should -Be 1
         $json = ConvertFrom-PureJson $result.Output
         $json.command | Should -Be 'error'
-        $json.message | Should -Match 'administrator'
+        $json.message | Should -Match 'undoing it needs PowerShell as administrator'
         Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test' | Should -BeFalse
     }
 }
