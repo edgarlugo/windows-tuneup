@@ -14,6 +14,7 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'a re-apply'; Present = @('Status', 'Reapply') }
         @{ Name = 'a re-apply without asking'; Present = @('Status', 'Reapply', 'Yes') }
         @{ Name = 'the plan of a re-apply'; Present = @('Status', 'Reapply', 'WhatIf') }
+        @{ Name = 'a re-apply of the tweaks it names'; Present = @('Status', 'Reapply', 'Include', 'Yes') }
         @{ Name = 'the list'; Present = @('List') }
         @{ Name = 'the suggestions'; Present = @('Suggest') }
         @{ Name = 'reading a result'; Present = @('ReadResult') }
@@ -37,6 +38,8 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('Status', 'Yes'); Expected = '-Status -Yes' }
         @{ Present = @('Status', 'Reapply', 'Profile'); Expected = '-Status -Profile' }
         @{ Present = @('Status', 'Reapply', 'Exclude', 'Yes'); Expected = '-Status -Exclude' }
+        @{ Present = @('Status', 'Include'); Expected = '-Status -Include' }
+        @{ Present = @('Undo', 'Include'); Expected = '-Undo -Include' }
         @{ Present = @('List', 'Suggest'); Expected = '-List -Suggest' }
         @{ Present = @('Status', 'List'); Expected = '-Status -List' }
         @{ Present = @('Suggest', 'Measure'); Expected = '-Measure -Suggest' }

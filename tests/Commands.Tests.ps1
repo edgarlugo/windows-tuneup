@@ -316,6 +316,54 @@ Describe 'Re-applying what drifted' {
         $human.ExitCode | Should -Be 0
     }
 
+    It 'with -Include re-applies only the drifted tweaks it names, by name, without the base profile' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        # A base tweak that drifted too, and that it does not name.
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.ask', 'rea.a') -Yes })[0]
+        $document.source | Should -Be 'reapply'
+        ($document.results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'rea.a=applied,rea.ask=applied'
+        $values = Get-ItemProperty -LiteralPath $Key
+        "$($values.B),$($values.A),$($values.Ask),$($values.High)" | Should -Be '5,1,1,5'
+        $values.One | Should -Be 5
+    }
+
+    It 'plans with -Include only the named drifted tweaks, a high-risk one too' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.high') -PlanOnly })[0]
+        ($plan.items | ForEach-Object { "$($_.id)=$($_.action)" }) -join ',' | Should -Be 'rea.high=apply'
+    }
+
+    It 'leaves out with a warning a named tweak that did not drift, and refuses an unknown one' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        Set-ItemProperty -LiteralPath $Key -Name 'A' -Value 1
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.b', 'rea.a', 'test.one') -Yes })[0]
+        ($document.results | ForEach-Object { $_.id }) -join ',' | Should -Be 'rea.b'
+        @($document.warnings | Where-Object { $_ -match 'rea\.a' -and $_ -match 'not reverted' }).Count | Should -Be 1
+        @($document.warnings | Where-Object { $_ -match 'test\.one' -and $_ -match 'not reverted' }).Count | Should -Be 1
+        $unknown = New-TestContext -Json
+        $unknown.CatalogPath = Join-Path $dir 'catalog'
+        $unknown.ProfilesPath = Join-Path $dir 'profiles'
+        $refusal = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $unknown -Reapply -Include @('rea.b', 'no.such') -Yes })[0]
+        $refusal.command | Should -Be 'error'
+        $refusal.message | Should -Be 'Unknown tweak: no.such'
+        $unknown.ExitCode | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).B | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).Ask | Should -Be 5
+    }
+
     It 'does not say there is nothing to apply again when some tweaks need administrator to be checked' {
         Mock -ModuleName Tuneup Get-TuneupStatus {
             @([pscustomobject]@{ id = 'x.one'; title = 'One'; status = 'ok'; runId = 'r' }, [pscustomobject]@{ id = 'x.two'; title = 'Two'; status = 'needs-admin'; runId = 'r' })

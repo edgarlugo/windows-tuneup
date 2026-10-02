@@ -18,7 +18,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 | `-WhatIf -Json`, or nothing to apply | `plan` |
 | `-Yes -Json` | `apply` (or `plan` when there was nothing to apply) |
 | `-Status -Json` | `status` |
-| `-Status -Reapply -WhatIf -Json` or `-Status -Reapply -Yes -Json` | `plan` or `apply`, with `source` = `reapply` (a `plan` with no items when nothing drifted; without `-WhatIf` or `-Yes`, something to apply ends in an `error`) |
+| `-Status -Reapply [-Include <ids>] -WhatIf -Json` or `-Status -Reapply [-Include <ids>] -Yes -Json` | `plan` or `apply`, with `source` = `reapply` (a `plan` with no items when nothing drifted; without `-WhatIf` or `-Yes`, something to apply ends in an `error`). With `-Include`, only the drifted tweaks it names, by name (a tweak that asks first or has high risk too), never the base profile; a named tweak that did not drift is left out with a warning, an unknown one is an `error` |
 | `-Undo <id\|last> [-Tweak <id>] -Json` | `undo` |
 | `-Health [-Repair] -Json` | `health` |
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>] -Json` | `measure` |

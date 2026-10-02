@@ -65,7 +65,7 @@ function Get-TuneupContextEnvironment {
 # confirmation, -Yes and -WhatIf as applying profiles. People see the status first; with -Json the
 # output is the plan or apply document of the re-apply (source reapply).
 function Invoke-TuneupStatusCommand {
-    param([Parameter(Mandatory)]$Context, [switch]$Reapply, [switch]$PlanOnly, [switch]$Yes)
+    param([Parameter(Mandatory)]$Context, [switch]$Reapply, [switch]$PlanOnly, [switch]$Yes, [string[]]$Include = @())
     $items = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupStatus -StateRoot $Context.StateRoot })
     $Context.Result = $items
     if (-not $Reapply) {
@@ -74,7 +74,7 @@ function Invoke-TuneupStatusCommand {
         return
     }
     if (-not $Context.Json) { Write-TuneupStatusReport -Items $items }
-    Invoke-TuneupReapply -Context $Context -Items $items -PlanOnly:$PlanOnly -Yes:$Yes
+    Invoke-TuneupReapply -Context $Context -Items $items -PlanOnly:$PlanOnly -Yes:$Yes -Include $Include
 }
 
 # Plans again, from the catalog of now, the tweaks whose status is drift: only them (no base profile)
@@ -82,18 +82,22 @@ function Invoke-TuneupStatusCommand {
 # compatibility checks still apply. A drifted tweak that the catalog no longer has is left out with a
 # warning: undoing the run that applied it restores it. -Interactive (the menu) asks about the tweaks
 # that are left out otherwise: one question for each that asks first, and each one of high risk comes
-# back only after typing the confirmation word in full.
+# back only after typing the confirmation word in full. -Include (the command line) names the drifted
+# tweaks to apply again: only those, by name, so one that asks first or has high risk comes back too; a
+# named tweak that did not drift is left out with a warning, and an unknown one stops everything.
 function Invoke-TuneupReapply {
     param(
         [Parameter(Mandatory)]$Context,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Items,
         [switch]$PlanOnly,
         [switch]$Yes,
-        [switch]$Interactive
+        [switch]$Interactive,
+        [string[]]$Include = @()
     )
     # In the order of the runs that applied them, not alphabetical.
     $drifted = @($Items | Where-Object { $_.status -eq 'drift' } | ForEach-Object { [string]$_.id } | Select-Object -Unique)
-    if (-not $drifted.Count -and -not $Context.Json) {
+    $named = @($Include | Where-Object { $_ } | Select-Object -Unique)
+    if (-not $drifted.Count -and -not $Context.Json -and -not $named.Count) {
         # Without administrator some tweaks cannot be checked: that is not the same as nothing to do.
         $unverified = @($Items | Where-Object { $_.status -eq 'needs-admin' }).Count
         $line = $(if ($unverified) { Get-TuneupText -Key 'reapply.noneUnverified' -Format $unverified } else { Get-TuneupText -Key 'reapply.none' })
@@ -116,9 +120,22 @@ function Invoke-TuneupReapply {
         }
     }
     $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
-    # Named like a profile names them, not asked for: a tweak that asks first or has high risk is left
-    # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those.
     $confirmed = @()
+    if ($named.Count) {
+        $unknown = @($named | Where-Object { -not $known.ContainsKey($_) })
+        if ($unknown.Count) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.unknownTweak' -Format ($unknown -join ', '))
+            return
+        }
+        Invoke-TuneupContextStep -Context $Context -Step {
+            foreach ($id in @($named | Where-Object { $ids -notcontains $_ })) { Write-Warning "Tweak $id was not reverted by Windows: it is not applied again" }
+        }
+        $ids = @($ids | Where-Object { $named -contains $_ })
+        $confirmed = $ids
+    }
+    # Named like a profile names them, not asked for: a tweak that asks first or has high risk is left
+    # out (needs-confirmation, high-risk-not-requested) and the plan says so; the menu asks about those,
+    # and -Include names them.
     if ($Interactive) {
         # Like Optimize: a plan that needs administrator is stopped before any question, unless only
         # tweaks still to be asked about (that ask first, or of high risk) need it.
@@ -639,7 +656,7 @@ function Invoke-TuneupCli {
         return
     }
     if ($List) { Invoke-TuneupListCommand -Context $Context; return }
-    if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes; return }
+    if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes -Include $Include; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }
     if ($Measure) { Invoke-TuneupMeasureCommand -Context $Context -Compare $Compare -IdleSeconds $IdleSeconds; return }

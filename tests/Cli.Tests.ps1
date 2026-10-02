@@ -420,6 +420,17 @@ Describe 'tuneup.ps1' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
+    It 're-applies with -Status -Reapply -Include only the drifted tweaks it names' {
+        Invoke-Tuneup @('-Profile', 'extra', '-Yes', '-Json') | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Set-ItemProperty -LiteralPath $Key -Name 'Three' -Value 5
+        $result = Invoke-Tuneup @('-Status', '-Reapply', '-Include', 'test.three', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 0
+        Get-Ids (ConvertFrom-PureJson $result.Output).results | Should -Be 'test.three'
+        (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 5
+    }
+
     It 'keeps the ids of result.json whatever the account is called, so -Status and -Reapply still work (<Name>)' -ForEach @(
         @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
     ) {
