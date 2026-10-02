@@ -74,7 +74,7 @@ Describe 'Skill' {
             'LiteralPath', 'Raw', 'Uri', 'ForegroundColor', 'ClassName', 'ErrorAction')
         # PowerShell operators, which look like parameters.
         $script:Operators = @('eq', 'ne', 'gt', 'ge', 'lt', 'le', 'like', 'notlike', 'match', 'notmatch', 'cmatch', 'contains', 'notcontains',
-            'in', 'notin', 'and', 'or', 'not', 'xor', 'band', 'bor', 'bxor', 'join', 'split', 'replace', 'is', 'isnot', 'as', 'f')
+            'cnotmatch', 'in', 'notin', 'and', 'or', 'not', 'xor', 'band', 'bor', 'bxor', 'join', 'split', 'replace', 'is', 'isnot', 'as', 'f')
         # Every line of the skill and its references, with the file it comes from and whether it is code
         # of a fenced block.
         $script:SkillLines = @(foreach ($file in $SkillFiles) {
@@ -231,6 +231,7 @@ Describe 'Skill' {
         @{ Phrase = 'Read what an elevated run did only with `-ReadResult <id>`' }
         @{ Phrase = 'Never open a result file yourself, never retry after `result-untrusted`' }
         @{ Phrase = 'never `last`' }
+        @{ Phrase = 'Put on a command line only ids that the tool gave you, each checked against its form' }
     ) {
         param($Phrase)
         $Skill.Contains($Phrase) | Should -BeTrue -Because $Phrase
@@ -263,10 +264,44 @@ Describe 'Skill' {
         # The installer runs only when its SHA256 is the one of its line in SHA256SUMS and the one approved.
         $Commands.Contains('$actual -ne $line.Groups[1].Value') | Should -BeTrue
         $Commands.Contains('$actual -ne $approved.ToLowerInvariant()') | Should -BeTrue
-        # The elevated process ends with the exit code of the tool, and the id is printed before it starts.
+        # The elevated process ends with the exit code of the tool.
         $Commands | Should -Match '(?m)^\$command = "[^"\r\n]*; exit `\$LASTEXITCODE"\r?$'
-        $Commands.IndexOf('"id=$id"') | Should -BeGreaterThan 0
-        $Commands.IndexOf('"id=$id"') | Should -BeLessThan $Commands.IndexOf('Start-Process -FilePath $powershell')
+    }
+
+    It 'makes the result id in a call of its own and writes it into the elevated command as a literal' {
+        $blocks = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value })
+        @($blocks | Where-Object { $_.Trim() -eq '[guid]::NewGuid().ToString()' }).Count | Should -Be 1
+        $elevated = @($blocks | Where-Object { $_.Contains('-Verb RunAs') -and $_.Contains('$toolArguments') })
+        $elevated.Count | Should -Be 1
+        $elevated[0] | Should -Not -Match 'NewGuid'
+        $elevated[0] | Should -Match "(?m)^\`$id = '<result id>'\r?$"
+        foreach ($term in 'in a call of its own', 'also if the elevated command does not come back') { $Commands.Contains($term) | Should -BeTrue -Because $term }
+    }
+
+    It 'checks every id against the form the tool gives it, and the elevated command again before the UAC prompt' {
+        # The form of each id, as the engine writes it.
+        $runPattern = & (Get-Module Tuneup) { $script:RunIdPattern }
+        foreach ($term in $runPattern, '^[a-z]+$', '^[a-z]+(\.[a-z0-9-]+)+$', '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$',
+            'never an alias', '`tweaks` or `incompatible` of `-List -Json`', 'stop and tell the user', '`invalid-arguments`') {
+            $Commands.Contains($term) | Should -BeTrue -Because $term
+        }
+        $Skill.Contains('`invalid-arguments`') | Should -BeTrue
+        # The guard of the elevated snippet, run on arguments that the templates give and on ones they never should.
+        $elevated = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value } |
+            Where-Object { $_.Contains('-Verb RunAs') -and $_.Contains('$toolArguments') })[0]
+        $guard = [regex]::Match($elevated, "(?m)^if \(\`$id -cnotmatch '(?<id>[^']+)' -or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`"\) \{ throw 'invalid-arguments")
+        $guard.Success | Should -BeTrue
+        $elevated.IndexOf($guard.Value) | Should -BeLessThan $elevated.IndexOf('Start-Process')
+        '3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12' | Should -MatchExactly $guard.Groups['id'].Value
+        foreach ($bad in '3F2A9C1E-0B7D-4E55-9A10-2C4B6D8E0F12', "x'; calc; '", 'last') { $bad | Should -Not -MatchExactly $guard.Groups['id'].Value }
+        foreach ($good in "-Profile 'gaming,privacy' -Yes -Json -Lang en", "-Undo '20261002-120000-01' -Tweak 'privacy.telemetry' -Json -Lang es",
+            "-Status -Reapply -Include 'lite.xbox-app,base.ads' -Yes -Json -Lang en", '-Health -Repair -Json -Lang es') {
+            $good | Should -MatchExactly $guard.Groups['arguments'].Value
+        }
+        foreach ($bad in "-Profile 'gaming'; Start-Process calc", "-Profile 'gaming' -Yes -Json -Lang en; calc", "-Profile 'port$([char]0x00E1)til' -Json -Lang es",
+            "-Profile ' gaming' -Json -Lang en", "-Undo 'x`$(calc)' -Json -Lang en", "-Profile `"gaming`" -Json -Lang en", "-Lang fr") {
+            $bad | Should -Not -MatchExactly $guard.Groups['arguments'].Value
+        }
     }
 
     It 'never runs what was downloaded from a folder, nor pipes it into iex, nor takes a path from an environment variable' {

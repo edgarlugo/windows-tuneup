@@ -2,7 +2,14 @@
 
 Run these snippets in Windows PowerShell 5.1 (the PowerShell tool). Without it, save the snippet as a `.ps1` file in your scratch folder and run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <that file>` from Bash. None of these snippets runs elevated itself: what runs elevated travels inside `-EncodedCommand`, and nobody can change it once the process has started.
 
-Replace only what is written between `<` and `>`. Every id you put on a command line (profile, tweak, run) must come from `-List -Json` or `-Status -Json`, between single quotes; several ids go in one string, separated by commas (`'gaming,privacy'`). A result id is a new GUID that you make (`[guid]::NewGuid()`). Never put text from the user, a web page or a JSON document on a command line.
+Replace only what is written between `<` and `>`. Every id you put on a command line goes between single quotes (several in one string, separated by commas: `'gaming,privacy'`), and before you write it, check that it comes from the tool and has the form the tool gives it; if one does not, stop and tell the user:
+
+- A profile: an `id` of `profiles` in `-List -Json` (never an alias: say `privacy` for `privacidad`), matching `^[a-z]+$`.
+- A tweak: an `id` of `tweaks` or `incompatible` of `-List -Json` (for `-Undo -Tweak`, an `id` of that run in `items` of `-Status -Json`), matching `^[a-z]+(\.[a-z0-9-]+)+$`.
+- A run or a measurement: a `runId` of `-Status -Json`, or the `id` of a `measure` document, matching `^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$`.
+- A result id: the GUID you made in a call of its own ("Run elevated"), matching `^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
+
+The elevated snippet checks the result id and the form of `$toolArguments` again and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
 
 ## Paths
 
@@ -56,13 +63,19 @@ A re-apply with `-Yes` always gets `-Include`: the tool then applies again only 
 
 ## Run elevated
 
-Only after the user said yes to this UAC prompt. The snippet prints the `id` first, then a new window opens, runs the tool and closes; `-Wait` holds the snippet until that process has ended:
+First make the result id, in a call of its own (this line needs nothing else), and keep it: it is how the result is read, also if the elevated command does not come back.
+
+```powershell
+[guid]::NewGuid().ToString()
+```
+
+Then, only after the user said yes to this UAC prompt, run this snippet with that id written in place of `<result id>`. A new window opens, runs the tool and closes; `-Wait` holds the snippet until that process has ended:
 
 ```powershell
 if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
-$id = [guid]::NewGuid().ToString()
-"id=$id"
+$id = '<result id>'
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
+if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-[A-Za-z]+|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$") { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool; nothing ran.' }
 $modules = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules'
 $command = "[Environment]::SetEnvironmentVariable('PSModulePath', '$modules', 'Process'); & '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -87,8 +100,8 @@ Before anything else, the elevated process takes its modules only from the folde
 
 What the output means:
 
-- `id=<id>`: keep it before anything else; it is how the result is read, also if this command does not come back.
 - `exit=<n>`: keep it, then read the result (below) with the `id`.
+- `invalid-arguments`: the result id or an argument does not have the form of the tool. Nothing ran and there was no UAC prompt. Do not fix it by hand: check where each id came from (the list at the top of this page) and stop.
 - `elevation-declined`: the user declined the UAC prompt or this PC does not allow elevation. Nothing ran. Go to "If UAC is declined".
 - `elevation-refused`: this PowerShell is 32-bit on a 64-bit Windows. Nothing ran and there was no UAC prompt. Tell the user, and give them the line of "If UAC is declined" for a PowerShell opened as administrator.
 
