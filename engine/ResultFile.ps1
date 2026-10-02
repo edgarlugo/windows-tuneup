@@ -9,10 +9,11 @@
 $script:ResultIdPattern = '^[A-Za-z0-9][A-Za-z0-9-]{7,63}\z'
 $script:ResultFileKeep = 50
 # The fields of the documents that can carry a path (the run folder, a state file, a file that could not
-# be written, a command line to restore by hand, the output of sfc or DISM): in the machine folder, which
-# Users can read, the profile folder and the account name are hidden there, as in result.json. Ids,
-# statuses, reasons and titles are written as they are.
-$script:ResultFreeTextFields = @('warnings', 'message', 'details', 'runDir', 'path', 'error', 'detail', 'manual', 'output', 'repairedFiles', 'unrepairedFiles')
+# be written, the output of sfc or DISM): in the machine folder, which Users can read, the profile folder
+# and the account name are hidden there, as in result.json. Ids, statuses, reasons and titles are written
+# as they are, and so is manual: it is a command to run (hidden, it would restore a wrong value, or a
+# wrong key for an account named like one of its folders), and the run folder already holds its values.
+$script:ResultFreeTextFields = @('warnings', 'message', 'details', 'runDir', 'path', 'error', 'detail', 'output', 'repairedFiles', 'unrepairedFiles')
 
 # The reason -ResultId cannot be used, or nothing. Without -Json there is no document to save.
 function Get-TuneupResultIdProblem {

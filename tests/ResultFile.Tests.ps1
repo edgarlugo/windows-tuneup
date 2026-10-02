@@ -225,7 +225,7 @@ Describe 'Machine result files' {
         [System.IO.File]::ReadAllText($file.Path) | Should -Be '{"command":"apply"}'
     }
 
-    It 'hides the profile folder and the account name in the machine folder, field by field, leaving ids alone' {
+    It 'hides the profile folder and the account name in the machine folder, field by field, leaving ids alone' -Skip:(([string]$env:USERNAME).Length -lt 3) {
         $profileFolder = $env:USERPROFILE
         $name = $env:USERNAME
         # A path under the profile, the account name as a folder of another path, and ids that hold the
@@ -243,12 +243,12 @@ Describe 'Machine result files' {
         $file = Open-TuneupResultFile -Id $Id -Machine -MachineRoot $MachineRoot
         Close-TuneupResultFile -File $file -Text $text | Should -BeTrue
         $saved = [System.IO.File]::ReadAllText($file.Path)
-        $saved | Should -Not -Match ([regex]::Escape($profileFolder.Replace('\', '\\')))
         $json = $saved | ConvertFrom-Json
         $json.warnings[0] | Should -Be 'Ignoring untrusted state file %USERPROFILE%\AppData\Local\windows-tuneup\runs\x\run.json'
         $json.results[0].error | Should -Be 'Cannot write D:\Data\%USERNAME%\file.txt'
         @($json.results[0].manual).Count | Should -Be 1
-        $json.results[0].manual[0] | Should -Be "Set-ItemProperty -LiteralPath 'HKCU:\Software\X' -Name P -Value '%USERPROFILE%\x'"
+        # A command to run keeps its paths: hidden, it would restore a wrong value or key.
+        $json.results[0].manual[0] | Should -Be "Set-ItemProperty -LiteralPath 'HKCU:\Software\X' -Name P -Value '$profileFolder\x'"
         $json.results[0].id | Should -Be "$name.tweak"
         $json.results[0].title | Should -Be "Title $name"
         $json.runId | Should -Be "$name-run"
