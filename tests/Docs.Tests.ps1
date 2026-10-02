@@ -8,6 +8,16 @@ BeforeAll {
     }
 }
 
+Describe 'README' {
+    It 'presents the version of the tool, with the Claude Code skill, in both languages' {
+        $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        $version = Get-TuneupVersion
+        $text | Should -Match ([regex]::Escape("> **Versi$([char]0x00F3)n $version.**") + '[^\r\n]*skill de Claude Code')
+        $text | Should -Match ([regex]::Escape("> **Version $version.**") + '[^\r\n]*Claude Code skill')
+        $text | Should -Not -Match '(?i)antes de la primera release|before the first release|before version \d'
+    }
+}
+
 Describe 'Blacklist' {
     It 'explains the cases of the design and of the research in both languages' {
         $terms = @('Defender', 'SmartScreen', 'Windows Update', 'WinRE', '/ResetBase', 'Spectre', 'PagingFiles', 'hosts',

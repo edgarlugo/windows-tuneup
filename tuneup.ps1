@@ -23,9 +23,9 @@
     one when elevated, which only administrators can change), so a program that started the tool
     elevated can read it. 8 to 64 letters, digits or hyphens; a file with that id must not exist.
 .PARAMETER ReadResult
-    Prints the document that a run with -ResultId saved, as it was written, after checking that only
-    an administrator could have written it (the machine folder; without elevation, also the user
-    folder). Needs no elevation. Exit code 0, or 1 with an error when the result is missing, not
+    Prints the document that a run with -ResultId saved, as it was written: from the machine folder
+    only when only administrators could have written it; without elevation, from the user folder when
+    the machine folder has no such result and, if it exists, is trusted. Needs no elevation. Exit code 0, or 1 with an error when the result is missing, not
     complete yet or not trusted.
 .PARAMETER ActionsPath
     Development and testing only: loads action scripts from another folder. They run as the

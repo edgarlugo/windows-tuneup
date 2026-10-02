@@ -109,7 +109,7 @@ Only after the elevated process has ended (the snippet above returned, or the us
 "exit=$LASTEXITCODE"
 ```
 
-`-ReadResult` prints the document of the elevated run exactly as it was written, with `exit=0`, only after checking that an administrator wrote it. Otherwise it prints an `error` with `exit=1` and a `reason`:
+`-ReadResult` prints the document exactly as it was written, with `exit=0`: from the state folder of the machine only when administrators wrote it and nobody else can change it, and from the folder of the user (where runs without elevation write) only when the machine folder has no result with that id and, if it exists, is trusted. Otherwise it prints an `error` with `exit=1` and a `reason`:
 
 | `reason` | What happened | What to do |
 |---|---|---|
