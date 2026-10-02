@@ -102,33 +102,37 @@ $callerEnvironment = @{ PSModulePath = $env:PSModulePath; TEMP = $env:TEMP; TMP 
 $env:PSModulePath = [System.IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules') + ';' +
     [System.IO.Path]::Combine([Environment]::GetFolderPath('ProgramFiles'), 'WindowsPowerShell\Modules')
 
-Import-Module (Join-Path $PSScriptRoot 'engine\Tuneup.psm1') -Force
-Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
-
-# Everything but the language, -Json and -ResultId goes to the engine as it was given; -WhatIf is
-# -PlanOnly there.
-$cliArguments = @{}
-foreach ($entry in $PSBoundParameters.GetEnumerator()) {
-    if (@('Lang', 'Json', 'ResultId', '_Rest') -contains $entry.Key -or $commonParameters -contains $entry.Key) { continue }
-    $name = $(if ($entry.Key -eq 'WhatIf') { 'PlanOnly' } else { $entry.Key })
-    $cliArguments[$name] = $entry.Value
-}
-$context = New-TuneupContext -Json:$Json
-$run = {
-    if (@($_Rest).Count) {
-        Write-TuneupCommandError -Context $context -Message (Get-TuneupText -Key 'err.unknownArgs' -Format (@($_Rest) -join ' '))
-    } else {
-        Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments }
-    }
-}
 # -ResultId: the document also goes to out\<id>.json of the state folder, for a program that cannot read
 # this output (the Claude skill starts the tool elevated with UAC). The file is created before anything
 # runs, so an id in use stops here, and gets what the command wrote, errors included. The folder is the
 # one the runs of this process use: the hardened machine folder when elevated, the user folder
 # otherwise, -StateRoot resolved as Invoke-TuneupCli resolves it.
 $resultFile = $null
+$context = $null
+$elevatedTemp = $null
 $document = New-Object System.Collections.Generic.List[string]
 try {
+    # Inside the try, so that the environment comes back also when the engine cannot be loaded; that
+    # error goes on as it is (code 1), without a context to end with.
+    Import-Module (Join-Path $PSScriptRoot 'engine\Tuneup.psm1') -Force
+    Initialize-TuneupI18n -Root (Join-Path $PSScriptRoot 'i18n') -Lang $Lang
+
+    # Everything but the language, -Json and -ResultId goes to the engine as it was given; -WhatIf is
+    # -PlanOnly there.
+    $cliArguments = @{}
+    foreach ($entry in $PSBoundParameters.GetEnumerator()) {
+        if (@('Lang', 'Json', 'ResultId', '_Rest') -contains $entry.Key -or $commonParameters -contains $entry.Key) { continue }
+        $name = $(if ($entry.Key -eq 'WhatIf') { 'PlanOnly' } else { $entry.Key })
+        $cliArguments[$name] = $entry.Value
+    }
+    $context = New-TuneupContext -Json:$Json
+    $run = {
+        if (@($_Rest).Count) {
+            Write-TuneupCommandError -Context $context -Message (Get-TuneupText -Key 'err.unknownArgs' -Format (@($_Rest) -join ' '))
+        } else {
+            Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupCli -Context $context -ScriptRoot $PSScriptRoot @cliArguments }
+        }
+    }
     # Reading a result never writes one.
     if ($PSBoundParameters.ContainsKey('ReadResult') -and $PSBoundParameters.ContainsKey('ResultId')) {
         Write-TuneupCommandError -Context $context -Message (Get-TuneupText -Key 'err.badArgs' -Format '-ReadResult -ResultId')
@@ -137,7 +141,7 @@ try {
     # Elevated, Add-Type, DISM and winget write through tmp of the machine state folder, never through the
     # TEMP of the account; a machine state folder that cannot be trusted stops the run here.
     try {
-        Use-TuneupElevatedTemp -StateRoot $StateRoot
+        $elevatedTemp = Use-TuneupElevatedTemp -StateRoot $StateRoot
     } catch {
         Write-TuneupCommandError -Context $context -Message $_.Exception.Message
         return
@@ -165,5 +169,12 @@ try {
         $context.ExitCode = 2
     }
     foreach ($name in $callerEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name, $callerEnvironment[$name], 'Process') }
-    exit $context.ExitCode
+    # The temporary folder of this run goes, with what it holds; what cannot be removed is a warning, never a
+    # change of the exit code. With -Json the document is already written, so it goes to the error output.
+    if ($elevatedTemp) {
+        foreach ($problem in @(Clear-TuneupTempFolder -Path $elevatedTemp -RemoveFolder)) {
+            if ($Json) { [Console]::Error.WriteLine("WARNING: $problem") } else { Write-Warning $problem }
+        }
+    }
+    if ($null -ne $context) { exit $context.ExitCode }
 }

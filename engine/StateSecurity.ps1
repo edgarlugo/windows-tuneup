@@ -306,7 +306,54 @@ function Use-TuneupElevatedTemp {
     if ($StateRoot -or -not (Test-TuneupAdmin)) { return }
     if (-not $MachineRoot) { $MachineRoot = Get-TuneupStateRoot -Machine }
     Initialize-TuneupStateRoot -Path $MachineRoot -Children @('tmp')
-    $folder = Join-Path $MachineRoot 'tmp'
+    # A folder of its own inside tmp (it takes the access list of tmp), so that the end of one elevated run
+    # never removes what another one, still running, has there. Gives its path; the caller empties and
+    # removes it at the end (Clear-TuneupTempFolder -RemoveFolder).
+    $folder = Join-Path (Join-Path $MachineRoot 'tmp') ([guid]::NewGuid().ToString('N'))
+    [void][System.IO.Directory]::CreateDirectory($folder)
     $env:TEMP = $folder
     $env:TMP = $folder
+    $folder
+}
+
+# Empties a temporary folder (the one of an elevated run, at its end) and, with -RemoveFolder, removes
+# it too. A link, file or folder, is removed as a name, never followed: Directory.Delete without
+# recursion removes a junction itself, and File.Delete removes a link, not its target. Gives one text
+# for each entry that could not be removed (or for a folder that could not be listed), and goes on.
+function Clear-TuneupTempFolder {
+    param([Parameter(Mandatory)][string]$Path, [switch]$RemoveFolder)
+    if ($RemoveFolder) {
+        $problems = @(Clear-TuneupTempFolder -Path $Path)
+        if ($problems.Count) { return $problems }
+        try { [System.IO.Directory]::Delete($Path, $false) } catch { "Could not remove ${Path}: $($_.Exception.Message)" }
+        return
+    }
+    try {
+        $entries = @([System.IO.Directory]::GetFileSystemEntries($Path))
+    }
+    catch {
+        return "Could not list ${Path}: $($_.Exception.Message)"
+    }
+    foreach ($entry in $entries) {
+        try {
+            $attributes = [System.IO.File]::GetAttributes($entry)
+            $isLink = [bool]($attributes -band [System.IO.FileAttributes]::ReparsePoint)
+            if ($attributes -band [System.IO.FileAttributes]::Directory) {
+                if (-not $isLink) {
+                    $inside = @(Clear-TuneupTempFolder -Path $entry)
+                    if ($inside.Count) { $inside; continue }
+                }
+                [System.IO.Directory]::Delete($entry, $false)
+            }
+            else {
+                if (-not $isLink -and ($attributes -band [System.IO.FileAttributes]::ReadOnly)) {
+                    [System.IO.File]::SetAttributes($entry, $attributes -band -bnot [System.IO.FileAttributes]::ReadOnly)
+                }
+                [System.IO.File]::Delete($entry)
+            }
+        }
+        catch {
+            "Could not remove ${entry}: $($_.Exception.Message)"
+        }
+    }
 }

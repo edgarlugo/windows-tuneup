@@ -91,6 +91,24 @@ Describe 'tuneup.ps1' {
         $output | Should -Be 'same=True'
     }
 
+    It 'gives PSModulePath back to a session also when the engine cannot be loaded, and ends with code 1' {
+        # A copy of tuneup.ps1 without the engine next to it: Import-Module fails.
+        $broken = Join-Path $TestDrive 'no-engine'
+        New-Item -ItemType Directory -Path $broken | Out-Null
+        Copy-Item -LiteralPath (Join-Path $Repo 'tuneup.ps1') -Destination $broken
+        $script = Join-Path $TestDrive 'in-session-broken.ps1'
+        [System.IO.File]::WriteAllText($script, @"
+`$before = `$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP
+try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catch { 'threw' }
+'same=' + (`$before -eq (`$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP))
+"@)
+        $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
+        $output -join ',' | Should -Be 'threw,same=True'
+        $ErrorActionPreference = 'Continue'
+        & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $broken 'tuneup.ps1') -List -Json 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 1
+    }
+
     It 'lists the profiles and the tweaks that suit this machine' {
         $result = Invoke-Tuneup @('-List', '-Json')
         $result.ExitCode | Should -Be 0

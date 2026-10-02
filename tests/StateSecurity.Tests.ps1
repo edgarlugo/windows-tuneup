@@ -233,10 +233,64 @@ Describe 'Temporary folder of an elevated run' {
     It 'leaves TEMP and TMP alone without elevation' {
         Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
         Mock -ModuleName Tuneup Initialize-TuneupStateRoot { }
-        Use-TuneupElevatedTemp
+        Use-TuneupElevatedTemp | Should -BeNullOrEmpty
         $env:TEMP | Should -Be $Temp
         $env:TMP | Should -Be $Tmp
         Should -Invoke Initialize-TuneupStateRoot -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'empties the temporary folder, removing links but never what they point to' {
+        New-Item -ItemType Directory -Path (Join-Path $Folder 'sub\deeper') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Folder 'a.tmp'), 'x')
+        [System.IO.File]::WriteAllText((Join-Path $Folder 'sub\deeper\b.dll'), 'x')
+        $readOnly = Join-Path $Folder 'sub\c.cs'
+        [System.IO.File]::WriteAllText($readOnly, 'x')
+        [System.IO.File]::SetAttributes($readOnly, [System.IO.FileAttributes]::ReadOnly)
+        $outside = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $outside | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $outside 'keep.txt'), 'mine')
+        New-Item -ItemType Junction -Path (Join-Path $Folder 'link') -Value $outside | Out-Null
+        @(Clear-TuneupTempFolder -Path $Folder) | Should -BeNullOrEmpty
+        @(Get-ChildItem -LiteralPath $Folder -Force).Count | Should -Be 0
+        Test-Path -LiteralPath $Folder | Should -BeTrue
+        [System.IO.File]::ReadAllText((Join-Path $outside 'keep.txt')) | Should -Be 'mine'
+    }
+
+    It 'gives what it could not remove and goes on with the rest' {
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        $held = Join-Path $Folder 'held.tmp'
+        [System.IO.File]::WriteAllText($held, 'x')
+        [System.IO.File]::WriteAllText((Join-Path $Folder 'free.tmp'), 'x')
+        $stream = [System.IO.File]::Open($held, 'Open', 'Read', 'None')
+        try {
+            $problems = @(Clear-TuneupTempFolder -Path $Folder)
+        } finally {
+            $stream.Dispose()
+        }
+        $problems.Count | Should -Be 1
+        $problems[0] | Should -BeLike "*$held*"
+        Test-Path -LiteralPath (Join-Path $Folder 'free.tmp') | Should -BeFalse
+    }
+
+    It 'gives a problem, and removes nothing, when the folder cannot be listed' {
+        @(Clear-TuneupTempFolder -Path (Join-Path $Folder 'missing')).Count | Should -Be 1
+    }
+
+    It 'removes the folder of the run with -RemoveFolder, and keeps it when something inside stays' {
+        New-Item -ItemType Directory -Path (Join-Path $Folder 'sub') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Folder 'sub\a.tmp'), 'x')
+        @(Clear-TuneupTempFolder -Path $Folder -RemoveFolder) | Should -BeNullOrEmpty
+        Test-Path -LiteralPath $Folder | Should -BeFalse
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        $held = Join-Path $Folder 'held.tmp'
+        [System.IO.File]::WriteAllText($held, 'x')
+        $stream = [System.IO.File]::Open($held, 'Open', 'Read', 'None')
+        try {
+            @(Clear-TuneupTempFolder -Path $Folder -RemoveFolder).Count | Should -Be 1
+        } finally {
+            $stream.Dispose()
+        }
+        Test-Path -LiteralPath $Folder | Should -BeTrue
     }
 
     It 'leaves TEMP and TMP alone with -StateRoot, which is for development only' {
@@ -253,13 +307,20 @@ Describe 'Temporary folder of an elevated run' {
         $root = New-TestMachineRoot
         Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
         Mock -ModuleName Tuneup Set-Acl { }
-        Use-TuneupElevatedTemp -MachineRoot $root
+        $used = Use-TuneupElevatedTemp -MachineRoot $root
         $tmp = Join-Path $root 'tmp'
-        $env:TEMP | Should -Be $tmp
-        $env:TMP | Should -Be $tmp
+        # A folder of this run inside tmp, which takes the access list of tmp.
+        Split-Path -Parent $used | Should -Be $tmp
+        Split-Path -Leaf $used | Should -Match '^[0-9a-f]{32}$'
+        Test-Path -LiteralPath $used -PathType Container | Should -BeTrue
+        $env:TEMP | Should -Be $used
+        $env:TMP | Should -Be $used
         $acl = Get-Acl -LiteralPath $tmp
         $acl.AreAccessRulesProtected | Should -BeTrue
         $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value | Should -Be $MeSid
+        Test-TuneupTrustedItem -Path $used | Should -BeTrue
+        $other = Use-TuneupElevatedTemp -MachineRoot $root
+        $other | Should -Not -Be $used
         $name = 'TuneupTempTest' + [guid]::NewGuid().ToString('N')
         Add-Type -TypeDefinition "public static class $name { public static int Value() { return 7; } }"
         ($name -as [type])::Value() | Should -Be 7
