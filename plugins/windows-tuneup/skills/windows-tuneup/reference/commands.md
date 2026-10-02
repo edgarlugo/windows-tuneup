@@ -91,7 +91,7 @@ What the output means:
 
 ## Long runs
 
-`-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
+`-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items, or a re-apply to which you added `needs-admin` items (they are apps, capabilities or features, and never appear in the classification plan), can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
 
 Never poll and never sleep waiting for a result. If a foreground command times out, the elevated window goes on by itself: do not start another one; ask the user to tell you when the elevated window has closed, and then run `-ReadResult '<id>' -Json` once. `result-incomplete` after the process has ended means that the run was stopped: run `-Status -Json` then, never before.
 
