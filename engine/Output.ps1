@@ -128,12 +128,39 @@ function New-TuneupApplyReport {
     }
 }
 
-# Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData):
-# the file is meant to be read and shared, and the run folder it names is under the profile of the
-# account. Fails when it cannot be written.
+# A copy of an object with some of its fields changed; the object itself is left as it is.
+function Copy-TuneupObject {
+    param([Parameter(Mandatory)]$Object, [hashtable]$Change = @{})
+    $copy = [ordered]@{}
+    foreach ($property in $Object.PSObject.Properties) {
+        $copy[$property.Name] = $(if ($Change.ContainsKey($property.Name)) { $Change[$property.Name] } else { $property.Value })
+    }
+    [pscustomobject]$copy
+}
+
+# Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData)
+# field by field, only where they can appear: the run folder, the messages of the preflight and the
+# error and detail of each result. Ids, statuses, reasons and titles are written as they are: -Status
+# reads the ids of this file. The file is meant to be read and shared, and the run folder it names is
+# under the profile of the account. Fails when it cannot be written.
 function Write-TuneupRunResult {
     param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Report)
-    $json = Hide-TuneupPersonalData -Text (ConvertTo-Json -InputObject $Report -Depth 10) -JsonEscaped
+    $hide = { param($value) $(if ($value -is [string]) { Hide-TuneupPersonalData -Text $value } else { $value }) }
+    $change = @{}
+    if ($Report.PSObject.Properties['runDir']) { $change.runDir = & $hide $Report.runDir }
+    if ($Report.PSObject.Properties['preflight']) {
+        $change.preflight = @(foreach ($item in @($Report.preflight | Where-Object { $null -ne $_ })) {
+            $(if ($item.PSObject.Properties['message']) { Copy-TuneupObject -Object $item -Change @{ message = & $hide $item.message } } else { $item })
+        })
+    }
+    if ($Report.PSObject.Properties['results']) {
+        $change.results = @(foreach ($result in @($Report.results | Where-Object { $null -ne $_ })) {
+            $fields = @{}
+            foreach ($name in 'error', 'detail') { if ($result.PSObject.Properties[$name]) { $fields[$name] = & $hide $result.$name } }
+            Copy-TuneupObject -Object $result -Change $fields
+        })
+    }
+    $json = ConvertTo-Json -InputObject (Copy-TuneupObject -Object $Report -Change $change) -Depth 10
     Write-TuneupStateFile -Path (Join-Path $Run.Dir 'result.json') -Text $json -Root $Run.Root
 }
 

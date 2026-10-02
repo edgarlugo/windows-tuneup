@@ -236,6 +236,32 @@ Describe 'tuneup.ps1' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
+    It 'keeps the ids of result.json whatever the account is called, so -Status and -Reapply still work (<Name>)' -ForEach @(
+        @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
+    ) {
+        $previous = $env:USERNAME
+        $env:USERNAME = $Name
+        try {
+            $applied = ConvertFrom-PureJson (Invoke-Tuneup @('-Yes', '-Json')).Output
+            $text = [System.IO.File]::ReadAllText((Join-Path $applied.runDir 'result.json'))
+            Get-Ids ($text | ConvertFrom-Json).results | Should -Be 'test.one,test.two'
+            # The profile folder is written %USERPROFILE% (the state folder of the test is usually under it).
+            $text | Should -Not -Match ('(?i)' + [regex]::Escape($env:USERPROFILE.TrimEnd('\').Replace('\', '\\')))
+            if ($script:Root.StartsWith($env:USERPROFILE.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                ($text | ConvertFrom-Json).runDir | Should -Match '^%USERPROFILE%\\'
+            }
+            $status = ConvertFrom-PureJson (Invoke-Tuneup @('-Status', '-Json')).Output
+            ($status.items | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.one=ok,test.two=ok'
+            Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+            $reapply = Invoke-Tuneup @('-Status', '-Reapply', '-Yes', '-Json')
+            $reapply.ExitCode | Should -Be 0
+            Get-Ids (ConvertFrom-PureJson $reapply.Output).results | Should -Be 'test.one'
+            (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+        } finally {
+            $env:USERNAME = $previous
+        }
+    }
+
     It 'opens the menu without a command and reads the answers from standard input' {
         # Optimize, only base, apply, back to the menu, exit.
         $answers = @('1', '', 'y', '', '0')

@@ -161,6 +161,39 @@ Describe 'Save-TuneupApplyReport' {
         $saved.PSObject.Properties.Name | Should -Not -Contain 'warnings'
     }
 
+    It 'hides the personal data of result.json only where it can be, never in ids, statuses, reasons or titles (<Name>)' -ForEach @(
+        @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
+    ) {
+        $dir = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        New-Item -ItemType Directory -Path $dir | Out-Null
+        $profileDir = $env:USERPROFILE.TrimEnd('\')
+        $failed = New-TestResult -Status 'failed' -ErrorText "Access denied to $profileDir\x and D:\data\$Name\y"
+        $failed | Add-Member -NotePropertyName detail -NotePropertyValue "kept in D:\$Name"
+        $skipped = [pscustomobject]@{ id = "$Name.one"; title = "$Name apps for User"; status = 'skipped'; reason = 'already-applied'; error = $null; rebootRequired = $false }
+        $report = New-TuneupApplyReport -Run ([pscustomobject]@{ Id = '20250101-000000'; Dir = "$profileDir\runs\$Name" }) -Results @($failed, $skipped) `
+            -RestorePoint 'not-needed' -Environment (New-TestEnvironment) -Preflight @([pscustomobject]@{ id = 'untrusted-location'; message = "from $profileDir\$Name" })
+        $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $dir; Root = 'custom' }
+        $previous = $env:USERNAME
+        $env:USERNAME = $Name
+        try {
+            Write-TuneupRunResult -Run $run -Report $report
+        } finally {
+            $env:USERNAME = $previous
+        }
+        $saved = Get-Content -LiteralPath (Join-Path $dir 'result.json') -Raw | ConvertFrom-Json
+        $saved.runDir | Should -Be "%USERPROFILE%\runs\%USERNAME%"
+        $saved.preflight[0].id | Should -Be 'untrusted-location'
+        $saved.preflight[0].message | Should -Be 'from %USERPROFILE%\%USERNAME%'
+        $saved.results[0].error | Should -Be 'Access denied to %USERPROFILE%\x and D:\data\%USERNAME%\y'
+        $saved.results[0].detail | Should -Be 'kept in D:\%USERNAME%'
+        $saved.results[1].id | Should -Be "$Name.one"
+        $saved.results[1].title | Should -Be "$Name apps for User"
+        "$($saved.results[1].status)/$($saved.results[1].reason)" | Should -Be 'skipped/already-applied'
+        # What is written is a copy: the report shown by the command keeps the real values.
+        $report.runDir | Should -Be "$profileDir\runs\$Name"
+        $report.results[0].error | Should -Match ([regex]::Escape($profileDir))
+    }
+
     It 'warns instead of failing when result.json cannot be saved' {
         Mock -ModuleName Tuneup Write-TuneupRunResult { throw [System.UnauthorizedAccessException]::new('Access denied') }
         $run = [pscustomobject]@{ Id = '20250101-000000'; Dir = $TestDrive; Root = 'custom' }

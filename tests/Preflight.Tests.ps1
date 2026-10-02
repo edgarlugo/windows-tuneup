@@ -211,9 +211,22 @@ Describe 'Locations in what the run keeps' {
 }
 
 Describe 'Hide-TuneupPersonalData' {
-    It 'replaces the profile folder and the account name, whatever the case' {
-        $text = "Folder $($env:USERPROFILE.ToLowerInvariant())\AppData of $($env:USERNAME.ToUpperInvariant())"
-        Hide-TuneupPersonalData -Text $text | Should -Be 'Folder %USERPROFILE%\AppData of %USERNAME%'
+    It 'replaces the profile folder anywhere and the account name in a path, whatever the case' {
+        $text = "Folder $($env:USERPROFILE.ToLowerInvariant())\AppData and D:\data\$($env:USERNAME.ToUpperInvariant())\x"
+        Hide-TuneupPersonalData -Text $text | Should -Be 'Folder %USERPROFILE%\AppData and D:\data\%USERNAME%\x'
+    }
+
+    It 'leaves the account name alone outside a path, so ids and titles stay as they are (<Name>)' -ForEach @(
+        @{ Name = 'test' }, @{ Name = 'User' }, @{ Name = 'dev' }, @{ Name = 'apps' }
+    ) {
+        $previous = $env:USERNAME
+        $env:USERNAME = $Name
+        try {
+            Hide-TuneupPersonalData -Text "$Name.one: $Name apps for C:\Users ($Name)" | Should -Be "$Name.one: $Name apps for C:\Users ($Name)"
+            Hide-TuneupPersonalData -Text "D:\$Name, E:/x/$Name/y and `"F:\\$Name\\z`"" -JsonEscaped | Should -Be 'D:\%USERNAME%, E:/x/%USERNAME%/y and "F:\\%USERNAME%\\z"'
+        } finally {
+            $env:USERNAME = $previous
+        }
     }
 
     It 'replaces the profile folder as it is written in JSON' {

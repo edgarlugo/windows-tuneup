@@ -4,12 +4,14 @@
 # line and anything else on the screen, and Users can read the machine state folder. With -Json the
 # transcript still gets the text for people.
 
-# The text with the profile folder of the account shown as %USERPROFILE% and the account name shown as
-# %USERNAME%, wherever they are. What a run keeps for people to read and share (the transcript,
-# result.json, the warnings of a preflight) goes through here, so a bug report does not carry the
-# account name inside a path. A name of fewer than 3 characters is left alone: it would also change
-# ordinary words. With -JsonEscaped the profile folder is looked for as JSON writes it (doubled
-# backslashes).
+# The text with the profile folder of the account shown as %USERPROFILE%, wherever it is, and the
+# account name shown as %USERNAME% where it is a folder of a path (after \ or /, up to the next \, /,
+# quote, space or punctuation). What a run keeps for people to read and share (the transcript, the
+# free texts of result.json, the warnings of a preflight) goes through here, so a bug report does not
+# carry the account name inside a path. Anywhere else the name is left alone: an account called test,
+# dev or apps would otherwise change tweak ids (test.one, dev.wsl) and words. A name of fewer than 3
+# characters is always left alone. With -JsonEscaped the profile folder is looked for as JSON writes
+# it (doubled backslashes).
 function Hide-TuneupPersonalData {
     param([AllowNull()][AllowEmptyString()][string]$Text, [switch]$JsonEscaped)
     if ([string]::IsNullOrEmpty($Text)) { return $Text }
@@ -22,7 +24,7 @@ function Hide-TuneupPersonalData {
     }
     $name = [string]$env:USERNAME
     if ($name.Length -ge 3) {
-        $Text = [regex]::Replace($Text, '(?<![A-Za-z0-9])' + [regex]::Escape($name) + '(?![A-Za-z0-9])', '%USERNAME%', $ignoreCase)
+        $Text = [regex]::Replace($Text, '(?<=[\\/])' + [regex]::Escape($name) + '(?=[\\/"''\s:;,)\]]|$)', '%USERNAME%', $ignoreCase)
     }
     $Text
 }
