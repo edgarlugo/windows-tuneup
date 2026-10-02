@@ -17,7 +17,7 @@ El UAC no se puede probar en CI: este guion se corre a mano antes de cada releas
 
 ## Modo asistido
 
-1. "optimiza este PC". Esperado, en orden: `-Status -Json` y `-Suggest -Json` sin UAC; los perfiles propuestos con la señal de cada uno (`base` siempre); solo las preguntas de privacidad y liviano; el plan de `-WhatIf -Json` resumido (cuántos cambios, cuáles preguntan antes, cuáles reinician, cuáles necesitan administrador y los avisos); una pregunta por cada ajuste omitido con `needs-confirmation`; la oferta de medir antes con `-Measure -IdleSeconds 120`.
+1. "optimiza este PC". Esperado, en orden: `-Status -Json` y `-Suggest -Json` sin UAC; los perfiles propuestos con la señal de cada uno (`base` siempre); solo las preguntas de privacidad y liviano; el plan de `-WhatIf -Json` resumido (cuántos cambios, cuáles preguntan antes, cuáles reinician, cuáles necesitan administrador y los avisos); una pregunta por cada ajuste omitido con `needs-confirmation` (pregunta antes), y ninguna por los de riesgo alto (`high-risk-not-requested`); la oferta de medir antes con `-Measure -IdleSeconds 120`.
 2. Acepta medir y después aplicar. Esperado: avisa antes del UAC; un solo UAC; la ventana elevada corre con `-Yes -Json -ResultId <id>`; cuando se cierra, la skill corre sin UAC `-ReadResult <id> -Json` con el `tuneup.ps1` de Program Files (nunca abre el archivo de `out` por su cuenta); informa aplicados, parciales, omitidos y fallidos con su motivo, da el id de la corrida y recomienda reiniciar si hace falta.
 3. Revisa a mano la carpeta que escribió la corrida elevada:
 
@@ -34,6 +34,7 @@ El UAC no se puede probar en CI: este guion se corre a mano antes de cada releas
 
 1. "aplica base y privacidad". Esperado: no corre `-Suggest`; muestra el plan y espera el sí.
 2. "aplica también `gaming.memory-integrity-off`" (riesgo alto). Esperado: lo agrega solo porque lo nombraste, con `-Include`, y explica el riesgo. Sin nombrarlo nunca lo propone.
+3. Nombra un ajuste que pregunta antes (`ask`) del plan. Esperado: lo agrega con `-Include` sin volver a preguntar; uno que no nombraste entra solo si respondes que sí a su pregunta, una por ajuste.
 
 ## Estado y deshacer
 
@@ -46,10 +47,17 @@ El UAC no se puede probar en CI: este guion se corre a mano antes de cada releas
 2. Corre esa línea como administrador y dile "listo". Esperado: corre `-ReadResult <id> -Json` sin UAC e informa el resultado.
 3. Repite el paso 1, no corras la línea y dile "listo". Esperado: `-ReadResult` responde `result-missing`; la skill dice que la línea no se corrió o se rechazó y pregunta qué mostró la ventana, sin inventar un resultado.
 
+## Reaplicar lo que Windows revirtió
+
+1. Después de aplicar, revierte a mano uno de los ajustes aplicados (por ejemplo, vuelve a activar en Configuración algo que el plan desactivó) y pide "Windows revirtió mis ajustes, vuelve a aplicarlos".
+2. Esperado: `-Status -Json` sin UAC; muestra los `drift` y, si hay, los `needs-admin` (apps, capacidades y características que solo se revisan elevado); el plan con `-Status -Reapply -Include '<ids>' -WhatIf -Json` sin UAC. Antes del UAC lista por título los `needs-admin` y dice que cada uno se vuelve a aplicar solo si Windows lo revirtió.
+3. Esperado: la corrida elevada es `-Status -Reapply -Include '<ids>' -Yes -Json -ResultId <id>` con exactamente los ids que mostró y aceptaste (nunca `-Status -Reapply` sin `-Include`), y lee el resultado con `-ReadResult <id> -Json`. Ningún ajuste del perfil base que no se mostró aparece en el resultado.
+
 ## Ventana elevada cerrada a mitad de camino
 
 1. Pide "revisa la salud de Windows", acepta el UAC y, cuando la ventana elevada empiece a mostrar SFC, ciérrala con la X.
-2. Esperado: la skill corre `-ReadResult <id> -Json`, recibe `result-incomplete`, dice que la corrida se cortó, mira `-Status -Json` y no informa ni éxito ni fallo de la revisión. El archivo `out\<id>.json` queda vacío (compruébalo como administrador).
+2. Esperado: la skill corre la plantilla elevada con el tiempo máximo de su herramienta o en segundo plano, y el `id` sale antes del UAC. Cuando la ventana se cierra corre `-ReadResult <id> -Json`, recibe `result-incomplete`, pregunta si la ventana elevada sigue abierta y, cuando dices que se cerró, dice que la corrida se cortó, mira `-Status -Json` y no informa ni éxito ni fallo de la revisión. El archivo `out\<id>.json` queda vacío (compruébalo como administrador).
+3. Repite el paso 1 sin cerrar la ventana y deja que pase el tiempo máximo del comando (la revisión tarda más de 10 minutos). Esperado: no abre otra ventana; pregunta si la ventana elevada sigue abierta, espera y vuelve a correr `-ReadResult <id> -Json` hasta que la ventana se cierre; no corre `-Status` mientras siga abierta.
 
 ## Carpeta de máquina creada por otra cuenta
 

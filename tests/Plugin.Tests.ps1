@@ -71,10 +71,18 @@ Describe 'Skill' {
             })
         # Parameters of powershell.exe and of the cmdlets in the templates, not of the tool.
         $script:OtherParameters = @('NoProfile', 'ExecutionPolicy', 'File', 'EncodedCommand', 'FilePath', 'ArgumentList', 'Verb', 'Wait', 'PassThru',
-            'LiteralPath', 'Raw', 'Uri', 'ForegroundColor')
-        # Every line of the skill and its references, with the file it comes from.
+            'LiteralPath', 'Raw', 'Uri', 'ForegroundColor', 'ClassName', 'ErrorAction')
+        # PowerShell operators, which look like parameters.
+        $script:Operators = @('eq', 'ne', 'gt', 'ge', 'lt', 'le', 'like', 'notlike', 'match', 'notmatch', 'cmatch', 'contains', 'notcontains',
+            'in', 'notin', 'and', 'or', 'not', 'xor', 'band', 'bor', 'bxor', 'join', 'split', 'replace', 'is', 'isnot', 'as', 'f')
+        # Every line of the skill and its references, with the file it comes from and whether it is code
+        # of a fenced block.
         $script:SkillLines = @(foreach ($file in $SkillFiles) {
-                foreach ($line in ((Read-RepoText $file.FullName) -split "`r?`n")) { [pscustomobject]@{ File = $file.Name; Text = $line } }
+                $fenced = $false
+                foreach ($line in ((Read-RepoText $file.FullName) -split "`r?`n")) {
+                    if ($line -match '^\s*```') { $fenced = -not $fenced; continue }
+                    [pscustomobject]@{ File = $file.Name; Text = $line; Fenced = $fenced }
+                }
             })
     }
 
@@ -88,6 +96,8 @@ Describe 'Skill' {
         $description | Should -Match 'windows-tuneup'
         # A plain YAML value cannot hold ": " or " #".
         $description | Should -Not -Match ': | #'
+        # Requests in Spanish load it too.
+        $description | Should -Match 'optimiza o acelera este PC, limpia Windows'
     }
 
     It 'stays short, with the details in its two references' {
@@ -97,11 +107,13 @@ Describe 'Skill' {
         }
     }
 
-    It 'names only parameters that tuneup.ps1 has' {
+    It 'names only parameters that tuneup.ps1 has, in any case' {
         $seen = New-Object System.Collections.Generic.List[string]
         foreach ($file in $SkillFiles) {
-            foreach ($match in [regex]::Matches((Read-RepoText $file.FullName), '(?<![\w-])-([A-Z][A-Za-z]+)\b')) {
+            # PowerShell takes -force as -Force: lowercase names are checked too.
+            foreach ($match in [regex]::Matches((Read-RepoText $file.FullName), '(?<![\w-])-([A-Za-z][A-Za-z]*)\b')) {
                 $name = $match.Groups[1].Value
+                if ($Operators -contains $name) { continue }
                 $seen.Add($name)
                 ($TuneupParameters -contains $name -or $OtherParameters -contains $name) | Should -BeTrue -Because "$($file.Name) names -$name"
             }
@@ -114,24 +126,37 @@ Describe 'Skill' {
 
     It 'never passes the options of development and testing' {
         foreach ($line in $SkillLines) {
-            if ($line.Text -cmatch '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath)\b') { $line.Text | Should -Match '(?i)\bnever\b' -Because $line.File }
+            if ($line.Text -match '(?i)-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath)\b') { $line.Text | Should -Match '(?i)\bnever\b' -Because $line.File }
         }
     }
 
     It 'never passes -Yes to -Undo or -Health, and undoes an explicit run' {
         foreach ($line in $SkillLines) {
-            foreach ($match in [regex]::Matches($line.Text, '`[^`]*-(Undo|Health)\b[^`]*`')) {
-                $match.Value | Should -Not -Match '-Yes\b' -Because "$($line.File): $($line.Text)"
+            # A line of code, or a span of code in a sentence, that runs -Undo or -Health has no -Yes.
+            $code = $(if ($line.Fenced) { @($line.Text) } else { @([regex]::Matches($line.Text, '`[^`]*`') | ForEach-Object { $_.Value }) })
+            foreach ($text in $code) {
+                if ($text -match '(?i)-(Undo|Health)\b') { $text | Should -Not -Match '(?i)-Yes\b' -Because "$($line.File): $($line.Text)" }
             }
-            $line.Text | Should -Not -Match "-Undo\s+'?last\b" -Because $line.File
+            $line.Text | Should -Not -Match "(?i)-Undo\s+'?last\b" -Because $line.File
         }
         $Commands | Should -Match "-Undo '<runId>'"
+    }
+
+    It 'always re-applies with -Include, the ids the user saw' {
+        foreach ($line in $SkillLines) {
+            $code = $(if ($line.Fenced) { @($line.Text) } else { @([regex]::Matches($line.Text, '`[^`]*`') | ForEach-Object { $_.Value }) })
+            foreach ($text in $code) {
+                if ($text -match '(?i)-Reapply\b' -and $text -match '(?i)-(Yes|WhatIf)\b') { $text | Should -Match "-Include '<" -Because "$($line.File): $($line.Text)" }
+            }
+        }
+        $Skill.Contains('list those `needs-admin` items by `title`') | Should -BeTrue
     }
 
     It 'keeps the guardrail: <Phrase>' -TestCases @(
         @{ Phrase = 'Never propose a change from the blacklist' }
         @{ Phrase = 'blacklist.md' }
-        @{ Phrase = 'only when the user names them, and then only with `-Include <id>`' }
+        @{ Phrase = 'A high-risk tweak (`risk` = `high`) is applied only when the user names it.' }
+        @{ Phrase = 'only when the user names it or answers yes to a question about that one tweak (one question per tweak). Either way it goes in with `-Include <id>`.' }
         @{ Phrase = 'Never pass -Force, -StateRoot, -CatalogPath, -ActionsPath or -ProfilesPath' }
         @{ Phrase = 'Never elevate to read' }
         @{ Phrase = 'Ask before every UAC prompt' }
@@ -149,12 +174,15 @@ Describe 'Skill' {
     }
 
     It 'links only to files that exist' {
-        foreach ($file in $SkillFiles) {
-            foreach ($match in [regex]::Matches((Read-RepoText $file.FullName), '\]\((?!https?://)([^)#]+)(#[^)]*)?\)')) {
-                $target = Join-Path $file.DirectoryName ($match.Groups[1].Value -replace '/', '\')
-                Test-Path -LiteralPath $target | Should -BeTrue -Because "$($file.Name) links to $($match.Groups[1].Value)"
+        # Outside code: [bool](Get-CimInstance ...) in a snippet is not a link.
+        foreach ($line in @($SkillLines | Where-Object { -not $_.Fenced })) {
+            foreach ($match in [regex]::Matches($line.Text, '\]\((?!https?://)([^)#]+)(#[^)]*)?\)')) {
+                $folder = $(if ($line.File -eq 'SKILL.md') { $SkillRoot } else { Join-Path $SkillRoot 'reference' })
+                $target = Join-Path $folder ($match.Groups[1].Value -replace '/', '\')
+                Test-Path -LiteralPath $target | Should -BeTrue -Because "$($line.File) links to $($match.Groups[1].Value)"
             }
         }
+        @($SkillLines | Where-Object { $_.File -eq 'SKILL.md' -and $_.Text -match '\]\(reference/commands\.md' }).Count | Should -BeGreaterThan 3
     }
 
     It 'has nothing that Claude Code would replace with an argument of the skill' {
@@ -164,9 +192,18 @@ Describe 'Skill' {
     It 'installs and elevates the way the design says' {
         foreach ($term in 'releases/download', 'install.ps1', 'SHA256SUMS', 'DownloadData', '[scriptblock]::Create', '-EncodedCommand',
             '-Verb RunAs -Wait -PassThru', '-ResultId', "-ReadResult '<id>' -Json", 'result-incomplete', 'result-untrusted', 'result-missing',
-            '.windows-tuneup', 'ProgramW6432Dir', '[Environment]::SystemDirectory') {
+            '.windows-tuneup', 'ProgramW6432Dir', '[Environment]::SystemDirectory', 'Sysnative', "[Environment]::GetFolderPath('Windows')",
+            '[Environment]::Is64BitProcess', "'MS DM Server'", 'PartOfDomain', '[int]$response.StatusCode -ne 404', 'has no $zipName',
+            'use-installed', 'IT department', '600000 ms', 'still open') {
             $Commands.Contains($term) | Should -BeTrue -Because $term
         }
+        # The installer runs only when its SHA256 is the one of its line in SHA256SUMS and the one approved.
+        $Commands.Contains('$actual -ne $line.Groups[1].Value') | Should -BeTrue
+        $Commands.Contains('$actual -ne $approved.ToLowerInvariant()') | Should -BeTrue
+        # The elevated process ends with the exit code of the tool, and the id is printed before it starts.
+        $Commands | Should -Match '(?m)^\$command = "[^"\r\n]*; exit `\$LASTEXITCODE"\r?$'
+        $Commands.IndexOf('"id=$id"') | Should -BeGreaterThan 0
+        $Commands.IndexOf('"id=$id"') | Should -BeLessThan $Commands.IndexOf('Start-Process -FilePath $powershell')
     }
 
     It 'never runs what was downloaded from a folder, nor pipes it into iex, nor takes a path from an environment variable' {

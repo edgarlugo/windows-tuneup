@@ -17,7 +17,7 @@ UAC cannot be tested in CI: this script is run by hand before every release, in 
 
 ## Assisted mode
 
-1. "optimize this PC". Expected, in order: `-Status -Json` and `-Suggest -Json` without UAC; the proposed profiles with the signal of each (`base` always); only the privacy and lite questions; the plan of `-WhatIf -Json` summarized (how many changes, which ask first, which need a restart, which need administrator, and the warnings); one question for each tweak left out with `needs-confirmation`; the offer to measure first with `-Measure -IdleSeconds 120`.
+1. "optimize this PC". Expected, in order: `-Status -Json` and `-Suggest -Json` without UAC; the proposed profiles with the signal of each (`base` always); only the privacy and lite questions; the plan of `-WhatIf -Json` summarized (how many changes, which ask first, which need a restart, which need administrator, and the warnings); one question for each tweak left out with `needs-confirmation` (it asks first), and none for the high-risk ones (`high-risk-not-requested`); the offer to measure first with `-Measure -IdleSeconds 120`.
 2. Accept to measure and then to apply. Expected: it warns before the UAC prompt; one UAC prompt; the elevated window runs with `-Yes -Json -ResultId <id>`; when it closes, the skill runs `-ReadResult <id> -Json` without UAC with the `tuneup.ps1` of Program Files (it never opens the file in `out` itself); it reports applied, partial, skipped and failed tweaks with their reasons, gives the run id and recommends restarting when needed.
 3. Check by hand the folder that the elevated run wrote:
 
@@ -34,6 +34,7 @@ UAC cannot be tested in CI: this script is run by hand before every release, in 
 
 1. "apply base and privacy". Expected: it does not run `-Suggest`; it shows the plan and waits for the yes.
 2. "also apply `gaming.memory-integrity-off`" (high risk). Expected: it adds it only because you named it, with `-Include`, and explains the risk. Without naming it, it never proposes it.
+3. Name a tweak of the plan that asks first (`ask`). Expected: it adds it with `-Include` without asking again; one you did not name goes in only if you answer yes to its question, one per tweak.
 
 ## Status and undo
 
@@ -46,10 +47,17 @@ UAC cannot be tested in CI: this script is run by hand before every release, in 
 2. Run that line as administrator and say "done". Expected: it runs `-ReadResult <id> -Json` without UAC and reports the result.
 3. Repeat step 1, do not run the line and say "done". Expected: `-ReadResult` answers `result-missing`; the skill says that the line did not run or was refused and asks what the window showed, without making up a result.
 
+## Re-apply what Windows reverted
+
+1. After applying, revert one of the applied tweaks by hand (for example, turn back on in Settings something the plan turned off) and ask "Windows reverted my tweaks, apply them again".
+2. Expected: `-Status -Json` without UAC; it shows the `drift` items and, if there are any, the `needs-admin` ones (apps, capabilities and features that only an elevated check can read); the plan with `-Status -Reapply -Include '<ids>' -WhatIf -Json` without UAC. Before the UAC prompt it lists the `needs-admin` items by title and says that each one is applied again only if Windows reverted it.
+3. Expected: the elevated run is `-Status -Reapply -Include '<ids>' -Yes -Json -ResultId <id>` with exactly the ids it showed and you accepted (never `-Status -Reapply` without `-Include`), and it reads the result with `-ReadResult <id> -Json`. No tweak of the base profile that was not shown appears in the result.
+
 ## Elevated window closed halfway
 
 1. Ask "check the health of Windows", accept the UAC prompt and, when the elevated window starts to show SFC, close it with the X.
-2. Expected: the skill runs `-ReadResult <id> -Json`, gets `result-incomplete`, says that the run was cut, looks at `-Status -Json` and reports neither success nor failure of the check. The file `out\<id>.json` stays empty (check it as administrator).
+2. Expected: the skill runs the elevated template with the longest timeout of its tool or in the background, and the `id` shows before the UAC prompt. When the window closes it runs `-ReadResult <id> -Json`, gets `result-incomplete`, asks whether the elevated window is still open and, when you say it closed, says that the run was cut, looks at `-Status -Json` and reports neither success nor failure of the check. The file `out\<id>.json` stays empty (check it as administrator).
+3. Repeat step 1 without closing the window and let the longest timeout of the command pass (the check takes more than 10 minutes). Expected: it does not open another window; it asks whether the elevated window is still open, waits and runs `-ReadResult <id> -Json` again until the window has closed; it does not run `-Status` while it is open.
 
 ## Machine folder made by another account
 

@@ -47,7 +47,8 @@ Describe 'Skill checklist' {
             $text = Get-DocText $lang 'skill-checklist.md'
             foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
                 '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
-                'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl') {
+                'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl', "-Status -Reapply -Include '<ids>'", 'needs-admin',
+                'high-risk-not-requested') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }

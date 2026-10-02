@@ -30,7 +30,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 | `reason` | Meaning | Do |
 |---|---|---|
-| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed, the process was ended) | Run `-Status -Json` and report what is in place; do not assume success or failure |
+| `result-incomplete` | The run is still going, or it was stopped before it wrote (its window was closed, the process was ended) | Ask the user whether the elevated window is still open. While it is, wait and run `-ReadResult` again later. Once it has closed and the result is still incomplete, run `-Status -Json` and report what is in place; do not assume success or failure |
 | `result-untrusted` | The result, or the state folder of the machine, could have been written by an account that is not an administrator | Stop and tell the user the `message`: an administrator has to delete that folder. Do not retry, and do not read the file by other means |
 | `result-missing` | There is no result with that id | After exit `1` of the elevated process: it refused before it wrote (the elevated window showed why): give the user the command for a PowerShell as administrator, so they can see the message. After exit `2`: run `-Status -Json`. When the user ran the command themselves: it did not run, or it was refused; ask what the window said |
 
@@ -44,7 +44,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 ## `list`
 
 - `profiles[]`: `id`, `aliases` (other names the user may use), `title`, `description`, `tweakCount` (tweaks that suit this PC), `needsAdmin`.
-- `tweaks[]`: `id`, `title`, `why`, `risk`, `ask`, `type`, `scope`, `needsAdmin`, `rebootRequired`, `requires`, `profiles` (empty: only by name). A tweak of `high` risk, or one that asks first, is applied only when the user names it.
+- `tweaks[]`: `id`, `title`, `why`, `risk`, `ask`, `type`, `scope`, `needsAdmin`, `rebootRequired`, `requires`, `profiles` (empty: only by name). A tweak of `high` risk is applied only when the user names it; one that asks first (`ask`), only when the user names it or says yes to a question about that one tweak.
 - `incompatible[]`: `id` and `reason` (`incompatible`: Windows version or edition; `not-applicable-hardware`: battery or not; `managed-device`: a policy on a managed PC).
 
 ## `plan`
@@ -66,7 +66,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 | `not-present` | The app or feature is not on this PC |
 | `state-unreadable` | Its state could not be read |
 | `high-risk-not-requested` | High risk: applied only when the user names it |
-| `needs-confirmation` | It asks first: ask the user (with `title` and `why`), then `-Include '<id>'` |
+| `needs-confirmation` | It asks first: ask the user one question about this tweak (with `title` and `why`); if they say yes, add it with `-Include '<id>'` |
 
 - `preflight[]`: `id` and `message`, warnings that never stop the run: `pending-reboot`, `low-disk`, `restore-disabled` (no restore point; `-Undo` still works), `restore-blocked`, `managed-device`, `untrusted-location`. Mention each one before asking for the yes.
 
@@ -101,4 +101,4 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 ## `error`
 
-`message` and `details`; `reason` only for `-ReadResult` (see "Reading an elevated run"). Explain them. If the message says that the plan has system changes or that a run needs administrator, offer the elevated run; if it says that this Windows is not supported, stop.
+`message` and `details`, and sometimes a `reason`: `needs-admin` (`-Undo` of a run with system changes, or `-Health`, without administrator: offer the elevated run, after the UAC question), or the reasons of `-ReadResult` (see "Reading an elevated run"). Decide by `reason`, never by the text of `message`. Explain the message. If it says that the plan has system changes, offer the elevated run; if it says that this Windows is not supported, stop.
