@@ -221,5 +221,11 @@
   "menu.undo.tweakAlreadyUndone": "El ajuste \"{0}\" ya estaba deshecho.",
   "menu.health.needsAdmin": "La salud de Windows necesita PowerShell como administrador: ábrelo así y vuelve a correr tuneup.ps1.",
   "menu.measure.range": "Escribe un número entre {0} y {1}.",
-  "menu.nonInteractive": "El menú necesita poder preguntar, y PowerShell se abrió con -NonInteractive, que no le deja leer respuestas (tampoco de una entrada redirigida). Ábrelo sin esa opción, o usa un comando (por ejemplo -WhatIf o -Status)."
+  "menu.nonInteractive": "El menú necesita poder preguntar, y PowerShell se abrió con -NonInteractive, que no le deja leer respuestas (tampoco de una entrada redirigida). Ábrelo sin esa opción, o usa un comando (por ejemplo -WhatIf o -Status).",
+  "list.profiles": "Perfiles:",
+  "list.profile": "  {0} - {1}: {2} ajustes para este equipo{3}",
+  "list.tweaks": "Ajustes para este equipo:",
+  "list.tweak": "  {0} - {1} [{2}]{3}",
+  "list.incompatible": "No son para este equipo:",
+  "list.incompatibleLine": "  {0}: {1}"
 }

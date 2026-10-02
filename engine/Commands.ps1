@@ -219,6 +219,21 @@ function Invoke-TuneupMeasureCommand {
     $Context.ExitCode = 0
 }
 
+# -List: the profiles and the tweaks that suit this machine. It reads the catalog, so it refuses an
+# unsupported Windows and a catalog with errors like any command that plans.
+function Invoke-TuneupListCommand {
+    param([Parameter(Mandatory)]$Context)
+    $ready = Get-TuneupPlanningDefinition -Context $Context
+    if ($ready.Message) {
+        Write-TuneupCommandError -Context $Context -Message $ready.Message -Details $ready.Details
+        return
+    }
+    $document = Get-TuneupListDocument -Definition $ready.Definition -Environment (Get-TuneupContextEnvironment -Context $Context)
+    $Context.Result = $document
+    Write-TuneupListReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+    $Context.ExitCode = 0
+}
+
 # Windows Server and builds older than 19041 are refused unless -Force; Server then plans like
 # Enterprise, which supports every policy that Server supports. Gives the message of the refusal, or
 # nothing. Helpers like this one return values and never write a report: with -Json the report is
