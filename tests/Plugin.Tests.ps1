@@ -299,18 +299,23 @@ Describe 'Skill' {
         # The guard of the elevated snippet, run on arguments that the templates give and on ones they never should.
         $elevated = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value } |
             Where-Object { $_.Contains('-Verb RunAs') -and $_.Contains('$toolArguments') })[0]
-        $guard = [regex]::Match($elevated, "(?m)^if \(\`$id -cnotmatch '(?<id>[^']+)' -or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`"\) \{ throw 'invalid-arguments")
+        $guard = [regex]::Match($elevated, "(?m)^if \(\`$id -cnotmatch '(?<id>[^']+)' -or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`" -or \`$toolArguments -match '(?<forbidden>[^']+)'\) \{ throw 'invalid-arguments")
         $guard.Success | Should -BeTrue
         $elevated.IndexOf($guard.Value) | Should -BeLessThan $elevated.IndexOf('Start-Process')
         '3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12' | Should -MatchExactly $guard.Groups['id'].Value
         foreach ($bad in '3F2A9C1E-0B7D-4E55-9A10-2C4B6D8E0F12', "x'; calc; '", 'last') { $bad | Should -Not -MatchExactly $guard.Groups['id'].Value }
+        # Arguments pass when they have the form of the tool (case-sensitive) and name no option the skill never passes (any case).
+        $passes = { param([string]$Arguments) ($Arguments -cmatch $guard.Groups['arguments'].Value) -and -not ($Arguments -match $guard.Groups['forbidden'].Value) }
         foreach ($good in "-Profile 'gaming,privacy' -Yes -Json -Lang en", "-Undo '20261002-120000-01' -Tweak 'privacy.telemetry' -Json -Lang es",
             "-Status -Reapply -Include 'lite.xbox-app,base.ads' -Yes -Json -Lang en", '-Health -Repair -Json -Lang es') {
-            $good | Should -MatchExactly $guard.Groups['arguments'].Value
+            & $passes $good | Should -BeTrue -Because $good
         }
         foreach ($bad in "-Profile 'gaming'; Start-Process calc", "-Profile 'gaming' -Yes -Json -Lang en; calc", "-Profile 'port$([char]0x00E1)til' -Json -Lang es",
-            "-Profile ' gaming' -Json -Lang en", "-Undo 'x`$(calc)' -Json -Lang en", "-Profile `"gaming`" -Json -Lang en", "-Lang fr") {
-            $bad | Should -Not -MatchExactly $guard.Groups['arguments'].Value
+            "-Profile ' gaming' -Json -Lang en", "-Undo 'x`$(calc)' -Json -Lang en", "-Profile `"gaming`" -Json -Lang en", "-Lang fr",
+            "-Profile 'base' -Force -Yes -Json -Lang en", "-Profile 'base' -force -Yes -Json -Lang en", "-Status -StateRoot 'x' -Json -Lang en",
+            "-Profile 'base' -CatalogPath 'x' -Yes -Json -Lang en", "-Profile 'base' -actionspath 'x' -Yes -Json -Lang en",
+            "-Profile 'base' -ProfilesPath 'x' -Yes -Json -Lang en", "-Health -Json -Lang en -ResultId 'abcdefgh'") {
+            & $passes $bad | Should -BeFalse -Because $bad
         }
     }
 

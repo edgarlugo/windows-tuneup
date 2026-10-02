@@ -9,7 +9,7 @@ Replace only what is written between `<` and `>`. Every id you put on a command 
 - A run or a measurement: a `runId` of `-Status -Json`, or the `id` of a `measure` document, matching `^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$`.
 - A result id: the GUID you made in a call of its own ("Run elevated"), matching `^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
 
-The elevated snippet checks the result id and the form of `$toolArguments` again and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
+The elevated snippet checks the result id and the form of `$toolArguments` again, and that `$toolArguments` names none of the options the skill never passes (`-ResultId` included: the snippet adds it), and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
 
 ## Paths
 
@@ -75,7 +75,7 @@ Then, only after the user said yes to this UAC prompt, run this snippet with tha
 if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $id = '<result id>'
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
-if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-[A-Za-z]+|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$") { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool; nothing ran.' }
+if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-[A-Za-z]+|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$" -or $toolArguments -match '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath|ResultId)\b') { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool, or name an option the skill never passes; nothing ran.' }
 $modules = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules'
 $command = "[Environment]::SetEnvironmentVariable('PSModulePath', '$modules', 'Process'); & '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
