@@ -1,5 +1,5 @@
 <Configuration>
-  <MemoryInMB>8192</MemoryInMB>
+  <MemoryInMB>__MEMORY__</MemoryInMB>
   <MappedFolders>
     <MappedFolder>
       <HostFolder>__REPO__</HostFolder>

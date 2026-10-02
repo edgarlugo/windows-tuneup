@@ -6,7 +6,9 @@
     It uses the real state folders of the sandbox (no -StateRoot), so the hardened folder is tested
     too. For each profile: snapshot, apply with -Yes (the tweaks that ask first are asked for by
     name), -Status (all in place), apply again (nothing left to apply), -Undo last, snapshot again and
-    compare: no difference may remain. Then a re-apply check: a tweak of base is put back as it was,
+    compare: no difference may remain. When a profile fails, or its second apply changed something,
+    every run that -Undo last still finds is undone before the next profile, so it starts clean (the
+    report says what was undone, and which run could not be). Then a re-apply check: a tweak of base is put back as it was,
     -Status shows the drift, -Status -Reapply applies it again, and two undos leave no difference.
     Store apps and OneDrive are left out: the sandbox has no Store and no winget, so their undo cannot
     run here (docs/es/vm-checklist.md covers them in a virtual machine). Writes e2e-report.json and
@@ -35,6 +37,27 @@ function Invoke-E2ETuneup([string[]]$Arguments) {
     $document = $null
     try { $document = $text | ConvertFrom-Json } catch { Write-E2ELog "not JSON: $text" }
     [pscustomobject]@{ ExitCode = $code; Document = $document }
+}
+
+# Undoes, newest first, every run that -Undo last still finds, so the next profile starts from the
+# state of the sandbox and not from what a failed profile (or a second apply that changed something)
+# left behind. Stops at a run that an undo does not take off the list (it could not restore all of
+# it): gives the undos made and that run, if any.
+function Invoke-E2ECleanup {
+    $undone = @()
+    $maxUndos = 20
+    for ($i = 0; $i -lt $maxUndos; $i++) {
+        $run = Resolve-TuneupRun -RunId 'last'
+        if (-not $run) { break }
+        $undo = Invoke-E2ETuneup @('-Undo', $run.Id)
+        $undone += "$($run.Id): exit $($undo.ExitCode)"
+        $next = Resolve-TuneupRun -RunId 'last'
+        if ($next -and $next.Id -eq $run.Id) {
+            return [pscustomobject]@{ undone = $undone; left = $run.Id }
+        }
+    }
+    $left = Resolve-TuneupRun -RunId 'last'
+    [pscustomobject]@{ undone = $undone; left = $(if ($left) { $left.Id } else { $null }) }
 }
 
 function Get-E2EProblem($Result) {
@@ -87,6 +110,12 @@ try {
         }
         $entry.passed = ($apply.ExitCode -eq 0 -and $entry.notInPlace.Count -eq 0 -and $entry.secondApply -eq 0 -and
             $undo.ExitCode -eq 0 -and $entry.differences.Count -eq 0)
+        # A second apply that changed something left two runs and -Undo last only undid one of them.
+        $entry.cleanup = $null
+        if (-not $entry.passed -or $again.Document.command -eq 'apply') {
+            Write-E2ELog "cleanup after $profileId"
+            $entry.cleanup = Invoke-E2ECleanup
+        }
         $report.profiles += [pscustomobject]$entry
     }
 
@@ -133,6 +162,10 @@ foreach ($entry in $report.profiles | Where-Object { -not $_.passed }) {
     $lines += @('', "## $($entry.profile)")
     foreach ($line in @($entry.problems) + @($entry.notInPlace) + @($entry.undoProblems)) { $lines += "- $line" }
     foreach ($difference in $entry.differences) { $lines += "- $($difference.kind) $($difference.name): $($difference.before) -> $($difference.after)" }
+    if ($entry.cleanup) {
+        $lines += "- cleanup: $(if (@($entry.cleanup.undone).Count) { @($entry.cleanup.undone) -join '; ' } else { 'nothing to undo' })"
+        if ($entry.cleanup.left) { $lines += "- run $($entry.cleanup.left) could not be fully undone: the profiles after this one did not start clean" }
+    }
 }
 if ($report.reapply) { $lines += @('', "Re-apply of $($report.reapply.tweak): $(if ($report.reapply.passed) { 'PASS' } else { 'FAIL' })") }
 Set-Content -LiteralPath (Join-Path $Output 'e2e-report.md') -Value $lines -Encoding UTF8

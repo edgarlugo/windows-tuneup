@@ -62,5 +62,7 @@ Describe 'End-to-end snapshots' {
         $folders[1].HostFolder | Should -Be 'C:\out'
         $folders[1].ReadOnly | Should -Be 'false'
         $xml.Configuration.LogonCommand.Command | Should -Match 'Invoke-E2E\.ps1 -Repo C:\\windows-tuneup -Output C:\\e2e-out -Profiles base,lite -KeepOpen$'
+        $xml.Configuration.MemoryInMB | Should -Be '4096'
+        ([xml](New-E2EConfiguration -Template $template -Repo 'C:\r' -Output 'C:\o' -MemoryInMB 8192)).Configuration.MemoryInMB | Should -Be '8192'
     }
 }

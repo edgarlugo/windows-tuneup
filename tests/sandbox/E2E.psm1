@@ -90,16 +90,18 @@ function Compare-E2ESnapshot {
     }
 }
 
-# The .wsb file for a run: the repository mapped read-only, the output folder writable, and the logon
-# command that starts Invoke-E2E.ps1. Paths are escaped for XML.
+# The .wsb file for a run: the memory of the sandbox, the repository mapped read-only, the output
+# folder writable, and the logon command that starts Invoke-E2E.ps1. Paths are escaped for XML.
 function New-E2EConfiguration {
     param(
         [Parameter(Mandatory)][string]$Template,
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][string]$Output,
-        [AllowEmptyString()][string]$Arguments = ''
+        [AllowEmptyString()][string]$Arguments = '',
+        [ValidateRange(2048, 65536)][int]$MemoryInMB = 4096
     )
-    $text = $Template.Replace('__REPO__', [Security.SecurityElement]::Escape($Repo)).
+    $text = $Template.Replace('__MEMORY__', [string]$MemoryInMB).
+        Replace('__REPO__', [Security.SecurityElement]::Escape($Repo)).
         Replace('__OUTPUT__', [Security.SecurityElement]::Escape($Output)).
         Replace('__ARGUMENTS__', [Security.SecurityElement]::Escape($Arguments))
     [xml]$text | Out-Null
