@@ -131,8 +131,11 @@ function Invoke-TuneupReapply {
             Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.unknownTweak' -Format ($unknown -join ', '))
             return
         }
+        # Without administrator, -Status cannot check some tweaks (apps, capabilities, features): one of
+        # those may have been reverted, and the warning says so.
+        $notDriftedKey = $(if ((Get-TuneupContextEnvironment -Context $Context).IsAdmin) { 'reapply.notReverted' } else { 'reapply.notRevertedUnverified' })
         Invoke-TuneupContextStep -Context $Context -Step {
-            foreach ($id in @($named | Where-Object { $ids -notcontains $_ })) { Write-Warning "Tweak $id was not reverted by Windows: it is not applied again" }
+            foreach ($id in @($named | Where-Object { $ids -notcontains $_ })) { Write-Warning (Get-TuneupText -Key $notDriftedKey -Format $id) }
         }
         $ids = @($ids | Where-Object { $named -contains $_ })
         $confirmed = $ids

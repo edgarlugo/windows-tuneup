@@ -363,8 +363,16 @@ Describe 'Re-applying what drifted' {
         $context.ProfilesPath = Join-Path $dir 'profiles'
         $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.b', 'rea.a', 'test.one') -Yes })[0]
         ($document.results | ForEach-Object { $_.id }) -join ',' | Should -Be 'rea.b'
-        @($document.warnings | Where-Object { $_ -match 'rea\.a' -and $_ -match 'not reverted' }).Count | Should -Be 1
-        @($document.warnings | Where-Object { $_ -match 'test\.one' -and $_ -match 'not reverted' }).Count | Should -Be 1
+        # Without administrator some tweaks cannot be checked: the warning says so.
+        $unverified = 'Tweak {0} was not reverted by Windows, or it cannot be checked without administrator: it is not applied again.'
+        @($document.warnings) | Should -Contain ($unverified -f 'rea.a')
+        @($document.warnings) | Should -Contain ($unverified -f 'test.one')
+        $elevated = New-TestContext -Json
+        $elevated.CatalogPath = Join-Path $dir 'catalog'
+        $elevated.ProfilesPath = Join-Path $dir 'profiles'
+        $elevated.Environment = New-TestEnvironment -IsAdmin $true
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $elevated -Reapply -Include @('rea.a') -PlanOnly })[0]
+        @($plan.warnings) | Should -Contain 'Tweak rea.a was not reverted by Windows: it is not applied again.'
         $unknown = New-TestContext -Json
         $unknown.CatalogPath = Join-Path $dir 'catalog'
         $unknown.ProfilesPath = Join-Path $dir 'profiles'

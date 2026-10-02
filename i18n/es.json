@@ -156,6 +156,8 @@
   "aborted.saved": "La corrida se detuvo por un error. El resultado de la corrida {0} quedó guardado; para deshacerla: .\\tuneup.ps1 -Undo {0}",
   "reason.aborted": "no se aplicó: la corrida se detuvo por un error",
   "reapply.noneUnverified": "Nada que volver a aplicar entre lo que se pudo comprobar. Ajustes que necesitan administrador para comprobarse: {0}; ejecútalo de nuevo como administrador.",
+  "reapply.notReverted": "Windows no revirtió el ajuste {0}: no se vuelve a aplicar.",
+  "reapply.notRevertedUnverified": "Windows no revirtió el ajuste {0}, o no se puede revisar sin administrador: no se vuelve a aplicar.",
   "reapply.leftOut": "No se vuelve a aplicar {0}: {1}",
   "menu.title": "windows-tuneup {0} - Windows {1} {2} (compilación {3})",
   "menu.admin.yes": "Corre como administrador.",

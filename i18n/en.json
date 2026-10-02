@@ -156,6 +156,8 @@
   "aborted.saved": "The run stopped because of an error. The result of run {0} was saved; to undo it: .\\tuneup.ps1 -Undo {0}",
   "reason.aborted": "not applied: the run stopped because of an error",
   "reapply.noneUnverified": "Nothing to apply again among what could be checked. Tweaks that need administrator to be checked: {0}; run it again as administrator.",
+  "reapply.notReverted": "Tweak {0} was not reverted by Windows: it is not applied again.",
+  "reapply.notRevertedUnverified": "Tweak {0} was not reverted by Windows, or it cannot be checked without administrator: it is not applied again.",
   "reapply.leftOut": "Not applied again, {0}: {1}",
   "menu.title": "windows-tuneup {0} - Windows {1} {2} (build {3})",
   "menu.admin.yes": "Running as administrator.",
