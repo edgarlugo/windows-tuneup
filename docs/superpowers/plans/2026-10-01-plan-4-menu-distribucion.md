@@ -7571,7 +7571,7 @@ git commit -m "fix: menú con plurales, sí con tilde y entradas inválidas"
 Diseño (sección 12, punto 9):
 
 - `build/package.ps1 -OutputPath <carpeta> [-Version <x.y.z>]` arma `windows-tuneup-<versión>.zip` con una carpeta `windows-tuneup-<versión>/` y solo lo que corre y lo que se lee (`tuneup.ps1`, `engine/**`, `i18n`, `catalog/*.json` sin `notes`, `profiles`, `actions`, `docs/es`, `docs/en`, `README.md`, `LICENSE`). En un checkout de git toma solo archivos seguidos (`git ls-files`): **los archivos nuevos tienen que estar commiteados** antes de empaquetar; fuera de un checkout (una copia extraída) toma los archivos de las carpetas previstas. git se llama con `$ErrorActionPreference = 'Continue'`: fuera de un checkout escribe en la salida de error y, con `Stop`, Windows PowerShell 5.1 lanzaba la excepción aunque se redirigiera con `2>$null` (lo encontró la copia rearmada desde el plan, que no es un repositorio; una prueba arma el paquete desde una copia así). Las entradas van ordenadas y con la fecha del último commit, así el mismo commit da el mismo zip en la misma máquina (comprobado: dos armados seguidos, mismo SHA256). Escribe además `install.ps1` con la versión y el SHA256 del zip reemplazando `'__TUNEUP_VERSION__'` y `'__TUNEUP_ZIP_SHA256__'`, `SHA256SUMS` (formato de `sha256sum`: hash, dos espacios, nombre; LF) y `release-notes.md` desde la plantilla. El zip se arma con `System.IO.Compression` y barras `/`, no con `Compress-Archive` (en Windows PowerShell 5.1 escribe `\`).
-- `install.ps1`: sin una versión y un hash válidos se niega; descarga `<Source>/v<versión>/windows-tuneup-<versión>.zip` (o lo copia si `-Source` es una carpeta: pruebas y sin conexión), compara el SHA256 y no extrae nada si difiere; rechaza entradas fuera de su carpeta; exige `tuneup.ps1` y `engine\Tuneup.psm1`; reemplaza solo una copia anterior de windows-tuneup; quita la marca de descarga (`Unblock-File`). Elevado instala en `%ProgramFiles%\windows-tuneup`; sin elevar, en `windows-tuneup-<versión>` de la carpeta actual y avisa que esa copia no debe correrse como administrador. Todo corre dentro de `& { }` y los errores se lanzan (nunca `exit`): se comprobó que por `irm | iex` los valores por defecto del `param()` se aplican, `$ErrorActionPreference` y las variables no quedan en la sesión, y un error no cierra la consola. Mensajes en inglés (corre antes de que existan los textos de la herramienta).
+- `install.ps1`: sin una versión y un hash válidos se niega; solo descarga por HTTPS (`-Source` que no empiece con `https://` y no sea una carpeta se rechaza); descarga `<Source>/v<versión>/windows-tuneup-<versión>.zip` (o lo copia si `-Source` es una carpeta: pruebas y sin conexión), compara el SHA256 y no extrae nada si difiere (nada de lo descargado se lee más que como bytes antes de esa comprobación); rechaza entradas fuera de su carpeta **y entradas que no cuelguen de `windows-tuneup-<versión>/`**; exige `tuneup.ps1` y `engine\Tuneup.psm1`; reemplaza solo una copia anterior de windows-tuneup y **se niega si esa carpeta es un vínculo (junction o enlace simbólico)**; quita la marca de descarga (`Unblock-File`). Elevado instala en `%ProgramFiles%\windows-tuneup` (se resuelve con `[Environment]::GetFolderPath`) y **le da a la carpeta una lista de acceso solo de administradores** (dueño Administradores, sin herencia, Administradores y SYSTEM control total, Usuarios lectura y ejecución; se fija con la carpeta aún vacía para que lo copiado la herede, con `[System.IO.Directory]::SetAccessControl`, que no pide el privilegio de auditoría que sí pide `Set-Acl`); **antes de reemplazar una copia elevada anterior comprueba que sea de los administradores y que ningún otro pueda escribirla (`Get-InstallFolderProblem` / `Get-InstallFolderWriter`), y si no, se niega sin instalar nada**. Sin elevar, instala en `windows-tuneup-<versión>` de la carpeta actual y avisa que esa copia no debe correrse como administrador. Todo corre dentro de `& { }` y los errores se lanzan (nunca `exit`): por `irm | iex` los valores por defecto del `param()` se aplican, `$ErrorActionPreference` y las variables del instalador no quedan en la sesión y un error no cierra la consola (salvedad: si la sesión ya tiene una variable con el nombre de un parámetro, p. ej. `$Version`, el `iex` la pisa con el valor por defecto). Mensajes en inglés (corre antes de que existan los textos de la herramienta).
 - Comprobado en la copia: instalar desde la carpeta del paquete, el `install.ps1` armado por `iex` (con `-Source` cambiado a la carpeta local en el texto), un hash equivocado (no crea la carpeta de destino), el `install.ps1` del repositorio sin versión, un zip con `../escaped.txt` y la copia instalada corriendo `-WhatIf -Json` con `toolVersion` 0.1.0.
 
 - [ ] **Step 1: Pruebas que fallan**
@@ -7609,6 +7609,13 @@ BeforeAll {
     function Get-ZipEntry([string]$Path) {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
         try { @($archive.Entries | ForEach-Object { $_.FullName }) } finally { $archive.Dispose() }
+    }
+
+    # The folder checks of the installer live inside it (it is one file); they are loaded from its syntax tree.
+    $installerAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Repo 'install.ps1'), [ref]$null, [ref]$null)
+    foreach ($functionName in 'Get-InstallFolderProblem', 'Get-InstallFolderWriter', 'New-InstallFolderSecurity') {
+        $definition = $installerAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        . ([scriptblock]::Create($definition.Extent.Text))
     }
 
     $script:Dist = Join-Path $TestDrive 'dist'
@@ -7706,6 +7713,14 @@ Describe 'install.ps1' {
         $run.Output | Should -Match 'has no release in it'
     }
 
+    It 'only downloads over HTTPS' {
+        $destination = Join-Path $TestDrive 'plain-http'
+        $run = Invoke-Installer $Built.Installer @('-Source', 'http://example.invalid/releases', '-Destination', $destination)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match 'only downloads over HTTPS'
+        Test-Path -LiteralPath $destination | Should -BeFalse
+    }
+
     It 'refuses a zip with an entry outside its folder' {
         $source = Join-Path $TestDrive 'evil'
         New-Item -ItemType Directory -Path $source | Out-Null
@@ -7726,6 +7741,26 @@ Describe 'install.ps1' {
         Test-Path -LiteralPath (Join-Path $TestDrive 'evil-out') | Should -BeFalse
     }
 
+    It 'refuses a zip whose entries are not under the folder of its version' {
+        $source = Join-Path $TestDrive 'stray'
+        New-Item -ItemType Directory -Path $source | Out-Null
+        $zip = Join-Path $source 'windows-tuneup-9.9.9.zip'
+        $archive = [System.IO.Compression.ZipFile]::Open($zip, [System.IO.Compression.ZipArchiveMode]::Create)
+        try {
+            foreach ($name in 'windows-tuneup-9.9.9/tuneup.ps1', 'windows-tuneup-9.9.9/engine/Tuneup.psm1', 'other-folder/payload.ps1') {
+                $writer = New-Object System.IO.StreamWriter -ArgumentList $archive.CreateEntry($name).Open()
+                try { $writer.Write('x') } finally { $writer.Dispose() }
+            }
+        } finally {
+            $archive.Dispose()
+        }
+        $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+        $run = Invoke-Installer (Join-Path $Repo 'install.ps1') @('-Version', '9.9.9', '-Sha256', $hash, '-Source', $source, '-Destination', (Join-Path $TestDrive 'stray-out'))
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match 'entry outside its folder: other-folder/payload\.ps1'
+        Test-Path -LiteralPath (Join-Path $TestDrive 'stray-out') | Should -BeFalse
+    }
+
     It 'extracts to the current folder when not elevated' -Skip:$Elevated {
         $folder = Join-Path $TestDrive 'here'
         New-Item -ItemType Directory -Path $folder | Out-Null
@@ -7733,6 +7768,77 @@ Describe 'install.ps1' {
         $run.ExitCode | Should -Be 0
         $run.Output | Should -Match 'never as administrator'
         Test-Path -LiteralPath (Join-Path $folder "$Top\tuneup.ps1") | Should -BeTrue
+    }
+
+    It 'installs with a folder that only administrators can change when elevated' -Skip:(-not $Elevated) {
+        $destination = Join-Path $TestDrive 'admin-only'
+        $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        Get-InstallFolderProblem $destination | Should -BeNullOrEmpty
+        Get-InstallFolderProblem (Join-Path $destination 'engine') | Should -BeNullOrEmpty
+    }
+
+    It 'refuses to replace an elevated copy that users can change' -Skip:(-not $Elevated) {
+        $destination = Join-Path $TestDrive 'weakened'
+        (Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)).ExitCode | Should -Be 0
+        $acl = [System.IO.Directory]::GetAccessControl($destination)
+        $users = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $users, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        [System.IO.Directory]::SetAccessControl($destination, $acl)
+        $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
+        $run.ExitCode | Should -Be 1
+        $run.Output | Should -Match 'cannot be trusted'
+    }
+}
+
+Describe 'the folder checks of install.ps1' {
+    It 'trusts a folder that belongs to the system and that users cannot change' {
+        $system32 = Join-Path $env:SystemRoot 'System32'
+        Get-InstallFolderProblem $system32 | Should -BeNullOrEmpty
+    }
+
+    It 'finds who besides the administrators and the system can change a folder' {
+        $folder = Join-Path $TestDrive 'users-write'
+        New-Item -ItemType Directory -Path $folder | Out-Null
+        $acl = [System.IO.Directory]::GetAccessControl($folder)
+        $users = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $users, 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        [System.IO.Directory]::SetAccessControl($folder, $acl)
+        Get-InstallFolderWriter $folder | Should -Not -BeNullOrEmpty
+        Get-InstallFolderProblem $folder | Should -Not -BeNullOrEmpty
+        Get-InstallFolderWriter (Join-Path $env:SystemRoot 'System32') | Should -BeNullOrEmpty
+    }
+
+    It 'does not trust a folder owned by a user' -Skip:$Elevated {
+        $folder = Join-Path $TestDrive 'owned-by-user'
+        New-Item -ItemType Directory -Path $folder | Out-Null
+        Get-InstallFolderProblem $folder | Should -Match 'not by Administrators'
+    }
+
+    It 'does not trust a link, whatever it points to' {
+        $target = Join-Path $TestDrive 'link-target'
+        $link = Join-Path $TestDrive 'link'
+        New-Item -ItemType Directory -Path $target | Out-Null
+        New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+        try {
+            Get-InstallFolderProblem $link | Should -Match 'is a link'
+        } finally {
+            [System.IO.Directory]::Delete($link)
+        }
+    }
+
+    It 'builds a folder security that is owned by Administrators and gives users only read and run' {
+        $security = New-InstallFolderSecurity
+        $sddl = $security.GetSecurityDescriptorSddlForm('All')
+        $sddl | Should -Match '^O:BA'
+        $sddl | Should -Match 'D:P'
+        $rules = @($security.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))
+        $rules.Count | Should -Be 3
+        $write = [int][System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
+        $users = @($rules | Where-Object { $_.IdentityReference.Value -eq 'S-1-5-32-545' })
+        $users.Count | Should -Be 1
+        ([int]$users[0].FileSystemRights -band $write) | Should -Be 0
+        @($rules | Where-Object { $_.IdentityReference.Value -in 'S-1-5-32-544', 'S-1-5-18' }).Count | Should -Be 2
     }
 }
 ```
@@ -7753,12 +7859,16 @@ Crear `install.ps1`:
 .DESCRIPTION
     The install.ps1 attached to a release carries the version and the SHA256 of its zip, so
         irm https://github.com/edgarlugo/windows-tuneup/releases/download/v<version>/install.ps1 | iex
-    installs exactly that release: a zip whose SHA256 differs is never extracted.
+    installs exactly that release: a zip whose SHA256 differs is never extracted, and nothing that
+    was downloaded runs before that check.
 
-    As administrator it installs in %ProgramFiles%\windows-tuneup, which only administrators can
-    change: the place to run it from as administrator. Without elevation it extracts to -Destination
-    (by default windows-tuneup-<version> in the current folder); that copy is for the tweaks of your
-    user only and must not be run as administrator, because other programs of your account can change it.
+    As administrator it installs in %ProgramFiles%\windows-tuneup and gives the folder an access list
+    that only administrators can change (users can read and run it). It refuses to replace an existing
+    folder that does not belong to the administrators or that users can change: whoever can change the
+    files of that folder could run code as administrator the next time it is used. Without elevation
+    it extracts to -Destination (by default windows-tuneup-<version> in the current folder); that copy
+    is for the tweaks of your user only and must not be run as administrator, because other programs of
+    your account can change it.
 
     The copy of install.ps1 in the repository has no version: give -Version and -Sha256 (the line of
     the zip in SHA256SUMS of that release).
@@ -7771,7 +7881,7 @@ param(
     [string]$Version = '__TUNEUP_VERSION__',
     [string]$Sha256 = '__TUNEUP_ZIP_SHA256__',
     [string]$Destination,
-    # A release URL base, or a folder that holds windows-tuneup-<version>.zip (offline and tests).
+    # A release URL base (HTTPS only), or a folder that holds windows-tuneup-<version>.zip (offline and tests).
     [string]$Source = 'https://github.com/edgarlugo/windows-tuneup/releases/download'
 )
 
@@ -7780,6 +7890,55 @@ param(
 & {
     param([string]$Version, [string]$Sha256, [string]$Destination, [string]$Source)
     $ErrorActionPreference = 'Stop'
+
+    # Gives the reason a folder cannot be trusted to hold code that runs as administrator, or nothing.
+    function Get-InstallFolderProblem {
+        param([Parameter(Mandatory)][string]$Path, [switch]$LinkOnly)
+        # Administrators, SYSTEM and TrustedInstaller are the owners and writers a folder of programs may have.
+        $trustedSid = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return "$Path is a link" }
+        if ($LinkOnly) { return }
+        $acl = Get-Acl -LiteralPath $Path
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ($trustedSid -notcontains $owner) { return "it is owned by $($acl.Owner), not by Administrators" }
+        $writer = Get-InstallFolderWriter -Path $Path
+        if ($writer) { return "$writer can change it" }
+    }
+
+    # Gives the first principal other than the administrators and the system that can change a folder, or nothing.
+    function Get-InstallFolderWriter {
+        param([Parameter(Mandatory)][string]$Path)
+        $trustedSid = @('S-1-5-32-544', 'S-1-5-18', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')
+        $write = [int64][System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, DeleteSubdirectoriesAndFiles, Delete, ChangePermissions, TakeOwnership'
+        foreach ($rule in (Get-Acl -LiteralPath $Path).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+            if (([int64]$rule.FileSystemRights -band $write) -eq 0) { continue }
+            # CREATOR OWNER only matters for what its owner could do, and the owner is checked apart.
+            if ($trustedSid -contains $rule.IdentityReference.Value -or $rule.IdentityReference.Value -eq 'S-1-3-0') { continue }
+            $who = $rule.IdentityReference.Value
+            try { $who = $rule.IdentityReference.Translate([System.Security.Principal.NTAccount]).Value } catch { Write-Verbose "No name for $who" }
+            return $who
+        }
+    }
+
+    # Owner Administrators; no inherited rules; administrators and SYSTEM full control; users read and run.
+    function New-InstallFolderSecurity {
+        $administrators = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+        $system = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+        $users = New-Object System.Security.Principal.SecurityIdentifier -ArgumentList ([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+        $security = New-Object System.Security.AccessControl.DirectorySecurity
+        $security.SetOwner($administrators)
+        $security.SetAccessRuleProtection($true, $false)
+        $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+        $none = [System.Security.AccessControl.PropagationFlags]::None
+        $allow = [System.Security.AccessControl.AccessControlType]::Allow
+        foreach ($entry in @(@($system, 'FullControl'), @($administrators, 'FullControl'), @($users, 'ReadAndExecute'))) {
+            $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList $entry[0], ([System.Security.AccessControl.FileSystemRights]$entry[1]), $inherit, $none, $allow))
+        }
+        $security
+    }
+
     if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
         throw 'This install.ps1 has no release in it: use the one attached to a release, or give -Version and -Sha256 (the line of the zip in SHA256SUMS of that release).'
     }
@@ -7791,32 +7950,40 @@ param(
     }
     $Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Destination)
     $name = "windows-tuneup-$Version.zip"
+    $fromFolder = Test-Path -LiteralPath $Source -PathType Container
+    if (-not $fromFolder -and $Source -notmatch '^https://') { throw "This installer only downloads over HTTPS: -Source must start with https:// (or be a folder that holds $name)." }
     $work = Join-Path ([System.IO.Path]::GetTempPath()) ("windows-tuneup-install-" + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $work | Out-Null
     try {
         $zip = Join-Path $work $name
-        if (Test-Path -LiteralPath $Source -PathType Container) {
+        if ($fromFolder) {
             Copy-Item -LiteralPath (Join-Path $Source $name) -Destination $zip
         } else {
             [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-            Write-Host "Downloading $Source/v$Version/$name ..."
-            Invoke-WebRequest -Uri "$Source/v$Version/$name" -OutFile $zip -UseBasicParsing
+            $url = "$($Source.TrimEnd('/'))/v$Version/$name"
+            Write-Host "Downloading $url ..."
+            Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
         }
+        # Nothing of what was downloaded is read as anything but bytes until this check passes.
         $actual = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
         if ($actual -ne $Sha256.ToUpperInvariant()) {
             throw "The SHA256 of $name is $actual, not $($Sha256.ToUpperInvariant()): it is not that release. Nothing was installed."
         }
         Write-Host "SHA256 checked: $actual"
 
-        # No entry may land outside the folder it is extracted to.
+        # Every entry must be under windows-tuneup-<version>/ and land inside the folder it is extracted to.
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $extract = Join-Path $work 'extract'
         $inside = [System.IO.Path]::GetFullPath($extract).TrimEnd('\') + '\'
         $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
         try {
             foreach ($entry in $archive.Entries) {
-                $target = [System.IO.Path]::GetFullPath((Join-Path $extract $entry.FullName))
-                if (-not $target.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) { throw "The zip has an entry outside its folder: $($entry.FullName)" }
+                $target = $null
+                try { $target = [System.IO.Path]::GetFullPath((Join-Path $extract $entry.FullName)) } catch { $target = $null }
+                if (-not $entry.FullName.StartsWith("windows-tuneup-$Version/", [StringComparison]::Ordinal) -or
+                    -not $target -or -not $target.StartsWith($inside, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "The zip has an entry outside its folder: $($entry.FullName)"
+                }
             }
         } finally {
             $archive.Dispose()
@@ -7827,13 +7994,29 @@ param(
             throw "$name is not a release of windows-tuneup."
         }
 
-        # An earlier copy is replaced; any other folder is left alone.
+        # An earlier copy is replaced; any other folder is left alone. As administrator the earlier copy
+        # must also be one that only administrators could have changed.
         if (Test-Path -LiteralPath $Destination) {
+            $link = Get-InstallFolderProblem -Path $Destination -LinkOnly
+            if ($link) { throw "${link}: choose another -Destination. Nothing was installed." }
             $earlier = (Test-Path -LiteralPath (Join-Path $Destination 'tuneup.ps1')) -and (Test-Path -LiteralPath (Join-Path $Destination 'engine\Tuneup.psm1'))
             if (-not $earlier) { throw "$Destination exists and is not a copy of windows-tuneup: choose another -Destination." }
+            if ($admin) {
+                $problem = Get-InstallFolderProblem -Path $Destination
+                if ($problem) { throw "$Destination cannot be trusted ($problem): remove it yourself or choose another -Destination. Nothing was installed." }
+            }
             Remove-Item -LiteralPath $Destination -Recurse -Force
         }
         New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+        if ($admin) {
+            # The access list is set while the folder is still empty, so what is copied in inherits it.
+            try {
+                [System.IO.Directory]::SetAccessControl($Destination, (New-InstallFolderSecurity))
+            } catch {
+                Remove-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue
+                throw
+            }
+        }
         Copy-Item -Path (Join-Path $top '*') -Destination $Destination -Recurse
         # Files saved by a browser carry a mark that PowerShell checks; these were not, but a copy made
         # by hand from a downloaded zip would, so it is cleared the same way.
@@ -8020,12 +8203,12 @@ por:
 - [ ] **Step 5: Verificar que pasan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Package.Tests.ps1`
-Expected: PASS (`Tests Passed: 10, Failed: 0` sin elevar; elevado, 9 y 1 saltada: la que instala sin `-Destination`, que iría a `Program Files`).
+Expected: PASS (`Tests Passed: 17, Failed: 0, Skipped: 2` sin elevar: se saltan las dos que solo corren elevadas, la que comprueba la lista de acceso de lo instalado y la que se niega a reemplazar una copia que los usuarios pueden cambiar; elevado, 17 pasan y se saltan las dos que solo corren sin elevar. Ninguna instala en `Program Files`: todas usan `-Destination` en `TestDrive`).
 
 - [ ] **Step 6: Mirar el paquete**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/package.ps1 -OutputPath $env:TEMP\tuneup-dist` y luego `Get-Content $env:TEMP\tuneup-dist\SHA256SUMS`
-Expected: el objeto con `Version 0.1.0`, `Files` 69 (71 cuando la Task 15 agregue las dos `vm-checklist.md`) y dos líneas en `SHA256SUMS` (`windows-tuneup-0.1.0.zip` e `install.ps1`). Borrar la carpeta después.
+Expected: el objeto con `Version 0.1.0`, `Files` 70 (72 cuando la Task 15 agregue las dos `vm-checklist.md`) y dos líneas en `SHA256SUMS` (`windows-tuneup-0.1.0.zip` e `install.ps1`). Borrar la carpeta después.
 
 - [ ] **Step 7: Lint**
 
@@ -9539,7 +9722,7 @@ Probado en la copia de `db1bcf0` (Windows 11 Pro 26H2, build 26300, sin elevar),
 - **Ctrl+C, los dos caminos**, en consolas ocultas nuevas: la tecla escrita en la entrada (`WriteConsoleInput`) con la trampa activa llega como `C` + `Control` y PowerShell no se detiene; `cmd.exe /c` deja `TreatControlCAsInput` en `False` (de ahí la reactivación en cada revisión); la señal (`GenerateConsoleCtrlEvent`) detiene la tubería sin pasar por `catch`, el `finally` sí corre, puede escribir archivos y al host pero no a la salida, y `exit 2` dentro del `finally` fija el código. Las tres pruebas de `tests/Interrupt.Tests.ps1` lo repiten con el motor: el ajuste en curso termina, el resto queda `interrupted`, código 2, y por el camino de la señal `result.json` queda guardado y `-Undo` restaura el ajuste cortado.
 - **El menú con respuestas guionadas** (13 pruebas en el proceso) y **por la entrada estándar** de `powershell -File` (dos pruebas de `tests/Cli.Tests.ps1`): `Read-Host` lee líneas redirigidas y devuelve `$null` al final.
 - **`install.ps1`**: con el zip correcto instala y la copia instalada corre; con un SHA256 equivocado, sin versión o con una entrada `../` no instala nada; por `iex` (con la fuente cambiada a una carpeta local) aplica los valores del `param()` y no deja `$ErrorActionPreference` ni variables en la sesión.
-- **El zip**: 69 archivos al probarlo (con los de este plan, 71), solo de las carpetas previstas, el mismo SHA256 en dos armados seguidos.
+- **El zip**: 70 archivos al probarlo (con los de este plan, 72), solo de las carpetas previstas, el mismo SHA256 en dos armados seguidos.
 - **`runas /trustlevel:0x20000`** desde un proceso sin elevar con `-Restricted`: arranca, el hijo no está elevado, escribe salida y código.
 - **Lecturas reales de solo lectura**: el GUID del volumen del sistema, el espacio libre, `Test-TuneupTrustedLocation` (falso en `Documents`) y Restaurar sistema sin elevar (`unknown`: `SPP\Clients` da `SecurityException`). Las líneas de PowerShell de deshacer a mano, ejecutadas en un proceso hijo sobre la clave de prueba.
 - **Coherencia del plan**: aplicar las tareas en orden sobre `db1bcf0` da exactamente los archivos de la copia probada (comparación archivo por archivo; los `.json` de textos por contenido). Esa copia rearmada desde el plan pasó la suite completa (`Tests Passed: 1178, Failed: 0, Skipped: 1`) y el lint, y los estados intermedios (después de las Tasks 2 a 15) pasaron el lint y, de la Task 3 a la 10, los archivos de prueba de cada tarea con los recuentos que dice cada paso "Expected".
