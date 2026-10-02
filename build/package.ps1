@@ -4,15 +4,19 @@
 .DESCRIPTION
     windows-tuneup-<version>.zip holds what runs (tuneup.ps1, engine, i18n, catalog, profiles,
     actions) and what people read (docs/es, docs/en, README.md, LICENSE) under one folder,
-    windows-tuneup-<version>. In a git checkout only tracked files go in. Entries are sorted and carry
-    the date of the last commit, so the same commit gives the same zip on the same machine.
+    windows-tuneup-<version>. In a git checkout only tracked files go in (git ls-files -z, read as
+    UTF-8, so names with spaces or letters outside ASCII are not quoted). Entries are sorted and carry
+    the date of the last commit, so the same commit gives the same zip on the same machine. The files
+    are read from the working tree: with -Release (the release workflow) it must be a git checkout
+    without changes that are not committed, so what goes in is the commit and nothing else.
     install.ps1 is the installer of the repository with the version and the SHA256 of the zip written
     in, SHA256SUMS lists both, and release-notes.md is build/release-notes.md with the version and the
     hashes filled in.
 #>
 param(
     [Parameter(Mandatory)][string]$OutputPath,
-    [string]$Version
+    [string]$Version,
+    [switch]$Release
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,20 +35,40 @@ $patterns = @(
     '^i18n/[^/]+\.json$', '^catalog/[^/]+\.json$', '^profiles/[^/]+\.json$', '^actions/[^/]+\.ps1$',
     '^docs/(es|en)/[^/]+\.md$'
 )
-# git answers on standard error outside a checkout; with Stop, Windows PowerShell 5.1 would throw on
-# that line, so it runs with Continue and its exit code decides.
+# git runs as a process of its own: its output is read as UTF-8 (PowerShell would decode it with the code
+# page of the console) and what it writes on standard error outside a checkout is not an error here; its
+# exit code decides. -z separates the names with NUL and leaves them unquoted.
 function Invoke-PackageGit {
-    param([Parameter(Mandatory)][string[]]$Arguments)
-    $ErrorActionPreference = 'Continue'
-    $output = @(& git -C $root @Arguments 2>$null)
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+    param([Parameter(Mandatory)][string]$Git, [Parameter(Mandatory)][string[]]$Arguments)
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $Git
+    $info.Arguments = $Arguments -join ' '
+    $info.WorkingDirectory = $root
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    $process = [System.Diagnostics.Process]::Start($info)
+    $errors = $process.StandardError.ReadToEndAsync()
+    $output = $process.StandardOutput.ReadToEnd()
+    $process.WaitForExit()
+    [void]$errors.Result
+    [pscustomobject]@{ ExitCode = $process.ExitCode; Output = $output }
 }
 $inGit = $false
 $tracked = @()
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    $listed = Invoke-PackageGit -Arguments @('ls-files')
-    $tracked = @($listed.Output)
+$git = @(Get-Command git -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)
+if ($git) {
+    $listed = Invoke-PackageGit -Git $git[0] -Arguments @('ls-files', '-z')
+    $tracked = @($listed.Output.Split([char]0) | Where-Object { $_ })
     $inGit = ($listed.ExitCode -eq 0 -and $tracked.Count -gt 0)
+}
+if ($Release) {
+    if (-not $inGit) { throw '-Release builds from a git checkout: this folder is not one (or git is not installed).' }
+    $changes = Invoke-PackageGit -Git $git[0] -Arguments @('status', '--porcelain', '-z', '--untracked-files=no')
+    if ($changes.ExitCode -ne 0) { throw "git status failed with exit code $($changes.ExitCode)" }
+    if ($changes.Output) { throw "-Release builds what is committed: the checkout has changes that are not committed ($($changes.Output.Split([char]0)[0].Trim()))." }
 }
 if (-not $inGit) {
     $prefix = $root.TrimEnd('\') + '\'
@@ -57,8 +81,8 @@ foreach ($required in 'tuneup.ps1', 'engine/Tuneup.psm1', 'LICENSE', 'README.md'
 
 $timestamp = [datetime]'2026-01-01T00:00:00'
 if ($inGit) {
-    $last = Invoke-PackageGit -Arguments @('log', '-1', '--format=%cI')
-    if ($last.ExitCode -eq 0 -and $last.Output.Count) { $timestamp = ([datetimeoffset]::Parse([string]$last.Output[0])).UtcDateTime }
+    $last = Invoke-PackageGit -Git $git[0] -Arguments @('log', '-1', '--format=%cI')
+    if ($last.ExitCode -eq 0 -and $last.Output.Trim()) { $timestamp = ([datetimeoffset]::Parse($last.Output.Trim())).UtcDateTime }
 }
 
 New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
