@@ -275,6 +275,14 @@ Describe 'tuneup.ps1' {
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
     }
 
+    It 'does not open the menu with -NonInteractive, also with the input redirected, and says why' {
+        $output = @('2') | & $PowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en 2>&1
+        $LASTEXITCODE | Should -Be 1
+        $text = $output -join "`n"
+        $text | Should -Match 'PowerShell was started with -NonInteractive'
+        $text | Should -Not -Match 'Read-Host|NonInteractive mode'
+    }
+
     It 'leaves the menu at the end of standard input' {
         $output = @('2') | & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Repo 'tuneup.ps1') -StateRoot $script:Root -Lang en
         $LASTEXITCODE | Should -Be 0

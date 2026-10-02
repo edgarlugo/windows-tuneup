@@ -220,5 +220,5 @@
   "menu.undo.tweakAlreadyUndone": "The tweak \"{0}\" was already undone.",
   "menu.health.needsAdmin": "The health check needs PowerShell as administrator: open it that way and run tuneup.ps1 again.",
   "menu.measure.range": "Type a number between {0} and {1}.",
-  "menu.nonInteractive": "The menu needs to be able to ask questions, and PowerShell was started with -NonInteractive. Open it without that option, redirect the input, or use a command (for example -WhatIf or -Status)."
+  "menu.nonInteractive": "The menu needs to be able to ask questions, and PowerShell was started with -NonInteractive, which does not let it read answers (not even from a redirected input). Open it without that option, or use a command (for example -WhatIf or -Status)."
 }

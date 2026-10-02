@@ -78,16 +78,16 @@ function Select-TuneupMenuItem {
     }
 }
 
-# Why the menu cannot ask anything, or nothing when it can: PowerShell started with -NonInteractive
-# and an input that is not redirected has nobody to answer, and Read-Host would fail with a PowerShell
-# error. Gives the text for the person.
+# Why the menu cannot ask anything, or nothing when it can: in a PowerShell started with
+# -NonInteractive (or -noni, -NonI...) Read-Host fails with a PowerShell error, also when the input is
+# redirected. Only the options of PowerShell count, the ones before -File or -Command: what comes after
+# belongs to the script. Gives the text for the person.
 function Get-TuneupMenuBlockMessage {
-    param(
-        [string[]]$CommandLineArgument = [Environment]::GetCommandLineArgs(),
-        [bool]$InputRedirected = [Console]::IsInputRedirected
-    )
-    $nonInteractive = @($CommandLineArgument | Where-Object { $_ -match '^[-/]noni' }).Count -gt 0
-    if ($nonInteractive -and -not $InputRedirected) { Get-TuneupText -Key 'menu.nonInteractive' }
+    param([string[]]$CommandLineArgument = [Environment]::GetCommandLineArgs())
+    foreach ($argument in @($CommandLineArgument | Select-Object -Skip 1)) {
+        if ($argument -match '^[-/](f|file|c|command|e|ec|enc|encodedcommand)$') { return }
+        if ($argument -match '^[-/]noni') { return (Get-TuneupText -Key 'menu.nonInteractive') }
+    }
 }
 
 function Write-TuneupMenuHeader {

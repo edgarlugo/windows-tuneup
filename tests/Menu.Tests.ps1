@@ -474,14 +474,16 @@ Describe 'Get-TuneupMenuBlockMessage' {
         Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     }
 
-    It 'says the menu cannot ask when PowerShell is not interactive and the input is not redirected' {
-        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-NonInteractive', '-File', 'tuneup.ps1') -InputRedirected $false |
+    It 'says the menu cannot ask when PowerShell was started with -NonInteractive, also with the input redirected' {
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-NonInteractive', '-File', 'tuneup.ps1') |
             Should -Match '-NonInteractive'
-        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-noni', '-File', 'tuneup.ps1') -InputRedirected $false | Should -Not -BeNullOrEmpty
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-noni', '-File', 'tuneup.ps1') | Should -Not -BeNullOrEmpty
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '/NonI', '-ExecutionPolicy', 'Bypass', '-File', 'tuneup.ps1') | Should -Not -BeNullOrEmpty
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NonInteractive', '-File', 'tuneup.ps1') | Should -Not -Match 'redirect the input'
     }
 
-    It 'lets the menu run with a redirected input, or in an interactive PowerShell' {
-        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NonInteractive', '-File', 'tuneup.ps1') -InputRedirected $true | Should -BeNullOrEmpty
-        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-File', 'tuneup.ps1') -InputRedirected $false | Should -BeNullOrEmpty
+    It 'lets the menu run in an interactive PowerShell, whatever comes after the script' {
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-File', 'tuneup.ps1') | Should -BeNullOrEmpty
+        Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-File', 'tuneup.ps1', '-NonInteractive') | Should -BeNullOrEmpty
     }
 }
