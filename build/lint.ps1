@@ -8,7 +8,8 @@ $targets = @(
     (Join-Path $root 'install.ps1'),
     (Join-Path $root 'engine'),
     (Join-Path $root 'actions'),
-    (Join-Path $root 'build')
+    (Join-Path $root 'build'),
+    (Join-Path $root 'tests\sandbox')
 ) | Where-Object { Test-Path -LiteralPath $_ }
 
 $findings = @(foreach ($target in $targets) {

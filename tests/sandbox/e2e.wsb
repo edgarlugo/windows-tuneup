@@ -1,0 +1,18 @@
+<Configuration>
+  <MemoryInMB>8192</MemoryInMB>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>__REPO__</HostFolder>
+      <SandboxFolder>C:\windows-tuneup</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>__OUTPUT__</HostFolder>
+      <SandboxFolder>C:\e2e-out</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\windows-tuneup\tests\sandbox\Invoke-E2E.ps1 -Repo C:\windows-tuneup -Output C:\e2e-out __ARGUMENTS__</Command>
+  </LogonCommand>
+</Configuration>
