@@ -110,6 +110,18 @@ Describe 'Commands' {
         $context = New-TestContext -Json
         $documents = @(Get-JsonOutput { Invoke-TuneupHealthCommand -Context $context })
         $documents[0].message | Should -Be '-Health needs PowerShell as administrator.'
+        $documents[0].reason | Should -Be 'needs-admin'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'refuses to undo a run with system changes without elevation, with the reason needs-admin' {
+        $context = New-TestContext -Json
+        $run = New-TuneupRun -StateRoot $Root -WarningAction SilentlyContinue
+        Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak (New-TestMachineTweak) -State $null -Root 'custom'
+        $documents = @(Get-JsonOutput { Invoke-TuneupUndoCommand -Context $context -RunId $run.Id })
+        $documents[0].command | Should -Be 'error'
+        $documents[0].reason | Should -Be 'needs-admin'
+        $documents[0].message | Should -Match 'undoing it needs PowerShell as administrator'
         $context.ExitCode | Should -Be 1
     }
 

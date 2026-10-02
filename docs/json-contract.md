@@ -283,7 +283,7 @@ What this machine has and the profiles that fit it. Read only, no elevation need
 |---|---|---|
 | `message` | string | What went wrong, for people. |
 | `details` | string[] | More lines (for example, each problem of the catalog). |
-| `reason` | string | Only in the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language. |
+| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, or `-Health`, without elevation: run it elevated), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
 
 Exit code: `1`.
 

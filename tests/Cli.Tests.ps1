@@ -801,6 +801,7 @@ Describe 'tuneup.ps1' {
         $json = ConvertFrom-PureJson $result.Output
         $json.command | Should -Be 'error'
         $json.message | Should -Match 'undoing it needs PowerShell as administrator'
+        $json.reason | Should -Be 'needs-admin'
         Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test' | Should -BeFalse
     }
 }

@@ -3,6 +3,10 @@
 # $Context.ExitCode and what it produced in $Context.Result. A command never calls exit: an error that
 # ends it is written as an error report with exit code 1.
 
+# The reason of an error that only an elevated process can get past (-Undo of a run with system
+# changes, -Health): a program that drives the tool decides by it, never by the text of the message.
+$script:NeedsAdminError = 'needs-admin'
+
 # What one invocation shares between its steps: JSON or text, the folders for testing, the warnings
 # collected so far, the questions and answers (Io), the exit code and the last result. The exit code
 # starts at 1 and every command sets 0 when it succeeds, so one that dies before reporting is a failure.
@@ -181,7 +185,7 @@ function Invoke-TuneupUndoCommand {
             Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_.tweak }).Count -gt 0
     }
     if ($needsAdmin -and -not $environment.IsAdmin) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.undoNeedsAdmin' -Format $run.Id)
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.undoNeedsAdmin' -Format $run.Id) -Reason $script:NeedsAdminError
         return
     }
     # Arguments of a step go in a table: PSScriptAnalyzer does not see a parameter used only inside it.
@@ -198,7 +202,7 @@ function Invoke-TuneupHealthCommand {
     param([Parameter(Mandatory)]$Context, [switch]$Repair, $Previous)
     $environment = Get-TuneupContextEnvironment -Context $Context
     if (-not $environment.IsAdmin) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin')
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.healthNeedsAdmin') -Reason $script:NeedsAdminError
         return
     }
     if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'health.running') }
