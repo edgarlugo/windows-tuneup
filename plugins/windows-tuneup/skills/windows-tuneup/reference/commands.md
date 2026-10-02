@@ -48,7 +48,7 @@ Put the arguments of the table in place of `-Suggest -Json -Lang en`, always wit
 | Apply a plan whose `requiresAdmin` is false | the same, with `-Yes -Json` in place of `-WhatIf -Json` |
 | How each drifted tweak would be re-applied (only a plan) | `-Status -Reapply -WhatIf -Json` |
 | Re-apply when that plan has `requiresAdmin` false and no `needs-admin` item was added | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json` |
-| Measure | `-Measure -IdleSeconds 120 -Json`, or `-Measure -IdleSeconds 120 -Compare '<id>' -Json` |
+| Measure | `-Measure -IdleSeconds 120 -Json`, or `-Measure -IdleSeconds 120 -Compare '<id>' -Json`; it waits two minutes ("Long runs") |
 | Undo a run (try this first) | `-Undo '<runId>' -Json`; one tweak with `-Tweak '<id>'`. The `runId` comes from `-Status -Json`, never `last`. An `error` with `reason` = `needs-admin`: run it elevated |
 | The result of an elevated run | `-ReadResult '<id>' -Json` (see "Read the result") |
 
@@ -94,7 +94,9 @@ What the output means:
 
 ## Long runs
 
-`-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items, or a re-apply to which you added `needs-admin` items (they are apps, capabilities or features, and never appear in the classification plan), can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
+`-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items, a re-apply to which you added `needs-admin` items (they are apps, capabilities or features, and never appear in the classification plan), or an elevated `-Undo` of a run with `appx`, `capability` or `feature` items (it reinstalls apps with winget; the `type` of each id that `-Status -Json` lists for that `runId` is in `tweaks` of `-List -Json`) can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
+
+`-Measure -IdleSeconds 120` runs without elevation, but it waits two minutes before it measures, longer than the default timeout of one command (120000 ms in Claude Code): run it with a timeout of 600000 ms or in the background, and read its output when it ends.
 
 Never poll and never sleep waiting for a result. If a foreground command times out, the elevated window goes on by itself: do not start another one; ask the user to tell you when the elevated window has closed, and then run `-ReadResult '<id>' -Json` once. `result-incomplete` after the process has ended means that the run was stopped: run `-Status -Json` then, never before.
 

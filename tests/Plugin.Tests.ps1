@@ -167,6 +167,14 @@ Describe 'Skill' {
             $Commands.Contains($term) | Should -BeTrue -Because $term
         }
         $Skill.Contains('run in the background by default') | Should -BeTrue
+        # -Measure -IdleSeconds 120 waits two minutes: longer than the default timeout of one command.
+        foreach ($term in 'waits two minutes before it measures', 'a timeout of 600000 ms or in the background',
+            'an elevated `-Undo` of a run with `appx`, `capability` or `feature` items') {
+            $Commands.Contains($term) | Should -BeTrue -Because $term
+        }
+        foreach ($term in 'in the background or with a timeout of 600000 ms', 'an elevated `-Undo` of a run with `appx`, `capability` or `feature` items') {
+            $Skill.Contains($term) | Should -BeTrue -Because $term
+        }
         foreach ($line in $SkillLines) {
             $line.Text | Should -Not -Match '(?i)\bStart-Sleep\b|\bsleep\s+\d' -Because "$($line.File): $($line.Text)"
             if ($line.Text -match '(?i)\b(poll|sleep)') { $line.Text | Should -Match '(?i)\bnever\b' -Because "$($line.File): $($line.Text)" }
@@ -198,6 +206,13 @@ Describe 'Skill' {
         $text = $install[0].Substring($install[0].IndexOf('$installScript = @'''))
         $text.IndexOf($reset + "[IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\Modules'), 'Process')") | Should -BeGreaterThan 0
         $text.IndexOf($reset) | Should -BeLessThan $text.IndexOf('New-Object')
+    }
+
+    It 'reports an elevated run from its result, which planned again with what only an administrator can read' {
+        foreach ($term in 'The elevated run plans again', '`state-unreadable`', '`session-user`', 'report from its result, not from the plan you showed',
+            'offer to apply those tweaks of the user without elevation') {
+            $Skill.Contains($term) | Should -BeTrue -Because $term
+        }
     }
 
     It 'keeps the guardrail: <Phrase>' -TestCases @(
