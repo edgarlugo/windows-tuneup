@@ -215,6 +215,16 @@ Describe 'Skill' {
         }
     }
 
+    It 'declares the oldest tool it can drive, never newer than the tool of this repository, and offers the update for an older copy' {
+        $minimum = [regex]::Match($Skill, 'oldest windows-tuneup it can drive is `(\d+\.\d+\.\d+)`')
+        $minimum.Success | Should -BeTrue
+        [version]$minimum.Groups[1].Value | Should -BeLessOrEqual ([version](Get-TuneupVersion))
+        $Skill.Contains("A copy older than ``$($minimum.Groups[1].Value)`` (guardrail 12) is never run: offer the update") | Should -BeTrue
+        foreach ($term in '`toolVersion`', '${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json') {
+            $Skill.Contains($term) | Should -BeTrue -Because $term
+        }
+    }
+
     It 'keeps the guardrail: <Phrase>' -TestCases @(
         @{ Phrase = 'Never propose a change from the blacklist' }
         @{ Phrase = 'blacklist.md' }
