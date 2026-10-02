@@ -110,6 +110,18 @@ Describe 'Commands' {
         $context = New-TestContext -Json
         $documents = @(Get-JsonOutput { Invoke-TuneupHealthCommand -Context $context })
         $documents[0].message | Should -Be '-Health needs PowerShell as administrator.'
+        $documents[0].reason | Should -Be 'needs-admin'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'refuses to undo a run with system changes without elevation, with the reason needs-admin' {
+        $context = New-TestContext -Json
+        $run = New-TuneupRun -StateRoot $Root -WarningAction SilentlyContinue
+        Add-TuneupJournalEntry -Path (Join-Path $run.Dir 'snapshot.jsonl') -Tweak (New-TestMachineTweak) -State $null -Root 'custom'
+        $documents = @(Get-JsonOutput { Invoke-TuneupUndoCommand -Context $context -RunId $run.Id })
+        $documents[0].command | Should -Be 'error'
+        $documents[0].reason | Should -Be 'needs-admin'
+        $documents[0].message | Should -Match 'undoing it needs PowerShell as administrator'
         $context.ExitCode | Should -Be 1
     }
 
@@ -316,6 +328,62 @@ Describe 'Re-applying what drifted' {
         $human.ExitCode | Should -Be 0
     }
 
+    It 'with -Include re-applies only the drifted tweaks it names, by name, without the base profile' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        # A base tweak that drifted too, and that it does not name.
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.ask', 'rea.a') -Yes })[0]
+        $document.source | Should -Be 'reapply'
+        ($document.results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'rea.a=applied,rea.ask=applied'
+        $values = Get-ItemProperty -LiteralPath $Key
+        "$($values.B),$($values.A),$($values.Ask),$($values.High)" | Should -Be '5,1,1,5'
+        $values.One | Should -Be 5
+    }
+
+    It 'plans with -Include only the named drifted tweaks, a high-risk one too' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.high') -PlanOnly })[0]
+        ($plan.items | ForEach-Object { "$($_.id)=$($_.action)" }) -join ',' | Should -Be 'rea.high=apply'
+    }
+
+    It 'leaves out with a warning a named tweak that did not drift, and refuses an unknown one' {
+        $dir = New-ReapplyDefinition
+        Initialize-Reverted $dir
+        Set-ItemProperty -LiteralPath $Key -Name 'A' -Value 1
+        $context = New-TestContext -Json
+        $context.CatalogPath = Join-Path $dir 'catalog'
+        $context.ProfilesPath = Join-Path $dir 'profiles'
+        $document = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $context -Reapply -Include @('rea.b', 'rea.a', 'test.one') -Yes })[0]
+        ($document.results | ForEach-Object { $_.id }) -join ',' | Should -Be 'rea.b'
+        # Without administrator some tweaks cannot be checked: the warning says so.
+        $unverified = 'Tweak {0} was not reverted by Windows, or it cannot be checked without administrator: it is not applied again.'
+        @($document.warnings) | Should -Contain ($unverified -f 'rea.a')
+        @($document.warnings) | Should -Contain ($unverified -f 'test.one')
+        $elevated = New-TestContext -Json
+        $elevated.CatalogPath = Join-Path $dir 'catalog'
+        $elevated.ProfilesPath = Join-Path $dir 'profiles'
+        $elevated.Environment = New-TestEnvironment -IsAdmin $true
+        $plan = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $elevated -Reapply -Include @('rea.a') -PlanOnly })[0]
+        @($plan.warnings) | Should -Contain 'Tweak rea.a was not reverted by Windows: it is not applied again.'
+        $unknown = New-TestContext -Json
+        $unknown.CatalogPath = Join-Path $dir 'catalog'
+        $unknown.ProfilesPath = Join-Path $dir 'profiles'
+        $refusal = @(Get-JsonOutput { Invoke-TuneupStatusCommand -Context $unknown -Reapply -Include @('rea.b', 'no.such') -Yes })[0]
+        $refusal.command | Should -Be 'error'
+        $refusal.message | Should -Be 'Unknown tweak: no.such'
+        $unknown.ExitCode | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).B | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).Ask | Should -Be 5
+    }
+
     It 'does not say there is nothing to apply again when some tweaks need administrator to be checked' {
         Mock -ModuleName Tuneup Get-TuneupStatus {
             @([pscustomobject]@{ id = 'x.one'; title = 'One'; status = 'ok'; runId = 'r' }, [pscustomobject]@{ id = 'x.two'; title = 'Two'; status = 'needs-admin'; runId = 'r' })
@@ -353,6 +421,74 @@ Describe 'Invoke-TuneupCli' {
         Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -StateRoot $Root 6>$null
         Should -Invoke Invoke-TuneupMenu -ModuleName Tuneup -Times 1 -Exactly
         $context.ExitCode | Should -Be 1
+    }
+
+    It 'runs -Suggest without reading the environment, so a broken system query does not turn it into an error' {
+        Mock -ModuleName Tuneup Get-TuneupEnvironment { throw 'WMI is broken' }
+        Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { @() }
+        Mock -ModuleName Tuneup Get-TuneupUserAppxName { @() }
+        Mock -ModuleName Tuneup Test-TuneupSuggestBattery { $false }
+        Mock -ModuleName Tuneup Get-TuneupComputerSystem { [pscustomobject]@{ PartOfDomain = $false; TotalPhysicalMemory = [double]16GB } }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Mock -ModuleName Tuneup Test-TuneupSuggestMdm { $false }
+        Mock -ModuleName Tuneup Get-TuneupSystemDiskMediaType { 'SSD' }
+        Mock -ModuleName Tuneup Get-TuneupInstalledMemoryByte { $null }
+        Mock -ModuleName Tuneup Get-TuneupOsSupport { [pscustomobject]@{ Build = 26100; Edition = 'Pro'; IsServer = $false } }
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -Suggest -StateRoot $Root })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'suggest'
+        $context.ExitCode | Should -Be 0
+        Should -Invoke Get-TuneupEnvironment -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'prints a saved result as it was written with -ReadResult, without reading the environment' {
+        Mock -ModuleName Tuneup Get-TuneupEnvironment { throw 'WMI is broken' }
+        $id = [guid]::NewGuid().ToString()
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        $text = '{"schemaVersion":1,"command":"apply","toolVersion":"0.1.0","warnings":[],"runId":"20261002-120000"}'
+        [System.IO.File]::WriteAllText((Join-Path $Root "out\$id.json"), $text)
+        foreach ($json in $true, $false) {
+            $context = New-TuneupContext -Json:$json
+            $output = @(Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult $id -StateRoot $Root 6>$null)
+            $output -join "`n" | Should -Be $text
+            $context.ExitCode | Should -Be 0
+        }
+        Should -Invoke Get-TuneupEnvironment -ModuleName Tuneup -Times 0 -Exactly
+    }
+
+    It 'gives the reason with the message when a result cannot be read' {
+        $id = [guid]::NewGuid().ToString()
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult $id -StateRoot $Root })
+        $documents.Count | Should -Be 1
+        $documents[0].command | Should -Be 'error'
+        $documents[0].reason | Should -Be 'result-missing'
+        $documents[0].message | Should -BeLike "*$id*"
+        $context.ExitCode | Should -Be 1
+        Test-Path -LiteralPath $Root | Should -BeFalse
+    }
+
+    It 'refuses a -ReadResult id that is not a result id' {
+        $context = New-TuneupContext -Json
+        $documents = @(Get-JsonOutput { Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult '..\x-123456' -StateRoot $Root })
+        $documents[0].message | Should -Be '-ReadResult takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was read.'
+        $documents[0].PSObject.Properties.Name | Should -Not -Contain 'reason'
+        $context.ExitCode | Should -Be 1
+    }
+
+    It 'looks in the user folder only when not elevated (<Name>)' -TestCases @(
+        @{ Name = 'elevated'; Admin = $true; IncludeUser = $false }
+        @{ Name = 'not elevated'; Admin = $false; IncludeUser = $true }
+    ) {
+        param($Admin, $IncludeUser)
+        $script:FakeAdmin = $Admin
+        $script:ExpectedIncludeUser = $IncludeUser
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $script:FakeAdmin }
+        Mock -ModuleName Tuneup Read-TuneupResultFile { [pscustomobject]@{ Code = $null; Key = $null; Text = '{}'; Path = 'x'; Folder = 'y' } }
+        $context = New-TuneupContext -Json
+        Invoke-TuneupCli -Context $context -ScriptRoot (Split-Path $PSScriptRoot -Parent) -ReadResult ([guid]::NewGuid().ToString()) | Should -Be '{}'
+        Should -Invoke Read-TuneupResultFile -ModuleName Tuneup -Times 1 -Exactly -ParameterFilter { [bool]$IncludeUser -eq $script:ExpectedIncludeUser -and -not $StateRoot }
     }
 
     It 'resolves the folders into the context and runs the command they name' {

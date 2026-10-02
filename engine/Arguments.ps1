@@ -1,11 +1,12 @@
 # Commands exclude each other and the options of applying a plan.
-$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure')
+$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure', 'List', 'Suggest', 'ReadResult')
 $script:CliApplyOptions = @('Profile', 'Include', 'Exclude', 'WhatIf', 'Yes')
 # Options that only make sense with one command.
 $script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure'; Reapply = 'Status' }
 # Options of applying that an option of a command brings back: -Status -Reapply applies again what
-# drifted, so it takes -Yes and -WhatIf (and still not -Profile, -Include or -Exclude).
-$script:CliApplyingOptions = @{ Reapply = @('Yes', 'WhatIf') }
+# drifted, so it takes -Yes and -WhatIf, and -Include to name the drifted tweaks to apply again (and
+# still not -Profile or -Exclude).
+$script:CliApplyingOptions = @{ Reapply = @('Yes', 'WhatIf', 'Include') }
 
 function Get-TuneupArgumentConflict {
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Present)

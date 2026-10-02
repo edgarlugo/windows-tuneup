@@ -63,6 +63,238 @@ Describe 'tuneup.ps1' {
         $json.requiresAdmin | Should -BeTrue
     }
 
+    It 'loads modules only from the folders of Windows, not from a folder put first in PSModulePath' {
+        $planted = Join-Path $TestDrive 'planted-modules'
+        $marker = Join-Path $TestDrive 'planted-module-loaded.txt'
+        New-PlantedModuleFolder -Folder $planted -Marker $marker
+        $modulePath = $env:PSModulePath
+        $env:PSModulePath = "$planted;$modulePath"
+        try {
+            $result = Invoke-Tuneup @('-List', '-Json')
+        } finally {
+            $env:PSModulePath = $modulePath
+        }
+        $loaded = $(if (Test-Path -LiteralPath $marker) { [System.IO.File]::ReadAllText($marker) } else { '' })
+        $loaded | Should -BeNullOrEmpty
+        $result.ExitCode | Should -Be 0 -Because $result.Output
+        (ConvertFrom-PureJson $result.Output).command | Should -Be 'list'
+    }
+
+    It 'gives PSModulePath back to a session that runs it without -File' {
+        $script = Join-Path $TestDrive 'in-session.ps1'
+        [System.IO.File]::WriteAllText($script, @"
+`$before = `$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP
+& '$(Join-Path $Repo 'tuneup.ps1')' -List -Json -StateRoot '$(Join-Path $TestDrive 'in-session-state')' -CatalogPath '$(Join-Path $Fixtures 'catalog')' -ProfilesPath '$(Join-Path $Fixtures 'profiles')' -Force | Out-Null
+'same=' + (`$before -eq (`$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP))
+"@)
+        $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
+        $output | Should -Be 'same=True'
+    }
+
+    It 'gives PSModulePath back to a session also when the engine cannot be loaded, and ends with code 1' {
+        # A copy of tuneup.ps1 without the engine next to it: Import-Module fails.
+        $broken = Join-Path $TestDrive 'no-engine'
+        New-Item -ItemType Directory -Path $broken | Out-Null
+        Copy-Item -LiteralPath (Join-Path $Repo 'tuneup.ps1') -Destination $broken
+        $script = Join-Path $TestDrive 'in-session-broken.ps1'
+        [System.IO.File]::WriteAllText($script, @"
+`$before = `$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP
+try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catch { 'threw' }
+'same=' + (`$before -eq (`$env:PSModulePath + '|' + `$env:TEMP + '|' + `$env:TMP))
+"@)
+        $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
+        $output -join ',' | Should -Be 'threw,same=True'
+        $ErrorActionPreference = 'Continue'
+        & $PowerShell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $broken 'tuneup.ps1') -List -Json 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 1
+    }
+
+    It 'lists the profiles and the tweaks that suit this machine' {
+        $result = Invoke-Tuneup @('-List', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'list'
+        @($json.profiles | ForEach-Object { $_.id }) -join ',' | Should -Be 'base,extra,nested,system'
+        ($json.profiles | Where-Object { $_.id -eq 'system' }).needsAdmin | Should -BeTrue
+        @(($json.tweaks | Where-Object { $_.id -eq 'test.three' }).profiles) -join ',' | Should -Be 'extra'
+        $json.PSObject.Properties.Name | Should -Contain 'warnings'
+    }
+
+    It 'shows the list for people in the chosen language' {
+        $result = Invoke-Tuneup @('-List') -Lang 'es'
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'Perfiles:'
+        $result.Output | Should -Match 'test\.one - Prueba uno'
+    }
+
+    It 'suggests profiles, always with every signal and base first' {
+        $result = Invoke-Tuneup @('-Suggest', '-Json')
+        $result.ExitCode | Should -Be 0
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'suggest'
+        # What the runner has installed is not checked: only the shape of the document.
+        @($json.signals | ForEach-Object { $_.id }) -join ',' | Should -Be 'dev,gaming,laptop,work,legacy,managed'
+        $json.suggestions[0].profile | Should -Be 'base'
+        @($json.questions | ForEach-Object { $_.id }) -join ',' | Should -Be 'privacy,lite'
+    }
+
+    It 'rejects -List with the options of applying, before reading anything' {
+        $result = Invoke-Tuneup @('-List', '-Profile', 'extra', '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be 'Invalid parameter combination: -List -Profile'
+    }
+
+    It 'also writes the JSON document to out\<id>.json with -ResultId' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        ($saved -replace "`r`n", "`n").Trim() | Should -Be $result.Output.Trim()
+        (ConvertFrom-PureJson $saved).command | Should -Be 'status'
+    }
+
+    It 'writes the -Suggest document to the result file too, though -Suggest reads no state' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Suggest', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        ($saved -replace "`r`n", "`n").Trim() | Should -Be $result.Output.Trim()
+        (ConvertFrom-PureJson $saved).command | Should -Be 'suggest'
+    }
+
+    It 'puts the result file next to the runs of a relative -StateRoot' {
+        $script:Root = [guid]::NewGuid().ToString()
+        $id = [guid]::NewGuid().ToString()
+        Push-Location -LiteralPath $TestDrive
+        try {
+            $result = Invoke-Tuneup @('-Yes', '-Json', '-ResultId', $id)
+        } finally {
+            Pop-Location
+        }
+        $result.ExitCode | Should -Be 0
+        (ConvertFrom-PureJson $result.Output).runDir | Should -BeLike (Join-Path $TestDrive "$Root\runs\*")
+        Test-Path -LiteralPath (Join-Path $TestDrive "$Root\out\$id.json") | Should -BeTrue
+    }
+
+    It 'writes an error document to the result file too' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Profile', 'nope', '-WhatIf', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json")))).command | Should -Be 'error'
+    }
+
+    It 'writes the error of an unknown parameter to the result file' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-Exlude', 'test.three', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        $saved = ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json")))
+        $saved.message | Should -Match 'Unknown parameter or value without a parameter name: -Exlude test\.three'
+    }
+
+    It 'refuses -ResultId <Case> with an error document and writes no file' -TestCases @(
+        @{ Case = 'that is too short'; Arguments = @('-Status', '-Json', '-ResultId', 'abc') }
+        @{ Case = 'that is a path'; Arguments = @('-Status', '-Json', '-ResultId', '..\..\escape-1') }
+        @{ Case = 'that is a relative path, with -List'; Arguments = @('-ResultId', '../x', '-Json', '-List') }
+        @{ Case = 'that is invalid, with an unknown parameter too'; Arguments = @('-Bogus', '-Json', '-ResultId', 'abc') }
+    ) {
+        param($Arguments)
+        $result = Invoke-Tuneup $Arguments
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be '-ResultId takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was done.'
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
+    It 'refuses -ResultId without -Json' {
+        $result = Invoke-Tuneup @('-Status', '-ResultId', [guid]::NewGuid().ToString())
+        $result.ExitCode | Should -Be 1
+        $result.Output | Should -Match '-ResultId needs -Json'
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
+    It 'refuses an id whose file exists and changes nothing' {
+        $id = [guid]::NewGuid().ToString()
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        $existing = Join-Path $Root "out\$id.json"
+        [System.IO.File]::WriteAllText($existing, 'old')
+        $result = Invoke-Tuneup @('-Yes', '-Json', '-ResultId', $id)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be "The result $id already exists: use a new -ResultId. Nothing was done."
+        [System.IO.File]::ReadAllText($existing) | Should -Be 'old'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
+    It 'puts an old result that could not be removed in the warnings of the document' {
+        $dir = Join-Path $Root 'out'
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $start = [datetime]::UtcNow.AddDays(-1)
+        for ($i = 1; $i -le 50; $i++) {
+            $path = Join-Path $dir ('old-{0:D8}.json' -f $i)
+            [System.IO.File]::WriteAllText($path, '{}')
+            [System.IO.File]::SetLastWriteTimeUtc($path, $start.AddMinutes($i))
+        }
+        $id = [guid]::NewGuid().ToString()
+        $lock = [System.IO.File]::Open((Join-Path $dir 'old-00000001.json'), [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::None)
+        try {
+            $result = Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)
+        } finally {
+            $lock.Dispose()
+        }
+        $result.ExitCode | Should -Be 0
+        @((ConvertFrom-PureJson $result.Output).warnings) -join "`n" | Should -Match 'Could not remove the old result file .*old-00000001\.json'
+        @((ConvertFrom-PureJson ([System.IO.File]::ReadAllText((Join-Path $dir "$id.json")))).warnings) -join "`n" | Should -Match 'old-00000001\.json'
+    }
+
+    It 'reads a saved result back with -ReadResult, as it was written, with or without -Json' {
+        $id = [guid]::NewGuid().ToString()
+        (Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)).ExitCode | Should -Be 0
+        $saved = [System.IO.File]::ReadAllText((Join-Path $Root "out\$id.json"))
+        foreach ($arguments in @(@('-ReadResult', $id, '-Json'), @('-ReadResult', $id))) {
+            $result = Invoke-Tuneup $arguments
+            $result.ExitCode | Should -Be 0
+            # Elevated, the text mode says first that -StateRoot turns the hardening off: it is not part of the result.
+            $text = (@($result.Output -split "`n") | Where-Object { $_ -notmatch '^WARNING: -StateRoot ' }) -join "`n"
+            $text.Trim() | Should -Be ($saved -replace "`r`n", "`n").Trim()
+        }
+    }
+
+    It 'says why a result cannot be read, with its reason' {
+        $id = [guid]::NewGuid().ToString()
+        $result = Invoke-Tuneup @('-ReadResult', $id, '-Json')
+        $result.ExitCode | Should -Be 1
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'error'
+        $json.reason | Should -Be 'result-missing'
+        New-Item -ItemType Directory -Path (Join-Path $Root 'out') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $Root "out\$id.json"), '')
+        $result = Invoke-Tuneup @('-ReadResult', $id, '-Json')
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).reason | Should -Be 'result-incomplete'
+    }
+
+    It 'rejects -ReadResult with <Case>' -TestCases @(
+        @{ Case = '-ResultId'; Arguments = @('-ResultId', 'abcd-1234-efgh'); Expected = '-ReadResult -ResultId' }
+        @{ Case = 'another command'; Arguments = @('-Status'); Expected = '-Status -ReadResult' }
+        @{ Case = 'an option of applying'; Arguments = @('-Yes'); Expected = '-ReadResult -Yes' }
+    ) {
+        param($Arguments, $Expected)
+        $result = Invoke-Tuneup (@('-ReadResult', [guid]::NewGuid().ToString(), '-Json') + $Arguments)
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be "Invalid parameter combination: $Expected"
+        Test-Path -LiteralPath (Join-Path $Root 'out') | Should -BeFalse
+    }
+
+    It 'exits with 2 instead of 0 when the result file cannot be saved' {
+        # In this process, so that saving can fail: tuneup.ps1 then uses the module this file loaded.
+        Mock Import-Module { }
+        Mock Close-TuneupResultFile { $File.Stream.Dispose(); $false }
+        $id = [guid]::NewGuid().ToString()
+        $output = & (Join-Path $Repo 'tuneup.ps1') -StateRoot $Root -Lang en -Status -Json -ResultId $id
+        $LASTEXITCODE | Should -Be 2
+        (ConvertFrom-PureJson ($output -join "`n")).command | Should -Be 'status'
+        Should -Invoke Close-TuneupResultFile -Times 1 -Exactly
+    }
+
     It 'reports an actions folder script that runs code as a warning and keeps -Status working' {
         $actions = Join-Path $TestDrive ([guid]::NewGuid().ToString())
         New-Item -ItemType Directory -Path $actions | Out-Null
@@ -234,6 +466,17 @@ Describe 'tuneup.ps1' {
         $json.source | Should -Be 'reapply'
         Get-Ids $json.results | Should -Be 'test.one'
         (Get-ItemProperty -LiteralPath $Key).One | Should -Be 1
+    }
+
+    It 're-applies with -Status -Reapply -Include only the drifted tweaks it names' {
+        Invoke-Tuneup @('-Profile', 'extra', '-Yes', '-Json') | Out-Null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Set-ItemProperty -LiteralPath $Key -Name 'Three' -Value 5
+        $result = Invoke-Tuneup @('-Status', '-Reapply', '-Include', 'test.three', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 0
+        Get-Ids (ConvertFrom-PureJson $result.Output).results | Should -Be 'test.three'
+        (Get-ItemProperty -LiteralPath $Key).Three | Should -Be 1
+        (Get-ItemProperty -LiteralPath $Key).One | Should -Be 5
     }
 
     It 'keeps the ids of result.json whatever the account is called, so -Status and -Reapply still work (<Name>)' -ForEach @(
@@ -534,7 +777,8 @@ Describe 'tuneup.ps1' {
     }
 
     It 'carries every JSON document a warnings array' {
-        foreach ($arguments in @(@('-WhatIf', '-Json'), @('-Yes', '-Json'), @('-Status', '-Json'), @('-Undo', 'last', '-Json'), @('-Profile', 'nope', '-Json'))) {
+        foreach ($arguments in @(@('-WhatIf', '-Json'), @('-Yes', '-Json'), @('-Status', '-Json'), @('-Undo', 'last', '-Json'), @('-Profile', 'nope', '-Json'),
+                @('-List', '-Json'), @('-Suggest', '-Json'), @('-Status', '-Json', '-ResultId', 'short'))) {
             $json = ConvertFrom-PureJson (Invoke-Tuneup $arguments).Output
             $json.PSObject.Properties.Name | Should -Contain 'warnings' -Because ($arguments -join ' ')
         }
@@ -605,6 +849,7 @@ Describe 'tuneup.ps1' {
         $json = ConvertFrom-PureJson $result.Output
         $json.command | Should -Be 'error'
         $json.message | Should -Match 'undoing it needs PowerShell as administrator'
+        $json.reason | Should -Be 'needs-admin'
         Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test' | Should -BeFalse
     }
 }

@@ -529,3 +529,35 @@ Describe 'Write-TuneupPlanReport with a policy value under HKCU' {
         (Write-TuneupPlanReport -Plan $skipped -Environment (New-TestEnvironment) -Json | ConvertFrom-Json).requiresAdmin | Should -BeFalse
     }
 }
+
+Describe 'ConvertTo-TuneupPlanView' {
+    It 'gives each item why, ask, type and whether applying it needs administrator' {
+        $asked = New-TestTweak -Id 'test.asked' -Ask $true
+        $machine = New-TestMachineTweak
+        $policy = New-TestTweak -Id 'test.policy' -Set ([pscustomobject]@{ path = 'HKCU:\Software\Policies\windows-tuneup-test'; name = 'X'; kind = 'DWord'; value = 1 })
+        $view = @(ConvertTo-TuneupPlanView -Plan @(
+                [pscustomobject]@{ Id = 'test.asked'; Tweak = $asked; Action = 'skip'; Reason = 'needs-confirmation' },
+                [pscustomobject]@{ Id = 'test.machine'; Tweak = $machine; Action = 'apply'; Reason = $null },
+                [pscustomobject]@{ Id = 'test.policy'; Tweak = $policy; Action = 'apply'; Reason = $null }))
+        $view[0].why | Should -Be 'Reason'
+        $view[0].ask | Should -BeTrue
+        $view[0].type | Should -Be 'registry'
+        $view[0].needsAdmin | Should -BeFalse
+        $view[1].ask | Should -BeFalse
+        $view[1].needsAdmin | Should -BeTrue
+        # A policy under HKCU keeps scope user, but only an elevated process can write it.
+        $view[2].scope | Should -Be 'user'
+        $view[2].needsAdmin | Should -BeTrue
+    }
+
+    It 'writes why in the language of the run' {
+        $i18n = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        Initialize-TuneupI18n -Root $i18n -Lang 'es'
+        try {
+            $view = @(ConvertTo-TuneupPlanView -Plan @([pscustomobject]@{ Id = 'test.one'; Tweak = (New-TestTweak -Id 'test.one'); Action = 'apply'; Reason = $null }))
+            $view[0].why | Should -Be 'Motivo'
+        } finally {
+            Initialize-TuneupI18n -Root $i18n -Lang 'en'
+        }
+    }
+}

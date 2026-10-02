@@ -1,0 +1,16 @@
+{
+  "name": "windows-tuneup",
+  "description": "windows-tuneup for Claude Code: goal-based, reversible and measurable Windows 10/11 optimization.",
+  "owner": {
+    "name": "edgarlugo",
+    "url": "https://github.com/edgarlugo"
+  },
+  "plugins": [
+    {
+      "name": "windows-tuneup",
+      "source": "./plugins/windows-tuneup",
+      "description": "Optimize a Windows 10/11 PC by goal (development, gaming, privacy, laptop, old PC, work, lite) with windows-tuneup: plan first, explicit yes, UAC only when needed, everything reversible.",
+      "version": "0.1.0"
+    }
+  ]
+}

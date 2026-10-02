@@ -4,6 +4,7 @@ BeforeDiscovery {
 
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
+    . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
     $script:Repo = Split-Path $PSScriptRoot -Parent
     $script:PowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
@@ -103,7 +104,7 @@ Describe 'build/package.ps1' {
             'actions/onedrive.ps1', 'docs/es/profiles.md', 'docs/en/catalog.md', 'docs/json-contract.md') {
             $names | Should -Contain $expected
         }
-        foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/') {
+        foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/', 'plugins/', '.claude-plugin/') {
             @($names | Where-Object { $_.StartsWith($folder) }).Count | Should -Be 0 -Because $folder
         }
         @($names | Where-Object { $_ -match '^docs/[^/]+$' }) -join ',' | Should -Be 'docs/json-contract.md'
@@ -219,6 +220,24 @@ Describe 'install.ps1' {
         Test-Path -LiteralPath (Join-Path $destination 'tuneup.ps1') | Should -BeTrue
     }
 
+    It 'loads modules only from the folder of PowerShell, not from a folder put first in PSModulePath' {
+        $destination = Get-TestDestination 'planted'
+        $planted = Join-Path $TestDrive 'planted-modules'
+        $marker = Join-Path $TestDrive 'planted-install.txt'
+        New-PlantedModuleFolder -Folder $planted -Marker $marker
+        $modulePath = $env:PSModulePath
+        $env:PSModulePath = "$planted;$modulePath"
+        try {
+            $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)
+        } finally {
+            $env:PSModulePath = $modulePath
+        }
+        $loaded = $(if (Test-Path -LiteralPath $marker) { [System.IO.File]::ReadAllText($marker) } else { '' })
+        $loaded | Should -BeNullOrEmpty
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        Test-Path -LiteralPath (Join-Path $destination 'tuneup.ps1') | Should -BeTrue
+    }
+
     It 'replaces an earlier copy and leaves any other folder alone, touching nothing' {
         $destination = Get-TestDestination 'twice'
         (Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destination', $destination)).ExitCode | Should -Be 0
@@ -276,11 +295,12 @@ Describe 'install.ps1' {
         [System.IO.File]::WriteAllText($script, @"
 `$Version = 'callers-version'; `$Destination = 'callers-destination'; `$Sha256 = 'callers-sha'; `$Source = 'callers-source'
 `$protocol = [Net.ServicePointManager]::SecurityProtocol
+`$modulePath = `$env:PSModulePath
 Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
-"`$Version|`$Destination|`$Sha256|`$Source|`$ErrorActionPreference|`$ProgressPreference|" + @(Get-ChildItem function:\ | Where-Object Name -like '*-Install*').Count + '|' + (`$protocol -eq [Net.ServicePointManager]::SecurityProtocol)
+"`$Version|`$Destination|`$Sha256|`$Source|`$ErrorActionPreference|`$ProgressPreference|" + @(Get-ChildItem function:\ | Where-Object Name -like '*-Install*').Count + '|' + (`$protocol -eq [Net.ServicePointManager]::SecurityProtocol) + '|' + (`$modulePath -eq `$env:PSModulePath) + '|' + @(Get-Variable -Name '*ModulePath*' -Scope Global | Where-Object Name -ne 'modulePath').Count
 "@)
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
-        $output | Should -Be 'callers-version|callers-destination|callers-sha|callers-source|Continue|Continue|0|True'
+        $output | Should -Be 'callers-version|callers-destination|callers-sha|callers-source|Continue|Continue|0|True|True|0'
         Test-Path -LiteralPath (Join-Path $destination 'tuneup.ps1') | Should -BeTrue
     }
 

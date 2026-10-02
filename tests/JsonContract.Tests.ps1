@@ -63,13 +63,31 @@ Describe 'docs/json-contract.md' {
         $Documents.undo = Invoke-TuneupUndoCommand -Context $context -RunId 'last' | ConvertFrom-Json
         Invoke-TuneupMeasureCommand -Context $context | Out-Null
         $Documents.measure = Invoke-TuneupMeasureCommand -Context $context -Compare 'last' | ConvertFrom-Json
-        $Documents.error = Write-TuneupErrorReport -Message 'x' -Details @('y') -Json | ConvertFrom-Json
+        $Documents.error = Write-TuneupErrorReport -Message 'x' -Details @('y') -Reason 'result-missing' -Json | ConvertFrom-Json
         $cbs = Join-Path $Fixtures 'cbs'
         $lines = @(Get-Content -LiteralPath (Join-Path $cbs 'sfc-unrepaired.log') -Encoding UTF8) + @(Get-Content -LiteralPath (Join-Path $cbs 'scanhealth-corrupt.log') -Encoding UTF8)
         $scan = New-TuneupHealthScan -Lines $lines -SfcRun ([pscustomobject]@{ ExitCode = 1; Output = 'x' }) -DismRun ([pscustomobject]@{ ExitCode = 0; Output = '' })
         $health = [pscustomobject]@{ schemaVersion = 1; command = 'health'; startedAt = 's'; finishedAt = 'f'; repairRequested = $true; repairRan = $true
             before = $scan; after = $scan; recommendation = 'manual-repair'; rebootRecommended = $false }
         $Documents.health = Write-TuneupHealthReport -Report $health -Json | ConvertFrom-Json
+        # One tweak that does not suit the machine, so incompatible has an entry to check.
+        $listDefinition = [pscustomobject]@{
+            Catalog  = @(Import-TuneupCatalog -Path (Join-Path $Fixtures 'catalog')) + @(New-TestTweak -Id 'test.later' -MinBuild 99999)
+            Profiles = @(Import-TuneupProfileSet -Path (Join-Path $Fixtures 'profiles'))
+            Problems = [string[]]@()
+        }
+        $Documents.list = Write-TuneupListReport -Document (Get-TuneupListDocument -Definition $listDefinition -Environment (New-TestEnvironment)) -Json | ConvertFrom-Json
+        # Every signal found, so every field of the document has a value.
+        Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { 'Steam', 'Git' }
+        Mock -ModuleName Tuneup Get-TuneupUserAppxName { 'Microsoft.GamingServices' }
+        Mock -ModuleName Tuneup Test-TuneupSuggestBattery { $true }
+        Mock -ModuleName Tuneup Get-TuneupComputerSystem { [pscustomobject]@{ PartOfDomain = $true; TotalPhysicalMemory = [double]4GB } }
+        Mock -ModuleName Tuneup Get-TuneupInstalledMemoryByte { [double]4GB }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $true }
+        Mock -ModuleName Tuneup Test-TuneupSuggestMdm { $true }
+        Mock -ModuleName Tuneup Get-TuneupSystemDiskMediaType { 'HDD' }
+        Mock -ModuleName Tuneup Get-TuneupOsSupport { [pscustomobject]@{ Build = 26100; Edition = 'Pro'; IsServer = $false } }
+        $Documents.suggest = Invoke-TuneupSuggestCommand -Context $context | ConvertFrom-Json
     }
 
     AfterAll {
@@ -81,6 +99,7 @@ Describe 'docs/json-contract.md' {
         foreach ($name in $Documents.Keys) { $paths[$name] = @(Get-JsonPath $Documents[$name]) }
         $paths.plan | Should -Contain 'preflight[].id'
         $paths.plan | Should -Contain 'items[].signOutRequired'
+        $paths.plan | Should -Contain 'items[].needsAdmin'
         $paths.apply | Should -Contain 'results[].refused'
         $paths.apply | Should -Contain 'summary.interrupted'
         $paths.apply | Should -Contain 'environment.pendingReboot'
@@ -91,6 +110,15 @@ Describe 'docs/json-contract.md' {
         $paths.health | Should -Contain 'after.componentStore.operationResult'
         $paths.health | Should -Contain 'before.corruptComponents[].files'
         $paths.error | Should -Contain 'details'
+        $paths.error | Should -Contain 'reason'
+        $Documents.error.reason | Should -Be 'result-missing'
+        (Get-ContractSection 'error').Contains('`needs-admin`') | Should -BeTrue
+        $paths.list | Should -Contain 'profiles[].needsAdmin'
+        $paths.list | Should -Contain 'tweaks[].profiles'
+        $paths.list | Should -Contain 'incompatible[].reason'
+        $paths.suggest | Should -Contain 'signals[].evidence'
+        $paths.suggest | Should -Contain 'suggestions[].signals'
+        $paths.suggest | Should -Contain 'questions[].text'
     }
 
     It 'catches a field that the page does not name' {
@@ -105,6 +133,8 @@ Describe 'docs/json-contract.md' {
         @{ Command = 'undo' }
         @{ Command = 'measure' }
         @{ Command = 'health' }
+        @{ Command = 'list' }
+        @{ Command = 'suggest' }
         @{ Command = 'error' }
     ) {
         param($Command)

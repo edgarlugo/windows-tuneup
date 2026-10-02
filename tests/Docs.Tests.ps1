@@ -8,6 +8,16 @@ BeforeAll {
     }
 }
 
+Describe 'README' {
+    It 'presents the version of the tool, with the Claude Code skill, in both languages' {
+        $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        $version = Get-TuneupVersion
+        $text | Should -Match ([regex]::Escape("> **Versi$([char]0x00F3)n $version.**") + '[^\r\n]*skill de Claude Code')
+        $text | Should -Match ([regex]::Escape("> **Version $version.**") + '[^\r\n]*Claude Code skill')
+        $text | Should -Not -Match '(?i)antes de la primera release|before the first release|before version \d'
+    }
+}
+
 Describe 'Blacklist' {
     It 'explains the cases of the design and of the research in both languages' {
         $terms = @('Defender', 'SmartScreen', 'Windows Update', 'WinRE', '/ResetBase', 'Spectre', 'PagingFiles', 'hosts',
@@ -41,6 +51,20 @@ Describe 'Virtual machine checklist' {
     }
 }
 
+Describe 'Skill checklist' {
+    It 'covers installing the plugin, the modes, undo, a declined UAC prompt, reading results and a managed PC, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'skill-checklist.md'
+            foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
+                '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
+                'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl', "-Status -Reapply -Include '<ids>'", '-Status -Reapply -WhatIf -Json', 'run_in_background', 'needs-admin',
+                'high-risk-not-requested') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+}
+
 Describe 'Documentation in both languages' {
     It 'has <Name> in Spanish and English, in UTF-8 without a byte order mark' -TestCases @(
         @{ Name = 'blacklist.md' }
@@ -48,6 +72,7 @@ Describe 'Documentation in both languages' {
         @{ Name = 'measuring.md' }
         @{ Name = 'catalog.md' }
         @{ Name = 'vm-checklist.md' }
+        @{ Name = 'skill-checklist.md' }
     ) {
         param($Name)
         foreach ($lang in 'es', 'en') {

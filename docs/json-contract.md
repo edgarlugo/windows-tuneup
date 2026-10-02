@@ -9,18 +9,39 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 - The exit code completes the document: `0` everything done, `2` not everything was done (read the document), `1` nothing was done or it could not start (the document is usually an `error`).
 - An unknown or misspelled parameter, or a value without its parameter name (parameters are never positional), ends in an `error` document (exit `1`) and nothing is done. A value PowerShell cannot take (a `-Lang` other than `es`/`en`, an `-IdleSeconds` that is not a number) is rejected by PowerShell itself: no JSON document, exit code `1`.
 - `-Json` never asks anything. Applying needs `-Yes` (or `-WhatIf` to only see the plan); without either, a plan with changes ends in an `error` (exit `1`), `-Json` alone included. Without a command and without `-Json` the tool opens the menu, which has no JSON output.
-- Texts meant for people (`title`, `message`, `detail`, `error`, `warnings`) follow `-Lang`; ids, statuses and reasons never change with the language.
+- Texts meant for people (`title`, `why`, `description`, `message`, `detail`, `error`, `text`, `warnings`) follow `-Lang`; ids, statuses, reasons and `evidence` never change with the language.
+- `-ResultId <id>` (with `-Json` only, any command) also writes the document to `out\<id>.json` under the state folder: `%ProgramData%\windows-tuneup` when elevated (only administrators can write there; users can read; the folder and `out` are checked like the rest of the machine state, and one that other accounts can change, or that is a junction, is refused, so no one else can put a file or a link there), `%LOCALAPPDATA%\windows-tuneup` otherwise (`-StateRoot` in tests and development, as for the runs). It is for a program that starts the tool elevated with UAC and cannot read its standard output; that program reads the result back with `-ReadResult` (below), never by opening the file itself. The id is 8 to 64 characters among `A-Z`, `a-z`, `0-9` and `-`, and starts with a letter or a digit (a GUID fits; one that starts with `-` would be taken by PowerShell as a parameter name); the caller never gives a path. An invalid id or an id whose file already exists (an existing file or hard link is never replaced) ends in an `error` document on the standard output; `-ResultId` without `-Json` ends in the same refusal as plain text, with no document. Either way: exit `1`, nothing done, no file written. The file is created, empty, before the command runs and gets, when it ends, the same document as the standard output, `error` documents included (an unknown parameter too, when the id is valid). In the machine folder, which users can read, the profile folder and the account name in a path are hidden in the free texts that can carry one (`warnings`, `message`, `details`, `runDir`, `path`, `error`, `detail`, `output`, `repairedFiles`, `unrepairedFiles`) as `%USERPROFILE%` and `%USERNAME%`, like `result.json` does; ids, statuses, reasons and titles are as on the standard output, which is never hidden. `manual` keeps its paths: it is a command to run, and the run folder already holds those values. `out` keeps the 50 newest results (only files named like a result id count: folders and links are left alone, and a result that cannot be removed is a warning in the document). An empty file, or one that is not a single JSON document, means the command is still running or was stopped before it could write (window closed, process killed): read it as no document and check with `-Status` (`-ReadResult` says `result-incomplete`). No file after the process ended means the document could not be written (the exit code is then `2` if it would have been `0`) or Ctrl+C stopped PowerShell itself (see `apply`).
+- `-ReadResult <id>` prints the document that a run with `-ResultId <id>` saved, after checking who could have written it (see "Reading a result").
 
 | Command line | `command` of the document |
 |---|---|
 | `-WhatIf -Json`, or nothing to apply | `plan` |
 | `-Yes -Json` | `apply` (or `plan` when there was nothing to apply) |
 | `-Status -Json` | `status` |
-| `-Status -Reapply -WhatIf -Json` or `-Status -Reapply -Yes -Json` | `plan` or `apply`, with `source` = `reapply` (a `plan` with no items when nothing drifted; without `-WhatIf` or `-Yes`, something to apply ends in an `error`) |
+| `-Status -Reapply [-Include <ids>] -WhatIf -Json` or `-Status -Reapply [-Include <ids>] -Yes -Json` | `plan` or `apply`, with `source` = `reapply` (a `plan` with no items when nothing drifted; without `-WhatIf` or `-Yes`, something to apply ends in an `error`). With `-Include`, only the drifted tweaks it names, by name (a tweak that asks first or has high risk too), never the base profile; a named tweak that did not drift is left out with a warning (without elevation the warning adds that it may be one that cannot be checked without administrator), an unknown one is an `error` |
 | `-Undo <id\|last> [-Tweak <id>] -Json` | `undo` |
 | `-Health [-Repair] -Json` | `health` |
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>] -Json` | `measure` |
+| `-List -Json` | `list` |
+| `-Suggest -Json` | `suggest` |
+| `-ReadResult <id> [-Json]` | the document saved by `-ResultId`, unchanged (any `command`), or `error` |
 | any refusal or failure before the work | `error` |
+
+## Reading a result
+
+`-ReadResult <id>` is how a program that started the tool elevated gets the document: it runs the installed `tuneup.ps1` again, **without** elevation, with `-ReadResult <id> -Json`, and never opens `out\<id>.json` itself. The reason: a standard user can create `%ProgramData%\windows-tuneup` (or its `out` folder) before the first elevated run; that run then refuses to write there (its `error` goes only to the elevated window, which the caller does not see) and the file found by its path would be whatever that user put there.
+
+- It excludes every other command (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`), the options of applying, and `-ResultId`: `error` (`Invalid parameter combination`), exit `1`. Elevated or not, it needs no administrator. It reads no catalog, profiles, state or environment. Run elevated (never by the skill, which reads results without elevation), it first goes through the check of every elevated command (see `error`): with a machine state folder that cannot be trusted it ends in a plain `error` without `reason`, not in `result-untrusted`.
+- The id follows the rule of `-ResultId`; another id is an `error` (exit `1`, no `reason`).
+- Where: first `out\<id>.json` of the machine folder (`CommonApplicationData`, that is `%ProgramData%\windows-tuneup`), only if the folder that holds it, the state folder, `out` and the file pass the checks of the machine state (owned by Administrators, SYSTEM or TrustedInstaller; no write right for anyone else; not a junction or a link; the file has one name only, no hard link). Then, only when the caller is not elevated, `out\<id>.json` of `%LOCALAPPDATA%\windows-tuneup`, where unelevated runs write; never when the machine state folder exists and fails those checks, which is `result-untrusted` before anything else. With `-StateRoot` (tests and development) only that folder, without checks.
+- Success: the stored document exactly as it was written (ASCII JSON; in the machine folder the profile folder and the account name are hidden as described for `-ResultId`), with or without `-Json`, and exit `0` whatever the document says. The exit code of the run itself is the one of the process that ran it (`Start-Process -PassThru`); its `command` says what it is, an `error` included. The warnings of the read itself are not added.
+- Otherwise an `error` document (with `-Json`; plain text without it) whose `reason` is one of these, exit `1`, and nothing of the file is printed:
+
+| `reason` | Meaning | What to do |
+|---|---|---|
+| `result-missing` | No result with that id in any folder it reads. | If the elevated process ended with exit `1`, it refused before it could write (an invalid or used id, an untrusted state folder, a tool that did not start): run the same command in a PowerShell opened as administrator to see the message. |
+| `result-incomplete` | The file is empty, held open by the run that writes it, or not a single JSON object. | The command is still running, or it was stopped before it wrote (window closed, process killed): check with `-Status`. |
+| `result-untrusted` | The file, `out`, the state folder or the folder that holds it fails the checks; also whenever the state folder exists and fails them, before the user folder is looked at (an elevated run could not write there, and a result of the same id elsewhere is not its result). | Do not read the file by other means and do not retry: the folder named in the message has to be deleted by an administrator. |
 
 ## `shared`
 
@@ -55,8 +76,12 @@ Fields that several documents carry.
 | `items` | object[] | One per tweak considered, in order. |
 | `items[].id` | string | Tweak id. |
 | `items[].title` | string | Tweak title in the language of the run. |
+| `items[].why` | string | What the tweak does and why, in the language of the run. |
 | `items[].risk` | string | `low`, `medium` or `high`. |
+| `items[].ask` | boolean | The tweak asks before it is applied: a profile alone leaves it out (`needs-confirmation`); `-Include <id>` asks for it by name. |
 | `items[].scope` | string | `user` or `machine`. |
+| `items[].type` | string | Kind of change: `registry`, `service`, `task`, `appx`, `capability`, `feature`, `powercfg` or `action`. |
+| `items[].needsAdmin` | boolean | Applying it needs elevation: a machine change, or a policy under `HKCU`. |
 | `items[].action` | string | `apply` or `skip`. |
 | `items[].reason` | string or null | Why it is skipped: `excluded`, `kept-by-profile`, `incompatible`, `not-applicable-hardware`, `managed-device`, `session-user`, `already-applied`, `not-present`, `state-unreadable`, `high-risk-not-requested`, `needs-confirmation`, `declined` (menu only). An item to apply can carry `unverified-needs-admin` (its state is checked when applied). |
 | `items[].rebootRequired` | boolean | The tweak needs a restart once applied. |
@@ -206,14 +231,63 @@ Exit code: `0` everything restored, `2` some left, `1` nothing restored.
 
 Exit code: `0` no problems (`recommendation` = `none`), `2` problems remain or the result could not be confirmed, `1` not elevated.
 
+## `list`
+
+What the catalog and the profiles offer on this machine. Read only, no elevation needed. Exit code `0`, or `1` with an `error` (an unsupported Windows without `-Force`, or a catalog or profiles with errors). The blacklist is not data of the tool: it is `docs/es/blacklist.md` and `docs/en/blacklist.md` of the installed copy.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `profiles` | object[] | Every profile, `base` first. |
+| `profiles[].id` | string | Profile id: what `-Profile` takes. |
+| `profiles[].aliases` | string[] | Other names `-Profile` takes (`privacidad`, `juegos`...). |
+| `profiles[].title` | string | Title in the language of the run. |
+| `profiles[].description` | string | What the profile does, in the language of the run. |
+| `profiles[].tweakCount` | number | Tweaks of the profile that suit this machine (the ones not in `incompatible`). |
+| `profiles[].needsAdmin` | boolean | Some of those tweaks need elevation. |
+| `tweaks` | object[] | Every tweak of the catalog that suits this machine, in catalog order. |
+| `tweaks[].id` | string | Tweak id: what `-Include` and `-Exclude` take. |
+| `tweaks[].title` | string | Title in the language of the run. |
+| `tweaks[].why` | string | What it does and why, in the language of the run. |
+| `tweaks[].risk` | string | `low`, `medium` or `high` (`high` is never in a profile: only `-Include` applies it). |
+| `tweaks[].ask` | boolean | It asks before it is applied: a profile alone leaves it out; `-Include <id>` asks for it. |
+| `tweaks[].type` | string | `registry`, `service`, `task`, `appx`, `capability`, `feature`, `powercfg` or `action`. |
+| `tweaks[].scope` | string | `user` or `machine`. |
+| `tweaks[].needsAdmin` | boolean | Applying it needs elevation. |
+| `tweaks[].rebootRequired` | boolean | It needs a restart once applied. |
+| `tweaks[].requires` | string[] | Hardware it is meant for: `battery`, `no-battery`; empty for any. |
+| `tweaks[].profiles` | string[] | Ids of the profiles that include it; empty for one that is only applied by name. |
+| `incompatible` | object[] | Tweaks that do not suit this machine, with the reason the plan would give. |
+| `incompatible[].id` | string | Tweak id. |
+| `incompatible[].reason` | string | `incompatible` (Windows version or edition), `not-applicable-hardware` (its `requires` does not match this machine) or `managed-device` (a policy, on a device joined to a domain or enrolled in MDM, where the plan leaves policies alone). |
+
+## `suggest`
+
+What this machine has and the profiles that fit it. Read only, no elevation needed, nothing is sent anywhere. Exit code `0` (`1` with an `error` only for parameters it does not take). It reads no catalog, profiles, actions, state or environment of the tool, so `-CatalogPath`, `-ProfilesPath`, `-ActionsPath` and `-StateRoot` do not change it (`-StateRoot` only places the `-ResultId` file), and a broken system query cannot turn it into an `error`. A source that cannot be read (a detector that fails) leaves out what it would have found and adds a warning; the document is still written. On a Windows the tool does not support (Server, a build older than 19041 or an edition it does not know) a warning says that the profiles would need `-Force`: it is advice only, the document is the same and the exit code is still `0`; a Windows whose version cannot be read gives no warning.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `signals` | object[] | Always six, in this order: `dev`, `gaming`, `laptop`, `work`, `legacy`, `managed`. |
+| `signals[].id` | string | `dev`: Visual Studio, Visual Studio Code, a JetBrains IDE, Android Studio, Git, Node.js, Python, a JDK or WSL installed. `gaming`: Steam, Epic Games Launcher, EA app, or Xbox Gaming Services (the Xbox app installs it to play Game Pass; the Xbox app and the Game Bar that come with Windows do not count). `laptop`: a battery on a portable chassis. `work`: joined to a domain or to Entra ID, or enrolled in MDM. `legacy`: less than 8 GB of RAM (the installed modules; when they cannot be read, what Windows reports rounded to the nearest GB, because it reports a little less than what is installed) or a system disk that is a hard disk. `managed`: joined to a domain or enrolled in MDM, the same rule as `environment.isManaged`; it suggests no profile, it is there to warn before changing anything. |
+| `signals[].detected` | boolean | Something was found. |
+| `signals[].evidence` | string[] | What was found. `battery`, `domain`, `Entra ID`, `MDM`, `HDD` and `RAM <n> GB` (`<n>` a whole number) are stable tokens: they never change with the language (the text for people translates them). Anything else is a product name: `Visual Studio`, `Visual Studio Code`, `JetBrains`, `Android Studio`, `Git`, `Node.js`, `Python`, `JDK`, `WSL`, `Steam`, `Epic Games Launcher`, `EA app` or `Xbox Gaming Services`. Never a path, the display name of an installer or the account. |
+| `suggestions` | object[] | Profiles to propose: `base` first (always, with no signals), then one per detected signal except `managed`, in the order of `signals`. |
+| `suggestions[].profile` | string | Profile id. |
+| `suggestions[].signals` | string[] | Ids of the signals behind it. |
+| `questions` | object[] | What only the user can decide: `privacy` and `lite` are never suggested. |
+| `questions[].id` | string | The profile it asks about: `privacy` or `lite`. |
+| `questions[].text` | string | The question, in the language of the run. |
+
 ## `error`
 
 | Field | Type | Meaning |
 |---|---|---|
 | `message` | string | What went wrong, for people. |
 | `details` | string[] | More lines (for example, each problem of the catalog). |
+| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, or `-Health`, without elevation: run it elevated), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
 
 Exit code: `1`.
+
+Elevated and without `-StateRoot`, every command (the menu too) first prepares the temporary folder of the run: it creates `%ProgramData%\windows-tuneup\tmp` with the machine state checks, if it is not there, and a folder of the run inside it, which it empties and removes at the end. When the machine state folder, or the folder that holds it, cannot be trusted, the command does nothing else and ends in an `error` (no `reason`; its `message` names the folder, which an administrator has to delete), exit `1`; with `-ResultId`, no result file is written.
 
 ## Run folder
 

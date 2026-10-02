@@ -14,6 +14,10 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'a re-apply'; Present = @('Status', 'Reapply') }
         @{ Name = 'a re-apply without asking'; Present = @('Status', 'Reapply', 'Yes') }
         @{ Name = 'the plan of a re-apply'; Present = @('Status', 'Reapply', 'WhatIf') }
+        @{ Name = 'a re-apply of the tweaks it names'; Present = @('Status', 'Reapply', 'Include', 'Yes') }
+        @{ Name = 'the list'; Present = @('List') }
+        @{ Name = 'the suggestions'; Present = @('Suggest') }
+        @{ Name = 'reading a result'; Present = @('ReadResult') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -34,6 +38,19 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('Status', 'Yes'); Expected = '-Status -Yes' }
         @{ Present = @('Status', 'Reapply', 'Profile'); Expected = '-Status -Profile' }
         @{ Present = @('Status', 'Reapply', 'Exclude', 'Yes'); Expected = '-Status -Exclude' }
+        @{ Present = @('Status', 'Include'); Expected = '-Status -Include' }
+        @{ Present = @('Undo', 'Include'); Expected = '-Undo -Include' }
+        @{ Present = @('List', 'Suggest'); Expected = '-List -Suggest' }
+        @{ Present = @('Status', 'List'); Expected = '-Status -List' }
+        @{ Present = @('Suggest', 'Measure'); Expected = '-Measure -Suggest' }
+        @{ Present = @('List', 'Profile'); Expected = '-List -Profile' }
+        @{ Present = @('Suggest', 'WhatIf'); Expected = '-Suggest -WhatIf' }
+        @{ Present = @('List', 'Yes'); Expected = '-List -Yes' }
+        @{ Present = @('ReadResult', 'Status'); Expected = '-Status -ReadResult' }
+        @{ Present = @('ReadResult', 'Suggest'); Expected = '-Suggest -ReadResult' }
+        @{ Present = @('ReadResult', 'Profile'); Expected = '-ReadResult -Profile' }
+        @{ Present = @('ReadResult', 'Yes'); Expected = '-ReadResult -Yes' }
+        @{ Present = @('ReadResult', 'WhatIf'); Expected = '-ReadResult -WhatIf' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected

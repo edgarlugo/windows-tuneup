@@ -13,6 +13,24 @@ Describe 'Repository hygiene' {
         ($bad -join ', ') | Should -BeNullOrEmpty
     }
 
+    It 'has no tab or other control character in Markdown, but in verbatim text blocks' {
+        # A tab is usually a backslash eaten by an escape (.\tuneup.ps1 written as .<TAB>uneup.ps1). Only
+        # a ```text block may hold one: it copies a log as it is (CBS.log separates its fields with tabs).
+        $files = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter '*.md' |
+            Where-Object { $_.FullName -notmatch '\\(\.git|node_modules|TestResults)\\' }
+        $files.Count | Should -BeGreaterThan 5
+        $bad = foreach ($file in $files) {
+            $verbatim = $false
+            $number = 0
+            foreach ($line in ([System.IO.File]::ReadAllText($file.FullName) -split "`r?`n")) {
+                $number++
+                if ($line -match '^\s*```') { $verbatim = (-not $verbatim) -and ($line -match '^\s*```text\s*$'); continue }
+                if (-not $verbatim -and $line -match '[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]') { "$($file.FullName):$number" }
+            }
+        }
+        ($bad -join ', ') | Should -BeNullOrEmpty
+    }
+
     It 'has JSON files that parse' {
         $files = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File -Filter '*.json' |
             Where-Object { $_.FullName -notmatch '\\\.git\\' }

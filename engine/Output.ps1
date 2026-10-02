@@ -2,15 +2,20 @@ function ConvertTo-TuneupPlanView {
     param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Plan)
     foreach ($item in $Plan) {
         [pscustomobject]@{
-            id             = $item.Id
-            title          = Get-TuneupTitle -Tweak $item.Tweak
-            risk           = $item.Tweak.risk
-            scope          = $item.Tweak.scope
-            action         = $item.Action
-            reason         = $item.Reason
-            rebootRequired = [bool]$item.Tweak.rebootRequired
+            id              = $item.Id
+            title           = Get-TuneupTitle -Tweak $item.Tweak
+            why             = Get-TuneupLocalizedText $item.Tweak.why
+            risk            = $item.Tweak.risk
+            ask             = [bool]$item.Tweak.ask
+            scope           = $item.Tweak.scope
+            type            = [string]$item.Tweak.type
+            # A machine change, or a policy under HKCU (only an elevated process can write those).
+            needsAdmin      = [bool](Test-TuneupTweakNeedsAdmin -Tweak $item.Tweak)
+            action          = $item.Action
+            reason          = $item.Reason
+            rebootRequired  = [bool]$item.Tweak.rebootRequired
             signOutRequired = ($null -ne $item.Tweak.PSObject.Properties['signOutRequired'] -and $item.Tweak.signOutRequired -eq $true)
-            requires       = @(if ($null -ne $item.Tweak.PSObject.Properties['requires']) { $item.Tweak.requires })
+            requires        = @(if ($null -ne $item.Tweak.PSObject.Properties['requires']) { $item.Tweak.requires })
         }
     }
 }
@@ -309,15 +314,19 @@ function Write-TuneupErrorReport {
         [Parameter(Mandatory)][string]$Message,
         [AllowEmptyCollection()][string[]]$Details = @(),
         [AllowEmptyCollection()][string[]]$Warnings = @(),
+        # A stable token for programs, when the error has one (-ReadResult); not in the text for people.
+        [string]$Reason,
         [switch]$Json
     )
     if ($Json) {
-        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document ([pscustomobject]@{
+        $document = [pscustomobject]@{
             schemaVersion = 1
             command       = 'error'
             message       = $Message
             details       = [string[]]@($Details)
-        }))
+        }
+        if ($Reason) { $document | Add-Member -NotePropertyName reason -NotePropertyValue $Reason }
+        Write-TuneupJson (Add-TuneupJsonWarning -Warnings $Warnings -Document $document)
         return
     }
     Write-Host $Message -ForegroundColor Red
