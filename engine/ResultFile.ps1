@@ -163,7 +163,8 @@ function Hide-TuneupValuePersonalData {
 # elevated run, which then refuses to write, and leave a result of their own there). The machine folder
 # first, checked like the machine state on every level (the folder that holds it, the state folder, out
 # and the file itself: owner, who can write, no junction, one link); then, for an unelevated caller,
-# the user folder, where its unelevated runs write; -StateRoot alone in tests. Gives { Code, Key, Text,
+# the user folder, where its unelevated runs write, but never past a machine folder that exists and
+# fails those checks; -StateRoot alone in tests. Gives { Code, Key, Text,
 # Path, Folder }: Code is null and Text the document as it was written, or Code says why there is none
 # (result-missing, result-incomplete, result-untrusted) and Key is its message.
 function Read-TuneupResultFile {
@@ -181,6 +182,11 @@ function Read-TuneupResultFile {
         $places = @([pscustomobject]@{ Kind = 'custom'; Path = Join-Path $StateRoot "out\$fileName" })
     }
     else {
+        # A machine folder that is not trusted stops everything, before the user folder: the elevated run
+        # refused to write there, and a result of the same id elsewhere is not its result.
+        if ((Test-Path -LiteralPath $machine) -and -not (Test-TuneupResultFolderTrusted -Root $machine)) {
+            return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $null)
+        }
         $places = @([pscustomobject]@{ Kind = 'machine'; Path = Join-Path $machine "out\$fileName" })
         if ($IncludeUser) {
             $user = $(if ($UserRoot) { $UserRoot } else { Get-TuneupStateRoot })
@@ -191,6 +197,7 @@ function Read-TuneupResultFile {
         if (-not (Test-Path -LiteralPath $place.Path)) { continue }
         try {
             if ($place.Kind -eq 'machine') {
+                # Again: the folder may have been made after the check above.
                 if (-not (Test-TuneupResultFolderTrusted -Root $machine)) { return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $place.Path) }
                 try {
                     $stream = Open-TuneupTrustedStream -Path $place.Path
@@ -213,10 +220,6 @@ function Read-TuneupResultFile {
         }
         if (-not (Test-TuneupResultDocument -Text $text)) { return (& $answer 'result-incomplete' 'err.readResultIncomplete' $null $place.Path) }
         return (& $answer $null $null $text $place.Path)
-    }
-    # No result anywhere. A machine folder that is not trusted is why an elevated run could not write it.
-    if (-not $StateRoot -and (Test-Path -LiteralPath $machine) -and -not (Test-TuneupResultFolderTrusted -Root $machine)) {
-        return (& $answer 'result-untrusted' 'err.readResultUntrusted' $null $null)
     }
     & $answer 'result-missing' 'err.readResultMissing' $null $null
 }

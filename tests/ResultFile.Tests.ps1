@@ -363,6 +363,16 @@ Describe 'Reading result files' {
         $read.Folder | Should -Be $MachineRoot
     }
 
+    It 'refuses a machine folder that another account made before it looks in the user folder' {
+        # Its run may have been refused there; a result of the same id in the user folder is not it.
+        Initialize-TuneupStateRoot -Path $MachineRoot -Children @('out')
+        Grant-EveryoneWrite $MachineRoot
+        Close-TuneupResultFile -File (Open-TuneupResultFile -Id $Id -UserRoot $UserRoot) -Text $Document | Should -BeTrue
+        $read = Read-TuneupResultFile -Id $Id @Roots -IncludeUser
+        $read.Code | Should -Be 'result-untrusted'
+        $read.Text | Should -BeNullOrEmpty
+    }
+
     It 'refuses an out folder that is a junction, reading nothing where it points' {
         Initialize-TuneupStateRoot -Path $MachineRoot -Children @('runs')
         $target = Join-Path $TestDrive ([guid]::NewGuid().ToString())
