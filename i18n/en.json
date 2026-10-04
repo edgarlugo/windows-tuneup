@@ -322,6 +322,7 @@
   "err.startupFixed": "These are never turned off, so nothing was done:",
   "err.startupWow64": "-Startup needs 64-bit PowerShell: on this 64-bit Windows, a 32-bit PowerShell sees another part of the registry and of System32, and the list would be wrong. Open Windows PowerShell (not the one marked (x86)) and try again. Nothing was done.",
   "err.startupSessionUser": "{0}: it belongs to the account signed in at this desktop, and this process runs as another administrator account. Turn it off without elevation from that account. Nothing was done.",
+  "err.startupNeedsAdmin": "Turning these off needs PowerShell as administrator (they start for every user of this PC): {0}. Entries of your account alone are turned off without it. Nothing was done.",
   "reapply.startupEntry": "{0} starts with Windows again: it is not applied again on its own. See it with -Startup and turn it off with -Startup -Disable.",
   "transcript.request.startup": "Asked for: turn off what starts with Windows ({1})",
   "menu.main.startup": " 6. What starts with Windows: see it and turn off what you choose",

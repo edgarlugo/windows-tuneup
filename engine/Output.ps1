@@ -58,7 +58,7 @@ function Write-TuneupPlanReport {
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
         [AllowEmptyCollection()][object[]]$Preflight = @(),
-        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles',
+        [ValidateSet('profiles', 'reapply', 'startup')][string]$Source = 'profiles',
         [switch]$Json,
         # The caller says it with its own line (the menu, when it stops a plan that needs administrator).
         [switch]$NoAdminHint
@@ -101,7 +101,7 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][object[]]$Preflight = @(),
-        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles'
+        [ValidateSet('profiles', 'reapply', 'startup')][string]$Source = 'profiles'
     )
     # A tweak left out because its backup could not be written was not done: it is counted apart, and
     # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to

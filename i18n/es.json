@@ -322,6 +322,7 @@
   "err.startupFixed": "Esto no se apaga, así que no se hizo nada:",
   "err.startupWow64": "-Startup necesita PowerShell de 64 bits: en este Windows de 64 bits, PowerShell de 32 bits ve otra parte del registro y de System32, y la lista saldría equivocada. Abre Windows PowerShell (no el que dice (x86)) y vuelve a intentarlo. No se hizo nada.",
   "err.startupSessionUser": "{0}: es de la cuenta que inició sesión en este escritorio, y este proceso corre como otra cuenta de administrador. Apágalo sin elevar desde esa cuenta. No se hizo nada.",
+  "err.startupNeedsAdmin": "Apagar esto necesita PowerShell como administrador (arranca para todos los usuarios del equipo): {0}. Lo que es solo de tu cuenta se apaga sin elevar. No se hizo nada.",
   "reapply.startupEntry": "{0} arranca otra vez con Windows: no se vuelve a aplicar solo. Míralo con -Startup y apágalo con -Startup -Disable.",
   "transcript.request.startup": "Pedido: apagar lo que arranca con Windows ({1})",
   "menu.main.startup": " 6. Lo que arranca con Windows: verlo y apagar lo que elijas",
