@@ -56,7 +56,7 @@ function Get-TuneupCurrentUserSid {
 
 function Get-TuneupUntrustedMessage {
     param([Parameter(Mandatory)][string]$Path)
-    "State folder $Path is not trusted. Delete it as administrator and run again."
+    Get-TuneupText -Key 'err.stateFolderUntrusted' -Format $Path
 }
 
 function New-TuneupStateSecurity {
@@ -272,7 +272,7 @@ function Initialize-TuneupStateRoot {
     param([Parameter(Mandatory)][string]$Path, [string[]]$Children = @('runs'))
     $base = Split-Path -Parent $Path
     if (-not (Test-TuneupBaseFolder -Path $base)) {
-        throw "Folder $base is not trusted to hold the machine state folder"
+        throw (Get-TuneupText -Key 'err.stateBaseUntrusted' -Format $base)
     }
     foreach ($folder in @($Path) + @($Children | ForEach-Object { Join-Path $Path $_ })) {
         $existed = Test-Path -LiteralPath $folder

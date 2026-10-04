@@ -254,5 +254,7 @@
   "err.readResultInvalid": "-ReadResult lleva de 8 a 64 letras (A-Z), dígitos o guiones, y empieza por una letra o un dígito, como un GUID. No se leyó nada.",
   "err.readResultMissing": "No hay un resultado {0}. Si una ventana elevada corrió el comando, se negó antes de empezar (código de salida 1: corre el mismo comando en PowerShell como administrador para ver por qué) o se detuvo antes de escribirlo, con Ctrl+C o porque no pudo guardar su documento (código de salida 2: revisa con -Status lo que quedó aplicado).",
   "err.readResultIncomplete": "El resultado {0} no está completo: el comando sigue corriendo o se cortó antes de terminar (se cerró su ventana). Revisa lo aplicado con -Status.",
-  "err.readResultUntrusted": "No se leyó el resultado {0}: el archivo, o la carpeta {1} que lo guarda, no está protegido como el estado del equipo, así que una cuenta que no es administradora pudo escribirlo. Borra {1} como administrador y vuelve a correr el comando."
+  "err.readResultUntrusted": "No se leyó el resultado {0}: el archivo, o la carpeta {1} que lo guarda, no está protegido como el estado del equipo, así que una cuenta que no es administradora pudo escribirlo. Borra {1} como administrador y vuelve a correr el comando.",
+  "err.stateFolderUntrusted": "La carpeta de estado {0} no es de confianza. Bórrala como administrador y vuelve a correr la herramienta.",
+  "err.stateBaseUntrusted": "La carpeta {0} no es de confianza para guardar la carpeta de estado del equipo"
 }
