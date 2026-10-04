@@ -184,6 +184,9 @@ function Get-TuneupStartupFixedReason {
     if ([string]$Entry.source -like 'runonce*') { return 'run-once' }
     # The list could not finish reading it (a warning said so): what was not checked is never turned off.
     if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'Incomplete') -eq $true) { return 'unreadable' }
+    # A control character (a line break, an escape sequence, NUL) in its name or key: not a name a person can
+    # check, nor one to look up again.
+    if (([string]$Entry.name + [string]$Entry.key) -match '\p{Cc}') { return 'unreadable' }
     # More than one entry has its id (Set-TuneupStartupAmbiguity): the id could name the wrong one.
     if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'Ambiguous') -eq $true) { return 'ambiguous' }
     if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]`]') { return 'unsupported-name' }

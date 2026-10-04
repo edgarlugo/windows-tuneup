@@ -206,6 +206,15 @@ Describe 'Get-TuneupStartupFixedReason' {
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Odd`Name') | Should -Be 'unsupported-name'
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Key 'Half' -Target @{ Incomplete = $true }) | Should -Be 'unreadable'
     }
+
+    It 'never offers an entry whose name or key holds a control character: <Name>' -TestCases @(
+        @{ Name = 'an escape sequence in the name'; Key = 'Tool'; EntryName = ('Tool' + [char]27 + '[2J') }
+        @{ Name = 'a line break in the key'; Key = ('Tool' + [char]10 + 'Other'); EntryName = 'Tool' }
+        @{ Name = 'a NUL in the key'; Key = ('Tool' + [char]0); EntryName = 'Tool' }
+    ) {
+        param($Key, $EntryName)
+        Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Key $Key -Name $EntryName) | Should -Be 'unreadable'
+    }
 }
 
 Describe 'Get-TuneupStartupRecommendation' {

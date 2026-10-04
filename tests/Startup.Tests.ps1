@@ -942,6 +942,16 @@ Describe 'Startup document and report' {
         $text | Should -Match ([regex]::Escape($Expected))
     }
 
+    It 'shows people a name with control characters without them, and never offers it' {
+        $odd = New-TuneupStartupEntry -Source 'run-user' -Key ('Odd' + [char]27 + '[2J') -Name ('Odd' + [char]27 + '[2J') -Target @{ ApprovedPath = 'HKCU:\Software\windows-tuneup-test\Run'; ApprovedName = 'Odd' }
+        Complete-TuneupStartupEntry -Entry $odd -Rules (Import-TuneupStartupRuleSet) -Process @()
+        $odd.canDisable | Should -BeFalse
+        $text = (Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry @($odd) -IsAdmin $true) 6>&1 | Out-String)
+        $text.IndexOf([char]27) | Should -Be -1
+        $text | Should -Match ([regex]::Escape('] Odd?[2J'))
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'startup.fixed.unreadable')))
+    }
+
     It 'marks what needs administrator to be turned off' {
         $tray = New-TuneupStartupEntry -Source 'run-machine' -Key 'Tray' -Name 'Tray'
         $tray.canDisable = $true

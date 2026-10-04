@@ -946,6 +946,13 @@ function Get-TuneupStartupUsageText {
     Get-TuneupText -Key 'startup.usage.unknown'
 }
 
+# A text of an entry as people see it: a control character (a line break, an escape sequence that would
+# drive the console) is shown as '?'.
+function Format-TuneupStartupText {
+    param([AllowNull()][AllowEmptyString()][string]$Text)
+    [regex]::Replace([string]$Text, '\p{Cc}', '?')
+}
+
 # The startup document as JSON, or for people: what is recommended first, then what can be turned off,
 # then what stays on; each entry with its id, so it can be named in -Disable.
 function Write-TuneupStartupReport {
@@ -966,10 +973,10 @@ function Write-TuneupStartupReport {
     $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
     $ambiguous = [string[]]@($entries | Group-Object -Property { [string]$_.id } | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
     foreach ($entry in $ordered) {
-        $publisher = $(if ($entry.publisher) { Get-TuneupText -Key 'startup.publisher' -Format $entry.publisher } else { '' })
+        $publisher = $(if ($entry.publisher) { Get-TuneupText -Key 'startup.publisher' -Format (Format-TuneupStartupText -Text $entry.publisher) } else { '' })
         $admin = $(if ($entry.canDisable -and $entry.needsAdmin) { $adminMark } else { '' })
         $color = $(if ($entry.recommended) { 'Cyan' } elseif ($entry.canDisable) { 'Gray' } else { 'DarkGray' })
-        $line = Get-TuneupText -Key 'startup.entry' -Format (Get-TuneupStartupMark -Entry $entry -Ambiguous $ambiguous), $entry.name, $publisher,
+        $line = Get-TuneupText -Key 'startup.entry' -Format (Get-TuneupStartupMark -Entry $entry -Ambiguous $ambiguous), (Format-TuneupStartupText -Text $entry.name), $publisher,
             (Get-TuneupText -Key "startup.source.$($entry.source)"), (Get-TuneupStartupUsageText -Entry $entry), $admin
         Write-Host $line -ForegroundColor $color
         Write-Host (Get-TuneupText -Key 'startup.id' -Format $entry.id) -ForegroundColor DarkGray

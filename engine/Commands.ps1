@@ -364,7 +364,7 @@ function Invoke-TuneupStartupCommand {
     # for each, with why.
     $fixed = @($chosen | Where-Object { Get-TuneupStartupFixedReason -Entry $_ })
     if ($fixed.Count) {
-        $details = @($fixed | ForEach-Object { Get-TuneupText -Key 'startup.refusedLine' -Format $_.id, ($names[[string]$_.id] -join ', '), (Get-TuneupStartupFixedText -Entry $_) })
+        $details = @($fixed | ForEach-Object { Get-TuneupText -Key 'startup.refusedLine' -Format $_.id, (Format-TuneupStartupText -Text ($names[[string]$_.id] -join ', ')), (Get-TuneupStartupFixedText -Entry $_) })
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupFixed') -Details $details
         return
     }
