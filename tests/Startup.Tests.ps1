@@ -138,3 +138,178 @@ Describe 'Startup texts' {
         }
     }
 }
+
+Describe 'Startup detectors' {
+    BeforeEach { Remove-TestKey }
+    AfterAll { Remove-TestKey }
+
+    It 'reads the values of a Run key as they are written, and nothing for a key that is not there' {
+        New-Item -Path "$Key\Run" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$Key\Run" -Name 'Steam' -Value '"%ProgramFiles%\Steam\steam.exe" -silent' -PropertyType ExpandString | Out-Null
+        $values = @(Get-TuneupStartupRunValue -Path "$Key\Run")
+        $values.Count | Should -Be 1
+        $values[0].Name | Should -Be 'Steam'
+        $values[0].Command | Should -Be '"%ProgramFiles%\Steam\steam.exe" -silent'
+        @(Get-TuneupStartupRunValue -Path "$Key\Missing").Count | Should -Be 0
+    }
+
+    It 'reads the binary StartupApproved values by name, in any case' {
+        New-Item -Path "$Key\Approved" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$Key\Approved" -Name 'Steam' -Value ([byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8)) -PropertyType Binary | Out-Null
+        New-ItemProperty -LiteralPath "$Key\Approved" -Name 'Text' -Value 'x' -PropertyType String | Out-Null
+        $values = Get-TuneupStartupApprovedValue -Path "$Key\Approved"
+        @($values.Keys).Count | Should -Be 1
+        $values['STEAM'][0] | Should -Be 3
+        $values['STEAM'].Length | Should -Be 12
+        (Get-TuneupStartupApprovedValue -Path "$Key\Missing").Count | Should -Be 0
+    }
+
+    It 'lists the files of a startup folder, without desktop.ini or folders' {
+        $folder = Join-Path $TestDrive 'Startup'
+        New-Item -ItemType Directory -Path (Join-Path $folder 'Sub') -Force | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $folder 'Tool.lnk'), 'x')
+        [System.IO.File]::WriteAllText((Join-Path $folder 'desktop.ini'), 'x')
+        $items = @(Get-TuneupStartupFolderItem -Path $folder)
+        @($items | ForEach-Object { $_.Name }) -join ',' | Should -Be 'Tool.lnk'
+        $items[0].FullName | Should -Be (Join-Path $folder 'Tool.lnk')
+        @(Get-TuneupStartupFolderItem -Path (Join-Path $TestDrive 'Nowhere')).Count | Should -Be 0
+        @(Get-TuneupStartupFolderItem -Path '').Count | Should -Be 0
+    }
+
+    It 'reads where a shortcut points without changing it' {
+        $link = Join-Path $TestDrive 'Notepad.lnk'
+        $shell = New-Object -ComObject WScript.Shell
+        try {
+            $shortcut = $shell.CreateShortcut($link)
+            $shortcut.TargetPath = Join-Path ([Environment]::SystemDirectory) 'notepad.exe'
+            $shortcut.Arguments = '/x'
+            $shortcut.Save()
+        } finally {
+            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+        }
+        $before = (Get-Item -LiteralPath $link).LastWriteTimeUtc
+        $target = Get-TuneupShortcutTarget -Path $link
+        $target.Target | Should -Be (Join-Path ([Environment]::SystemDirectory) 'notepad.exe')
+        $target.Arguments | Should -Be '/x'
+        (Get-Item -LiteralPath $link).LastWriteTimeUtc | Should -Be $before
+    }
+
+    It 'reads the State of the startup tasks of Store apps, and only keys that have one' {
+        $root = "$Key\SystemAppData"
+        New-Item -Path "$root\Vendor.App_abc\StartAtLogon" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$root\Vendor.App_abc\StartAtLogon" -Name 'State' -Value 2 -PropertyType DWord | Out-Null
+        New-Item -Path "$root\Vendor.App_abc\Schemas" -Force | Out-Null
+        $tasks = @(Get-TuneupStartupStoreTask -Root $root)
+        $tasks.Count | Should -Be 1
+        $tasks[0].PackageFamilyName | Should -Be 'Vendor.App_abc'
+        $tasks[0].TaskId | Should -Be 'StartAtLogon'
+        $tasks[0].State | Should -Be 2
+        $tasks[0].KeyPath | Should -Be "$root\Vendor.App_abc\StartAtLogon"
+        @(Get-TuneupStartupStoreTask -Root "$Key\Missing").Count | Should -Be 0
+    }
+
+    It 'reads the startup tasks that a package manifest declares' {
+        $manifest = Join-Path $TestDrive 'AppxManifest.xml'
+        [System.IO.File]::WriteAllText($manifest, @'
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
+         xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
+  <Applications>
+    <Application Id="App">
+      <Extensions>
+        <uap5:Extension Category="windows.startupTask">
+          <uap5:StartupTask TaskId="TaskOne" Enabled="true" DisplayName="Sample One" />
+        </uap5:Extension>
+        <desktop:Extension Category="windows.startupTask" Executable="x.exe" EntryPoint="Windows.FullTrustApplication">
+          <desktop:StartupTask TaskId="TaskTwo" Enabled="false" DisplayName="ms-resource:Name" />
+        </desktop:Extension>
+        <desktop:Extension Category="windows.fullTrustProcess" Executable="y.exe" />
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>
+'@)
+        $tasks = @(Get-TuneupAppxManifestStartupTask -Path $manifest)
+        @($tasks | ForEach-Object { $_.TaskId }) -join ',' | Should -Be 'TaskOne,TaskTwo'
+        $tasks[0].DisplayName | Should -Be 'Sample One'
+        @(Get-TuneupAppxManifestStartupTask -Path (Join-Path $TestDrive 'none.xml')).Count | Should -Be 0
+    }
+
+    It 'reads the Store packages of the current user' {
+        Mock -ModuleName Tuneup Get-AppxPackage {
+            [pscustomobject]@{ PackageFamilyName = 'MSTeams_8wekyb3d8bbwe'; Name = 'MSTeams'; Publisher = 'CN=Microsoft Corporation'; InstallLocation = 'C:\Apps\Teams'; SignatureKind = 'Store' }
+        }
+        $packages = @(Get-TuneupStartupPackage)
+        $packages[0].PackageFamilyName | Should -Be 'MSTeams_8wekyb3d8bbwe'
+        $packages[0].SignatureKind | Should -Be 'Store'
+    }
+
+    It 'keeps only the tasks outside \Microsoft\ that start at sign-in or at boot' {
+        Mock -ModuleName Tuneup Get-ScheduledTask {
+            $logon = [pscustomobject]@{ CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskLogonTrigger' } }
+            $boot = [pscustomobject]@{ CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskBootTrigger' } }
+            $daily = [pscustomobject]@{ CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskDailyTrigger' } }
+            $exec = [pscustomobject]@{ CimClass = [pscustomobject]@{ CimClassName = 'MSFT_TaskExecAction' }; Execute = '"C:\Vendor\up.exe"'; Arguments = '/silent' }
+            [pscustomobject]@{ TaskPath = '\'; TaskName = 'VendorUpdate'; State = 'Ready'; Triggers = @($daily, $logon); Actions = @($exec) }
+            [pscustomobject]@{ TaskPath = '\Vendor\'; TaskName = 'Boot'; State = 'Disabled'; Triggers = @($boot); Actions = @() }
+            [pscustomobject]@{ TaskPath = '\Vendor\'; TaskName = 'Daily'; State = 'Ready'; Triggers = @($daily); Actions = @($exec) }
+            [pscustomobject]@{ TaskPath = '\Microsoft\Windows\Defrag\'; TaskName = 'ScheduledDefrag'; State = 'Ready'; Triggers = @($logon); Actions = @($exec) }
+        }
+        $tasks = @(Get-TuneupStartupScheduledTask)
+        @($tasks | ForEach-Object { "$($_.TaskPath)$($_.TaskName)" }) -join ',' | Should -Be '\VendorUpdate,\Vendor\Boot'
+        $tasks[0].Execute | Should -Be '"C:\Vendor\up.exe"'
+        $tasks[0].Arguments | Should -Be '/silent'
+        $tasks[1].State | Should -Be 'Disabled'
+        $tasks[1].Execute | Should -BeNullOrEmpty
+    }
+
+    It 'reads the services and the drivers that start on their own' {
+        Mock -ModuleName Tuneup Get-CimInstance {
+            [pscustomobject]@{ Name = 'VendorSvc'; DisplayName = 'Vendor Service'; PathName = '"C:\Vendor\svc.exe"'; State = 'Running'; ProcessId = 77; DelayedAutoStart = $true }
+        } -ParameterFilter { $ClassName -eq 'Win32_Service' -and $Filter -eq "StartMode = 'Auto'" }
+        Mock -ModuleName Tuneup Get-CimInstance {
+            [pscustomobject]@{ Name = 'vendordrv'; DisplayName = 'Vendor Driver'; PathName = 'C:\WINDOWS\system32\drivers\vendordrv.sys'; State = 'Running' }
+        } -ParameterFilter { $ClassName -eq 'Win32_SystemDriver' -and $Filter -eq "StartMode = 'Auto'" }
+        $items = @(Get-TuneupStartupServiceItem)
+        @($items | ForEach-Object { "$($_.Kind):$($_.Name)" }) -join ',' | Should -Be 'service:VendorSvc,driver:vendordrv'
+        $items[0].DelayedAutoStart | Should -BeTrue
+        $items[0].ProcessId | Should -Be 77
+        $items[1].ProcessId | Should -Be 0
+    }
+
+    It 'reads the folders of the products that Windows Security lists, from their paths only' {
+        Mock -ModuleName Tuneup Get-CimInstance {
+            [pscustomobject]@{ pathToSignedProductExe = 'windowsdefender://'; pathToSignedReportingExe = '%ProgramFiles%\Vendor AV\report.exe' }
+        } -ParameterFilter { $Namespace -eq 'root/SecurityCenter2' -and $ClassName -eq 'AntiVirusProduct' }
+        @(Get-TuneupSecurityProductFolder -ClassName 'AntiVirusProduct') -join ',' | Should -Be "$([Environment]::GetFolderPath('ProgramFiles'))\Vendor AV"
+    }
+
+    It 'reads who signed a file, only from a valid signature, and remembers it' {
+        $file = Join-Path $TestDrive 'signed.exe'
+        [System.IO.File]::WriteAllText($file, 'x')
+        Clear-TuneupFileSignerCache
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc., O=Vendor' } } }
+        Get-TuneupFileSigner -Path $file | Should -Be 'Vendor Inc.'
+        Get-TuneupFileSigner -Path $file | Should -Be 'Vendor Inc.'
+        Should -Invoke -ModuleName Tuneup Get-AuthenticodeSignature -Times 1 -Exactly
+        Clear-TuneupFileSignerCache
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc.' } } }
+        Get-TuneupFileSigner -Path $file | Should -BeNullOrEmpty
+        Get-TuneupFileSigner -Path (Join-Path $TestDrive 'missing.exe') | Should -BeNullOrEmpty
+        Clear-TuneupFileSignerCache
+    }
+
+    It 'reads the running processes, leaving unknown what Windows does not tell' {
+        Mock -ModuleName Tuneup Get-Process {
+            [pscustomobject]@{ Id = 10; Path = 'C:\Games\Steam\steam.exe'; WorkingSet64 = 200MB; TotalProcessorTime = [timespan]::FromSeconds(10.04) }
+            [pscustomobject]@{ Id = 4; Path = $null; WorkingSet64 = 1MB; TotalProcessorTime = $null }
+        }
+        $processes = @(Get-TuneupStartupProcess)
+        $processes[0].Path | Should -Be 'C:\Games\Steam\steam.exe'
+        $processes[0].WorkingSet | Should -Be 200MB
+        $processes[0].CpuSeconds | Should -Be 10.04
+        $processes[1].Path | Should -BeNullOrEmpty
+        $processes[1].CpuSeconds | Should -BeNullOrEmpty
+    }
+}

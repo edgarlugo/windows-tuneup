@@ -190,3 +190,192 @@ function New-TuneupStartupEntry {
         target            = [pscustomobject]$Target
     }
 }
+
+$script:StoreTaskRoot = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData'
+$script:SecurityCenterClasses = @('AntiVirusProduct', 'FirewallProduct')
+$script:StartupSignerCache = @{}
+
+# The values of a Run key, name and command as they are written (not expanded). A key that does not exist
+# gives nothing; one that exists but cannot be read fails.
+function Get-TuneupStartupRunValue {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+    try {
+        foreach ($name in $key.GetValueNames()) {
+            # The default value of the key is not an entry.
+            if (-not $name) { continue }
+            [pscustomobject]@{ Name = $name; Command = [string]$key.GetValue($name, $null, 'DoNotExpandEnvironmentNames') }
+        }
+    } finally {
+        $key.Close()
+    }
+}
+
+# The binary values of a StartupApproved key, by name (a table that does not tell case apart, like the
+# registry). An empty table when the key does not exist.
+function Get-TuneupStartupApprovedValue {
+    param([Parameter(Mandatory)][string]$Path)
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $Path)) { return $values }
+    $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+    try {
+        foreach ($name in $key.GetValueNames()) {
+            if ($name -and $key.GetValueKind($name) -eq [Microsoft.Win32.RegistryValueKind]::Binary) { $values[$name] = [byte[]]$key.GetValue($name) }
+        }
+    } finally {
+        $key.Close()
+    }
+    $values
+}
+
+# The files of a startup folder (desktop.ini and subfolders are not entries). Nothing when the folder does
+# not exist.
+function Get-TuneupStartupFolderItem {
+    param([AllowEmptyString()][string]$Path)
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) { return }
+    foreach ($file in @(Get-ChildItem -LiteralPath $Path -File -Force -ErrorAction Stop)) {
+        if ($file.Name -ieq 'desktop.ini') { continue }
+        [pscustomobject]@{ Name = $file.Name; FullName = $file.FullName }
+    }
+}
+
+# Where a shortcut points and with which arguments. CreateShortcut only reads the file: nothing is saved.
+function Get-TuneupShortcutTarget {
+    param([Parameter(Mandatory)][string]$Path)
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $link = $shell.CreateShortcut($Path)
+        [pscustomobject]@{ Target = [string]$link.TargetPath; Arguments = [string]$link.Arguments }
+    } finally {
+        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    }
+}
+
+# The keys of SystemAppData\<package family>\<task> that hold a State: what Windows keeps for the startup
+# tasks of Store apps (StartupTaskState). Whether a key is really a startup task is decided against the
+# manifest of the package (Get-TuneupStartupStoreEntry).
+function Get-TuneupStartupStoreTask {
+    param([string]$Root = $script:StoreTaskRoot)
+    if (-not (Test-Path -LiteralPath $Root)) { return }
+    foreach ($package in @(Get-ChildItem -LiteralPath $Root -ErrorAction Stop)) {
+        foreach ($task in @(Get-ChildItem -LiteralPath $package.PSPath -ErrorAction Stop)) {
+            $state = $task.GetValue('State')
+            if ($null -eq $state) { continue }
+            [pscustomobject]@{
+                PackageFamilyName = $package.PSChildName
+                TaskId            = $task.PSChildName
+                State             = [int]$state
+                KeyPath           = "$Root\$($package.PSChildName)\$($task.PSChildName)"
+            }
+        }
+    }
+}
+
+# The Store packages of the current user, with what -Startup needs of them.
+function Get-TuneupStartupPackage {
+    foreach ($package in @(Get-AppxPackage -ErrorAction Stop)) {
+        [pscustomobject]@{
+            PackageFamilyName = [string]$package.PackageFamilyName
+            Name              = [string]$package.Name
+            Publisher         = [string]$package.Publisher
+            InstallLocation   = [string]$package.InstallLocation
+            SignatureKind     = [string]$package.SignatureKind
+        }
+    }
+}
+
+# The startup tasks (Extension windows.startupTask) that a package manifest declares. The document is
+# loaded without resolving anything outside it.
+function Get-TuneupAppxManifestStartupTask {
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    $xml = New-Object System.Xml.XmlDocument
+    $xml.XmlResolver = $null
+    $xml.Load($Path)
+    foreach ($node in @($xml.SelectNodes("//*[local-name()='Extension'][@Category='windows.startupTask']/*[local-name()='StartupTask']"))) {
+        [pscustomobject]@{ TaskId = $node.GetAttribute('TaskId'); DisplayName = $node.GetAttribute('DisplayName') }
+    }
+}
+
+# The scheduled tasks outside \Microsoft\ with a sign-in or boot trigger, and the program of their first
+# action. Without elevation Windows hides some tasks.
+function Get-TuneupStartupScheduledTask {
+    foreach ($task in @(Get-ScheduledTask -ErrorAction Stop)) {
+        if ([string]$task.TaskPath -like '\Microsoft\*') { continue }
+        $triggers = @($task.Triggers | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.CimClass.CimClassName })
+        if (-not @($triggers | Where-Object { $_ -eq 'MSFT_TaskLogonTrigger' -or $_ -eq 'MSFT_TaskBootTrigger' }).Count) { continue }
+        $action = @($task.Actions | Where-Object { $null -ne $_ -and [string]$_.CimClass.CimClassName -eq 'MSFT_TaskExecAction' }) | Select-Object -First 1
+        [pscustomobject]@{
+            TaskPath  = [string]$task.TaskPath
+            TaskName  = [string]$task.TaskName
+            State     = [string]$task.State
+            Execute   = $(if ($null -ne $action) { [string]$action.Execute } else { $null })
+            Arguments = $(if ($null -ne $action) { [string]$action.Arguments } else { $null })
+        }
+    }
+}
+
+# The services and the drivers whose start mode is Auto (delayed included).
+function Get-TuneupStartupServiceItem {
+    foreach ($service in @(Get-CimInstance -ClassName Win32_Service -Filter "StartMode = 'Auto'" -ErrorAction Stop)) {
+        [pscustomobject]@{
+            Kind = 'service'; Name = [string]$service.Name; DisplayName = [string]$service.DisplayName; PathName = [string]$service.PathName
+            State = [string]$service.State; ProcessId = [int]$service.ProcessId; DelayedAutoStart = [bool]$service.DelayedAutoStart
+        }
+    }
+    foreach ($driver in @(Get-CimInstance -ClassName Win32_SystemDriver -Filter "StartMode = 'Auto'" -ErrorAction Stop)) {
+        [pscustomobject]@{
+            Kind = 'driver'; Name = [string]$driver.Name; DisplayName = [string]$driver.DisplayName; PathName = [string]$driver.PathName
+            State = [string]$driver.State; ProcessId = 0; DelayedAutoStart = $false
+        }
+    }
+}
+
+# The folders of the products of one class that Windows Security lists (its paths only: Defender gives a
+# windowsdefender:// link). Windows Server has no Security Center: that fails, and the caller warns.
+function Get-TuneupSecurityProductFolder {
+    param([Parameter(Mandatory)][string]$ClassName)
+    foreach ($product in @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName $ClassName -ErrorAction Stop)) {
+        foreach ($path in @($product.pathToSignedProductExe, $product.pathToSignedReportingExe)) {
+            $expanded = Expand-TuneupStartupPath -Text ([string]$path)
+            if ($expanded -match '^[A-Za-z]:\\') { Split-Path -Path $expanded -Parent }
+        }
+    }
+}
+
+function Clear-TuneupFileSignerCache {
+    $script:StartupSignerCache = @{}
+}
+
+# Who signed a file (the CN of its Authenticode signer, catalog signatures included), only when the
+# signature is valid; nothing otherwise or when the file is not there. Each file is read once per list.
+function Get-TuneupFileSigner {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($script:StartupSignerCache.ContainsKey($Path)) { return $script:StartupSignerCache[$Path] }
+    $signer = $null
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        if ([string]$signature.Status -eq 'Valid' -and $null -ne $signature.SignerCertificate) {
+            $signer = Get-TuneupCommonName -DistinguishedName ([string]$signature.SignerCertificate.Subject)
+        }
+    }
+    $script:StartupSignerCache[$Path] = $signer
+    $signer
+}
+
+# The running processes. Windows keeps the path and the times of some processes (other accounts, protected
+# ones) from a process that is not elevated: those stay unknown, never guessed.
+function Get-TuneupStartupProcess {
+    foreach ($process in @(Get-Process -ErrorAction Stop)) {
+        $path = $null
+        try { $path = [string]$process.Path } catch { $path = $null }
+        $cpu = $null
+        try {
+            if ($null -ne $process.TotalProcessorTime) { $cpu = [double]$process.TotalProcessorTime.TotalSeconds }
+        } catch {
+            $cpu = $null
+        }
+        [pscustomobject]@{ Id = [int]$process.Id; Path = $(if ($path) { $path } else { $null }); WorkingSet = [int64]$process.WorkingSet64; CpuSeconds = $cpu }
+    }
+}
