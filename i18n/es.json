@@ -257,9 +257,9 @@
   "err.readResultUntrusted": "No se leyó el resultado {0}: el archivo, o la carpeta {1} que lo guarda, no está protegido como el estado del equipo, así que una cuenta que no es administradora pudo escribirlo. Borra {1} como administrador y vuelve a correr el comando.",
   "err.stateFolderUntrusted": "La carpeta de estado {0} no es de confianza. Bórrala como administrador y vuelve a correr la herramienta.",
   "err.stateBaseUntrusted": "La carpeta {0} no es de confianza para guardar la carpeta de estado del equipo",
-  "reason.protected-by-windows": "sin cambios: Windows no deja que los programas cambien este valor",
-  "run.protectedByWindows": "Windows no deja que los programas cambien {0}, ni siquiera como administrador (acceso denegado): no se cambió nada. Cámbialo a mano en la configuración de Windows.",
-  "run.protectedByWindowsManual": "Windows no deja que los programas cambien {0}, ni siquiera como administrador (acceso denegado): no se cambió nada. Cámbialo a mano: {1}.",
+  "reason.protected-by-windows": "sin cambios: el acceso a este valor está denegado (lo protege Windows o un programa de seguridad)",
+  "run.protectedByWindows": "El acceso a {0} está denegado (lo protege Windows o un programa de seguridad): no se cambió nada. Cámbialo a mano en la configuración de Windows.",
+  "run.protectedByWindowsManual": "El acceso a {0} está denegado (lo protege Windows o un programa de seguridad): no se cambió nada. Cámbialo a mano: {1}.",
   "undo.emptyKeyLeft": "no se pudo quitar la clave vacía {0} ({1}); no guarda nada, así que no cambia nada",
   "reason.unchanged": "ya estaba como antes: no había nada que restaurar"
 }

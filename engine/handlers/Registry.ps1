@@ -172,12 +172,20 @@ function Test-TuneupAccessDenied {
     $false
 }
 
-# Removes the keys from -Path up to -StopAt (not included) that hold nothing, deepest first, and stops
-# at the first one that holds something. Gives the key that could not be removed and why, or nothing.
+# Removes the keys from -Path up to -StopAt (not included), the deepest existing one first, that hold
+# nothing, and stops at the first one that holds something. A level that is missing (the creation
+# stopped above it) is passed over: every key between -Path and -StopAt was created after the state was
+# saved. Without a -StopAt above -Path nothing is removed. Gives the key that could not be removed and
+# why, or nothing.
 function Remove-TuneupEmptyRegistryKey {
     param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$StopAt)
+    if (-not $StopAt -or -not $Path.StartsWith($StopAt.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return }
     $current = $Path
-    while ($current -and $current -ne $StopAt -and (Test-Path -LiteralPath $current)) {
+    while ($current -and $current -ne $StopAt) {
+        if (-not (Test-Path -LiteralPath $current)) {
+            $current = Split-Path -Path $current -Parent
+            continue
+        }
         $key = Get-Item -LiteralPath $current
         $isEmpty = ($key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0)
         $key.Close()
@@ -192,8 +200,9 @@ function Remove-TuneupEmptyRegistryKey {
 }
 
 # A value that Windows does not let programs change is refused, with what was created for it removed, so
-# the state stays as it was journaled (the executor checks it). Without elevation a machine value is
-# access denied for that reason alone: that stays a failure.
+# the state stays as it was journaled (the executor checks it). Without elevation a tweak that needs an
+# administrator (a machine value, or a policy of the account) is denied for that reason alone: that stays
+# a failure.
 function Set-RegistryTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
     $desired = $Tweak.set
@@ -205,7 +214,7 @@ function Set-RegistryTweakDesired {
             Write-TuneupRegistryValue -Path $desired.path -Name $desired.name -Kind $desired.kind -Value $desired.value
         }
     } catch {
-        if (-not (Test-TuneupAccessDenied -ErrorRecord $_) -or ([string]$desired.path -cmatch '^HKLM:' -and -not (Test-TuneupAdmin))) { throw }
+        if (-not (Test-TuneupAccessDenied -ErrorRecord $_) -or ((Test-TuneupTweakNeedsAdmin -Tweak $Tweak) -and -not (Test-TuneupAdmin))) { throw }
         if (-not $before.keyExisted) { [void](Remove-TuneupEmptyRegistryKey -Path $desired.path -StopAt $before.existingAncestor) }
         $target = "$($desired.path)\$($desired.name)"
         $manual = $Tweak.PSObject.Properties['manualSetting']

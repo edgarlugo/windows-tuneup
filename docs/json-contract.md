@@ -120,8 +120,8 @@ Also saved, without `warnings` and `toolVersion`, as `result.json` in the run fo
 | `results[].id` | string | Tweak id. |
 | `results[].title` | string | Tweak title. |
 | `results[].status` | string | `applied`, `partial`, `not-applied`, `failed`, `skipped`. |
-| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, `aborted` (the run stopped because of an error that was not Ctrl+C), or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`, `protected-by-windows`: Windows denies programs, even elevated, writing or removing that registry value, as it does on build 26300 for the Widgets policy; `detail` says where to change it by hand). |
-| `results[].error` | string or null | What failed. A tweak that failed without changing anything (its state read again matches the one saved before) is noted as needing no undo. |
+| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, `aborted` (the run stopped because of an error that was not Ctrl+C), or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`, `protected-by-windows`: writing or removing that registry value is access denied, because Windows or a security program protects it (seen elevated on build 26300 for the Widgets policy); `detail` says where to change it by hand). |
+| `results[].error` | string or null | What failed. The tweak stays undoable: `-Undo` reports one that is still as before as `restored` with `reason` `unchanged`. |
 | `results[].detail` | string or null | Explanation of a partial result or a refusal. |
 | `results[].rebootRequired` | boolean | This tweak needs a restart. |
 | `results[].signOutRequired` | boolean | This tweak shows after signing in again. |

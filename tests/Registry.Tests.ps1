@@ -155,6 +155,41 @@ Describe 'Registry handler' {
         { Set-RegistryTweakDesired -Tweak $tweak } | Should -Throw '*denied*'
     }
 
+    It 'still fails on access denied to a policy of the account without elevation' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup New-ItemProperty { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'denied') }
+        $tweak = New-RegTweak "$Key\Policies\Sub" 'A' 'DWord' 1
+        { Set-RegistryTweakDesired -Tweak $tweak } | Should -Throw '*denied*'
+    }
+
+    It 'says only that access is denied, not who denied it' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        New-Item -Path $Key -Force | Out-Null
+        Set-TestSetValueDeny
+        $outcome = Get-TuneupOutcome -Output @(Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' 'DWord' 1))
+        $outcome.detail | Should -BeLike '*access to*is denied*'
+        $outcome.detail | Should -Not -BeLike '*administrator*'
+        Get-TuneupText -Key 'reason.protected-by-windows' | Should -Not -BeLike '*administrator*'
+    }
+
+    It 'removes the keys it created also when a deeper one was never created' {
+        $tweak = New-RegTweak "$Key\Sub\Deep" 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        New-Item -Path "$Key\Sub" -Force | Out-Null
+        Restore-RegistryTweakState -Tweak $tweak -State $state
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'keeps an existing key above the missing ones when it holds anything' {
+        $tweak = New-RegTweak "$Key\Sub\Deep" 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        New-Item -Path "$Key\Sub" -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'Other' -PropertyType DWord -Value 1 | Out-Null
+        Restore-RegistryTweakState -Tweak $tweak -State $state
+        Test-Path -LiteralPath "$Key\Sub" | Should -BeFalse
+        (Get-ItemProperty -LiteralPath $Key).Other | Should -Be 1
+    }
+
     It 'restores a value whose empty key cannot be removed, saying the key is left' {
         $tweak = New-RegTweak "$Key\Sub" 'A' 'DWord' 1
         $state = Get-RegistryTweakState -Tweak $tweak
