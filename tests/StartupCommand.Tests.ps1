@@ -317,6 +317,45 @@ Describe 'Invoke-TuneupStartupCommand' {
         Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 0
     }
 
+    It 'reads ids without case, and the scope of an id written in capitals still decides the account' {
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true -IsSessionUser $false)
+        $refused = Invoke-TestStartup $context -Disable @($SteamId.ToUpperInvariant()) -Yes
+        $refused.reason | Should -Be 'session-user'
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupSessionUser' -Format $SteamId)
+        Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 0
+        $context = New-TestContext -Json
+        $plan = Invoke-TestStartup $context -Disable @(" $($SteamId.ToUpperInvariant()) ") -PlanOnly
+        $plan.items[0].id | Should -BeExactly $SteamId
+    }
+
+    It 'refuses what is not an id of -Startup before reading anything' {
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true -IsSessionUser $false)
+        $refused = Invoke-TestStartup $context -Disable @('privacy.advertising-id', 'steam') -Yes
+        $context.ExitCode | Should -Be 1
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupUnknown' -Format 'privacy.advertising-id, steam')
+        Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 0
+    }
+
+    It 'says that Windows hides some tasks when an unknown id of the machine is asked for without administrator' {
+        $context = New-TestContext -Json
+        $refused = Invoke-TestStartup $context -Disable @('startup.task.vendor-up-0000000000000000') -Yes
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupUnknown' -Format 'startup.task.vendor-up-0000000000000000')
+        @($refused.details) | Should -Contain (Get-TuneupText -Key 'startup.unelevatedNote')
+        $context = New-TestContext -Json
+        @((Invoke-TestStartup $context -Disable @('startup.run-user.gone-0000000000000000') -Yes).details) | Should -Not -Contain (Get-TuneupText -Key 'startup.unelevatedNote')
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true)
+        @((Invoke-TestStartup $context -Disable @('startup.task.vendor-up-0000000000000000') -Yes).details) | Should -Not -Contain (Get-TuneupText -Key 'startup.unelevatedNote')
+    }
+
+    It 'warns, when elevated as another account, that the entries of the user are that account''s' {
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true -IsSessionUser $false)
+        $document = Invoke-TestStartup $context
+        $context.ExitCode | Should -Be 0
+        $document.warnings | Should -Contain (Get-TuneupText -Key 'startup.otherAccountNote')
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true)
+        @((Invoke-TestStartup $context).warnings) | Should -Not -Contain (Get-TuneupText -Key 'startup.otherAccountNote')
+    }
+
     It 'asks for -Yes with -Json, like applying a profile' {
         $context = New-TestContext -Json
         (Invoke-TestStartup $context -Disable @($SteamId)).message | Should -Be (Get-TuneupText -Key 'err.jsonNeedsYes')

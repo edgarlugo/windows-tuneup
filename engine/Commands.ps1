@@ -296,11 +296,18 @@ function Invoke-TuneupStartupCommand {
         return
     }
     $environment = Get-TuneupContextEnvironment -Context $Context
-    $ids = @($Disable | Where-Object { $_ } | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    # Ids are lowercase; one written in capitals is the same id (and its scope is read from it below).
+    $ids = @($Disable | Where-Object { $_ } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
     if ($ids.Count) {
         $unsupported = Get-TuneupUnsupportedMessage -Context $Context
         if ($unsupported) {
             Write-TuneupCommandError -Context $Context -Message $unsupported
+            return
+        }
+        # What is not an id of -Startup can never be in the list: refused before anything is read.
+        $malformed = @($ids | Where-Object { -not (Test-TuneupStartupId -Id $_) })
+        if ($malformed.Count) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($malformed -join ', '))
             return
         }
         # Elevated with another administrator's password, HKCU is that administrator's: the entries of the
@@ -322,6 +329,11 @@ function Invoke-TuneupStartupCommand {
         if (-not $environment.IsAdmin) {
             Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'startup.unelevatedNote') }
         }
+        # Elevated with another administrator's password: what is of the user (Run of the user, its startup
+        # folder, Store apps) is that administrator's, not the one of the account at this desktop.
+        if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false) {
+            Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'startup.otherAccountNote') }
+        }
         $document = Get-TuneupStartupDocument -Entry $entries -IsAdmin ([bool]$environment.IsAdmin) -WorkPc $workPc
         $Context.Result = $document
         Write-TuneupStartupReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
@@ -342,7 +354,9 @@ function Invoke-TuneupStartupCommand {
     }
     $unknown = @($ids | Where-Object { -not $byId.ContainsKey($_) })
     if ($unknown.Count) {
-        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($unknown -join ', '))
+        # Without administrator Windows hides some scheduled tasks: an id of the machine may be one of them.
+        $hint = @(if (-not $environment.IsAdmin -and @($unknown | Where-Object { (Get-TuneupStartupIdScope -Id $_) -eq 'machine' }).Count) { Get-TuneupText -Key 'startup.unelevatedNote' })
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($unknown -join ', ')) -Details $hint
         return
     }
     $chosen = @($ids | ForEach-Object { $byId[$_] })

@@ -279,6 +279,7 @@
   "startup.howTo": "Para apagar lo que elijas: .\\tuneup.ps1 -Startup -Disable '<id>,<id>'. Nada se desinstala ni se borra, y -Undo lo vuelve a encender.",
   "startup.empty": "No se encontró nada que arranque con Windows.",
   "startup.unelevatedNote": "Sin administrador, Windows oculta algunas tareas programadas: corre -Startup como administrador para verlas todas.",
+  "startup.otherAccountNote": "Este PowerShell corre como otra cuenta de administrador: las entradas del usuario (Run del usuario, su carpeta Inicio y las apps de la Store) son de esa cuenta, no de la que inició sesión en este escritorio. Corre -Startup sin elevar para ver las tuyas.",
   "startup.nextStart": "Los cambios rigen desde el próximo inicio de Windows o de sesión; lo que ya está abierto sigue abierto hasta que lo cierres.",
   "startup.offer": "¿Revisamos lo que arranca con Windows? .\\tuneup.ps1 -Startup muestra la lista y lo recomendado; no se apaga nada que no elijas.",
   "startup.refusedLine": "{0} ({1}): {2}",

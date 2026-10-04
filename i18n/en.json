@@ -279,6 +279,7 @@
   "startup.howTo": "To turn off what you choose: .\\tuneup.ps1 -Startup -Disable '<id>,<id>'. Nothing is uninstalled or deleted, and -Undo turns it on again.",
   "startup.empty": "Nothing that starts with Windows was found.",
   "startup.unelevatedNote": "Without administrator, Windows hides some scheduled tasks: run -Startup as administrator to see them all.",
+  "startup.otherAccountNote": "This PowerShell runs as another administrator account: the entries of the user (Run of the user, its Startup folder and Store apps) are that account's, not the ones of the account signed in at this desktop. Run -Startup without elevation to see yours.",
   "startup.nextStart": "The changes take effect the next time Windows or your session starts; what is already open stays open until you close it.",
   "startup.offer": "Do we review what starts with Windows? .\\tuneup.ps1 -Startup shows the list and what is recommended; nothing is turned off unless you choose it.",
   "startup.refusedLine": "{0} ({1}): {2}",
