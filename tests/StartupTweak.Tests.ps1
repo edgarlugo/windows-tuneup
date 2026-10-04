@@ -12,6 +12,18 @@ BeforeAll {
         param($Run)
         $script:StartupRunKeys = @([pscustomobject]@{ Source = 'run-user'; Path = $Run })
     }
+    # What a tweak may write is pinned to StartupApproved and SystemAppData: the tests use copies under their key.
+    $script:WindowsRoots = InModuleScope Tuneup { [pscustomobject]@{ Approved = $script:StartupApprovedRoot.Clone(); Store = $script:StoreTaskRoot } }
+    function Use-TestRoot([switch]$Windows) {
+        $roots = $(if ($Windows) { $WindowsRoots } else {
+                [pscustomobject]@{ Approved = @{ user = "$Key\StartupApproved"; machine = 'HKLM:\SOFTWARE\windows-tuneup-test\StartupApproved' }; Store = "$Key\SystemAppData" } })
+        InModuleScope Tuneup -Parameters @{ Roots = $roots } {
+            param($Roots)
+            $script:StartupApprovedRoot = $Roots.Approved
+            $script:StoreTaskRoot = $Roots.Store
+        }
+    }
+    Use-TestRoot
     function New-TestEntry([string]$Source, [string]$Key, [hashtable]$Target = @{}, [bool]$Enabled = $true) {
         $entry = New-TuneupStartupEntry -Source $Source -Key $Key -Name "Name $Key" -Enabled $Enabled -Target $Target
         $entry.canDisable = $Enabled
@@ -33,7 +45,7 @@ Describe 'New-TuneupStartupApprovedValue' {
 
 Describe 'ConvertTo-TuneupStartupTweak' {
     It 'turns a Run entry off through StartupApproved of its hive' {
-        $approved = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+        $approved = "$Key\StartupApproved\Run"
         $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = $approved; ApprovedName = 'Steam' }) -DisabledAt $DisabledAt
         $tweak.id | Should -BeExactly 'startup.run-user.steam-eb4bc901e3d06cf1'
         $tweak.type | Should -Be 'registry'
@@ -60,7 +72,7 @@ Describe 'ConvertTo-TuneupStartupTweak' {
     It 'writes why in the language of the run, in both fields' {
         Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'es'
         try {
-            $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = "$Key\Run"; ApprovedName = 'Steam' })
+            $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Steam' })
         } finally {
             Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
         }
@@ -69,25 +81,25 @@ Describe 'ConvertTo-TuneupStartupTweak' {
     }
 
     It 'keeps the scope of a machine entry and the Run32 and StartupFolder keys' {
-        $machine = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run32-machine' 'Tray' @{ ApprovedPath = 'HKLM:\Software\X\StartupApproved\Run32'; ApprovedName = 'Tray' })
+        $machine = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run32-machine' 'Tray' @{ ApprovedPath = 'HKLM:\SOFTWARE\windows-tuneup-test\StartupApproved\Run32'; ApprovedName = 'Tray' })
         $machine.scope | Should -Be 'machine'
         Test-TuneupTweakNeedsAdmin -Tweak $machine | Should -BeTrue
-        $folder = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'folder-user' 'Tool.lnk' @{ ApprovedPath = 'HKCU:\Software\X\StartupApproved\StartupFolder'; ApprovedName = 'Tool.lnk' })
+        $folder = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'folder-user' 'Tool.lnk' @{ ApprovedPath = "$Key\StartupApproved\StartupFolder"; ApprovedName = 'Tool.lnk' })
         $folder.set.name | Should -Be 'Tool.lnk'
         $folder.set.value[0] | Should -Be 3
     }
 
     It 'gives an entry that is already off the same new value (the check reads any odd first byte as off), and a Store task the State it has' {
         $bytes = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8)
-        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Old' @{ ApprovedPath = 'HKCU:\Software\X'; ApprovedName = 'Old'; ApprovedValue = $bytes } -Enabled $false) -DisabledAt $DisabledAt
+        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Old' @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Old'; ApprovedValue = $bytes } -Enabled $false) -DisabledAt $DisabledAt
         @($tweak.set.value) -join ',' | Should -Be ($Expected -join ',')
         $tweak.set.compare | Should -Be 'startupApproved'
-        $store = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'P\T' @{ StoreKeyPath = 'HKCU:\Software\X\P\T'; StoreState = 0 } -Enabled $false)
+        $store = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'P\T' @{ StoreKeyPath = "$Key\SystemAppData\P\T"; StoreState = 0 } -Enabled $false)
         $store.set.value | Should -Be 0
     }
 
     It 'turns a Store task off with State 1, as Settings does' {
-        $path = 'HKCU:\Software\Classes\X\MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask'
+        $path = "$Key\SystemAppData\MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask"
         $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask' @{ StoreKeyPath = $path; StoreState = 2 })
         $tweak.type | Should -Be 'registry'
         $tweak.scope | Should -Be 'user'
@@ -136,6 +148,32 @@ Describe 'ConvertTo-TuneupStartupTweak' {
         { ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'P\T' @{ StoreKeyPath = ''; StoreState = 2 }) } | Should -Throw '*cannot be turned off*'
         { ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'task' '\V\Up' @{ TaskPath = 'V'; TaskName = 'Up' }) } | Should -Throw '*cannot be turned off*'
         { ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'service' 'Svc') } | Should -Throw '*cannot be turned off*'
+    }
+
+    It 'writes only the StartupApproved value of the entry and the State of its Store task: <Name>' -TestCases @(
+        @{ Name = 'the key of another source'; Source = 'run-user'; EntryKey = 'Steam'; Target = @{ ApprovedPath = 'HKCU:\Software\windows-tuneup-test\StartupApproved\Run32'; ApprovedName = 'Steam' } }
+        @{ Name = 'the Run key itself'; Source = 'run-user'; EntryKey = 'Steam'; Target = @{ ApprovedPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'; ApprovedName = 'Steam' } }
+        @{ Name = 'a key under StartupApproved'; Source = 'run-user'; EntryKey = 'Steam'; Target = @{ ApprovedPath = 'HKCU:\Software\windows-tuneup-test\StartupApproved\Run\Sub'; ApprovedName = 'Steam' } }
+        @{ Name = 'the value of another entry'; Source = 'run-user'; EntryKey = 'Steam'; Target = @{ ApprovedPath = 'HKCU:\Software\windows-tuneup-test\StartupApproved\Run'; ApprovedName = 'Other' } }
+        @{ Name = 'the folder of the machine for an entry of the user'; Source = 'folder-user'; EntryKey = 'Tool.lnk'; Target = @{ ApprovedPath = 'HKLM:\SOFTWARE\windows-tuneup-test\StartupApproved\StartupFolder'; ApprovedName = 'Tool.lnk' } }
+        @{ Name = 'the task of another Store app'; Source = 'store-app'; EntryKey = 'P\T'; Target = @{ StoreKeyPath = 'HKCU:\Software\windows-tuneup-test\SystemAppData\Other\T'; StoreState = 2 } }
+        @{ Name = 'a key outside SystemAppData'; Source = 'store-app'; EntryKey = 'P\T'; Target = @{ StoreKeyPath = 'HKCU:\Software\Elsewhere\P\T'; StoreState = 2 } }
+    ) {
+        param($Source, $EntryKey, $Target)
+        { ConvertTo-TuneupStartupTweak -Entry (New-TestEntry $Source $EntryKey $Target) } | Should -Throw '*cannot be turned off*'
+    }
+
+    It 'pins the keys of Windows when no test copy stands in for them' {
+        Use-TestRoot -Windows
+        try {
+            $real = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+            (ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = $real; ApprovedName = 'Steam' })).set.path | Should -Be $real
+            $store = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\P\T'
+            (ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'P\T' @{ StoreKeyPath = $store; StoreState = 2 })).set.path | Should -Be $store
+            { ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Steam' }) } | Should -Throw '*cannot be turned off*'
+        } finally {
+            Use-TestRoot
+        }
     }
 }
 

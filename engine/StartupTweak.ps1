@@ -36,17 +36,30 @@ function New-TuneupStartupApprovedValue {
     , $bytes
 }
 
-# The problems of the set block of a startup tweak; nothing when it says where to turn the entry off. A
-# registry value must be in the hive of the scope of its entry (the user's under HKCU, the machine's under
-# HKLM), and a task and a service must pass the checks of their handlers.
+# The StartupApproved key that keeps the choice of Task Manager for the entries of a source.
+$script:StartupApprovedSubkeys = @{ 'run-user' = 'Run'; 'run-machine' = 'Run'; 'run32-machine' = 'Run32'; 'folder-user' = 'StartupFolder'; 'folder-machine' = 'StartupFolder' }
+
+# The problems of the set block of a startup tweak; nothing when it says where to turn the entry off. What a
+# registry tweak writes is pinned: the value of the entry (its key) in the StartupApproved key of its source
+# and scope, or the State of its task in SystemAppData (<package family>\<task>, its key); a task and a
+# service must pass the checks of their handlers.
 function Test-TuneupStartupTweakSet {
     param([Parameter(Mandatory)]$Tweak)
     $set = $Tweak.set
+    $source = [string]$Tweak.startup.source
+    $key = [string]$Tweak.startup.key
     switch ($Tweak.type) {
         'registry' {
-            $hive = $(if ($Tweak.scope -ceq 'user') { 'HKCU' } else { 'HKLM' })
-            if ([string]$set.path -cnotmatch "^${hive}:\\.+") { "no registry key under $hive" }
-            if ([string]::IsNullOrEmpty([string]$set.name)) { 'no registry value name' }
+            if ($source -ceq 'store-app') {
+                $expected = "$($script:StoreTaskRoot)\$key"
+                $name = 'State'
+            } else {
+                $subkey = $script:StartupApprovedSubkeys[$source]
+                $expected = $(if ($subkey) { "$($script:StartupApprovedRoot[[string]$Tweak.scope])\$subkey" } else { $null })
+                $name = $key
+            }
+            if (-not $expected -or -not [string]::Equals([string]$set.path, $expected, [System.StringComparison]::OrdinalIgnoreCase)) { "not the key $expected" }
+            if (-not [string]::Equals([string]$set.name, $name, [System.StringComparison]::OrdinalIgnoreCase)) { "not the value $name" }
         }
         'task' { Test-TaskTweakDefinition -Tweak $Tweak }
         'service' { Test-ServiceTweakDefinition -Tweak $Tweak }

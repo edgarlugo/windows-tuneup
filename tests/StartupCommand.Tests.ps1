@@ -10,8 +10,11 @@ BeforeAll {
     $script:On = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     $script:Run = "$Key\Run"
     # Whether an entry is still there is read from the Run key of the test, never from the one of the account.
-    InModuleScope Tuneup -Parameters @{ Run = $Run } {
-        param($Run)
+    # And what a tweak may write is pinned to copies of StartupApproved and SystemAppData under that key.
+    InModuleScope Tuneup -Parameters @{ Run = $Run; Key = $Key } {
+        param($Run, $Key)
+        $script:StartupApprovedRoot = @{ user = "$Key\StartupApproved"; machine = 'HKLM:\SOFTWARE\windows-tuneup-test\StartupApproved' }
+        $script:StoreTaskRoot = "$Key\SystemAppData"
         $script:StartupRunKeys = @(
             [pscustomobject]@{ Source = 'run-user'; Path = $Run }
             [pscustomobject]@{ Source = 'run-machine'; Path = "$Run-machine" }
