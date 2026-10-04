@@ -403,6 +403,20 @@ function Invoke-TuneupStartupCommand {
     }
 }
 
+# True when a profile named by id or alias offers the review of what starts with Windows (offersStartup:
+# gaming). A name that is not a profile offers nothing: the plan already said so.
+function Test-TuneupStartupOffered {
+    param([Parameter(Mandatory)]$Definition, [AllowEmptyCollection()][string[]]$ProfileIds = @())
+    foreach ($name in @($ProfileIds | Where-Object { $_ })) {
+        $needle = $name.Trim().ToLowerInvariant()
+        $profileData = @($Definition.Profiles | Where-Object { $_.id -eq $needle -or @($_.aliases) -contains $needle }) | Select-Object -First 1
+        if ($null -eq $profileData) { continue }
+        $offer = $profileData.PSObject.Properties['offersStartup']
+        if ($null -ne $offer -and $offer.Value -eq $true) { return $true }
+    }
+    $false
+}
+
 # -ReadResult: the document that a run with -ResultId saved, exactly as it was written, for a caller that
 # started the tool elevated (the Claude skill) and reads the result unelevated through the tool instead
 # of opening the file itself: the tool checks that only an administrator could have written it. An
@@ -508,6 +522,10 @@ function Invoke-TuneupApplyCommand {
     $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $ProfileIds -Include $Include -Exclude $Exclude
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+    # For people only: the JSON says it in profiles[].offersStartup of -List.
+    if (-not $Context.Json -and $Context.ExitCode -ne 1 -and (Test-TuneupStartupOffered -Definition $definition -ProfileIds $ProfileIds)) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'startup.offer')
+    }
 }
 
 # What was asked for, for the transcript and the JSON report: profiles and the -Include and -Exclude

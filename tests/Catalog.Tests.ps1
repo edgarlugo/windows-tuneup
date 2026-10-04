@@ -234,6 +234,11 @@ Describe 'Test-TuneupProfileSet' {
         $profiles = @((New-TestProfile -Id 'base'), (New-TestProfile -Id 'dev' -Aliases @('base')))
         (Test-TuneupProfileSet -Profiles $profiles -Catalog $Catalog) -join '; ' | Should -Match "name 'base' is used"
     }
+    It 'rejects offersStartup that is not true or false' {
+        $profileData = New-TestProfile -Id 'base'
+        $profileData | Add-Member -NotePropertyName offersStartup -NotePropertyValue 'yes'
+        (Test-TuneupProfileSet -Profiles @($profileData) -Catalog $Catalog) -join '; ' | Should -Match 'profile base offersStartup must be true or false'
+    }
 }
 
 Describe 'Shipped catalog and profiles' {
@@ -246,6 +251,10 @@ Describe 'Shipped catalog and profiles' {
         $catalog = @(Import-TuneupCatalog -Path (Join-Path $RepoRoot 'catalog'))
         $profiles = @(Import-TuneupProfileSet -Path (Join-Path $RepoRoot 'profiles'))
         (Test-TuneupProfileSet -Profiles $profiles -Catalog $catalog) -join "`n" | Should -BeNullOrEmpty
+    }
+    It 'offers the review of what starts with Windows from the gaming profile only' {
+        $profiles = @(Import-TuneupProfileSet -Path (Join-Path $RepoRoot 'profiles'))
+        @($profiles | Where-Object { $null -ne $_.PSObject.Properties['offersStartup'] -and $_.offersStartup } | ForEach-Object { $_.id }) -join ',' | Should -Be 'gaming'
     }
 }
 

@@ -621,3 +621,46 @@ Describe 'A startup entry that is no longer there' {
         Test-Path -LiteralPath $package | Should -BeFalse
     }
 }
+
+Describe 'The review of what starts with Windows, offered by a profile' {
+    BeforeAll {
+        # The fixture profiles, with extra offering the review.
+        $script:OfferingProfiles = Join-Path $TestDrive 'profiles'
+        Copy-Item -LiteralPath (Join-Path $Fixtures 'profiles') -Destination $OfferingProfiles -Recurse
+        $extra = Join-Path $OfferingProfiles 'extra.json'
+        $data = [System.IO.File]::ReadAllText($extra) | ConvertFrom-Json
+        $data | Add-Member -NotePropertyName offersStartup -NotePropertyValue $true
+        [System.IO.File]::WriteAllText($extra, ($data | ConvertTo-Json -Depth 10))
+    }
+    BeforeEach { Mock -ModuleName Tuneup Get-TuneupPreflight { } }
+
+    It 'knows which profiles offer it, by id or alias' {
+        $gaming = New-TestProfile -Id 'gaming' -Aliases @('juegos')
+        $gaming | Add-Member -NotePropertyName offersStartup -NotePropertyValue $true
+        $definition = [pscustomobject]@{ Profiles = @((New-TestProfile -Id 'base'), $gaming) }
+        Test-TuneupStartupOffered -Definition $definition -ProfileIds @('juegos') | Should -BeTrue
+        Test-TuneupStartupOffered -Definition $definition -ProfileIds @('GAMING') | Should -BeTrue
+        Test-TuneupStartupOffered -Definition $definition -ProfileIds @('base') | Should -BeFalse
+        Test-TuneupStartupOffered -Definition $definition -ProfileIds @() | Should -BeFalse
+        Test-TuneupStartupOffered -Definition $definition -ProfileIds @('nope') | Should -BeFalse
+    }
+
+    It 'ends the plan of such a profile with the offer, for people only' {
+        $context = New-TestContext
+        $context.ProfilesPath = $OfferingProfiles
+        Invoke-TuneupApplyCommand -Context $context -ProfileIds @('extra') -PlanOnly 6>$null | Out-Null
+        $context.ExitCode | Should -Be 0
+        $context.Io.Output | Should -Contain (Get-TuneupText -Key 'startup.offer')
+        $json = New-TestContext -Json
+        $json.ProfilesPath = $OfferingProfiles
+        (Invoke-TuneupApplyCommand -Context $json -ProfileIds @('extra') -PlanOnly | ConvertFrom-Json).command | Should -Be 'plan'
+        $json.Io.Output | Should -Not -Contain (Get-TuneupText -Key 'startup.offer')
+    }
+
+    It 'does not offer it after a plan of a profile that does not' {
+        $context = New-TestContext
+        $context.ProfilesPath = $OfferingProfiles
+        Invoke-TuneupApplyCommand -Context $context -ProfileIds @('system') -PlanOnly 6>$null | Out-Null
+        $context.Io.Output | Should -Not -Contain (Get-TuneupText -Key 'startup.offer')
+    }
+}

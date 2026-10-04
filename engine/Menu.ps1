@@ -238,6 +238,9 @@ function Invoke-TuneupMenuOptimize {
     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $profileIds -Include $highRisk -Exclude $declined
     $Context.Pause = $true
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request
+    if ($Context.ExitCode -ne 1 -and (Test-TuneupStartupOffered -Definition $definition -ProfileIds $profileIds)) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'startup.offer')
+    }
 }
 
 # The status, and when Windows reverted something, the offer to apply it again.

@@ -114,6 +114,7 @@ Describe 'docs/json-contract.md' {
         $Documents.error.reason | Should -Be 'result-missing'
         (Get-ContractSection 'error').Contains('`needs-admin`') | Should -BeTrue
         $paths.list | Should -Contain 'profiles[].needsAdmin'
+        $paths.list | Should -Contain 'profiles[].offersStartup'
         $paths.list | Should -Contain 'tweaks[].profiles'
         $paths.list | Should -Contain 'incompatible[].reason'
         $paths.suggest | Should -Contain 'signals[].evidence'

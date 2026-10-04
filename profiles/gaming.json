@@ -6,6 +6,7 @@
     "es": "Modo Juego, sin grabación en segundo plano, sin aceleración del mouse y GPU con menos latencia. Conserva las apps y la tarea de Xbox.",
     "en": "Game Mode, no background recording, no mouse acceleration and lower GPU latency. Keeps the Xbox apps and task."
   },
+  "offersStartup": true,
   "include": [
     "gaming.game-mode-on",
     "gaming.game-dvr-off",

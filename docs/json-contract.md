@@ -244,6 +244,7 @@ What the catalog and the profiles offer on this machine. Read only, no elevation
 | `profiles[].description` | string | What the profile does, in the language of the run. |
 | `profiles[].tweakCount` | number | Tweaks of the profile that suit this machine (the ones not in `incompatible`). |
 | `profiles[].needsAdmin` | boolean | Some of those tweaks need elevation. |
+| `profiles[].offersStartup` | boolean | The profile offers to review what starts with Windows (`-Startup`) after it is planned or applied (`gaming`). Only an offer: nothing is turned off unless it is named in `-Startup -Disable`. |
 | `tweaks` | object[] | Every tweak of the catalog that suits this machine, in catalog order. |
 | `tweaks[].id` | string | Tweak id: what `-Include` and `-Exclude` take. |
 | `tweaks[].title` | string | Title in the language of the run. |
