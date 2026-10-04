@@ -122,3 +122,19 @@ Describe 'New-TuneupStartupEntry' {
         { New-TuneupStartupEntry -Source 'nowhere' -Key 'x' -Name 'x' } | Should -Throw "*Unknown startup source 'nowhere'*"
     }
 }
+Describe 'Startup texts' {
+    It 'has a text in es and en for every source, protection, reason, recommendation and kind of change' {
+        $module = Get-Module Tuneup
+        $keys = @(& $module { $script:StartupSources.Keys } | ForEach-Object { "startup.source.$_" }) +
+            @(& $module { $script:StartupProtections } | ForEach-Object { "startup.protected.$_" }) +
+            @('run-once', 'unsupported-name' | ForEach-Object { "startup.fixed.$_" }) +
+            @(& $module { $script:StartupRuleCategories.recommend } | ForEach-Object { "startup.recommend.$_" }) +
+            @('registry', 'store', 'task', 'service' | ForEach-Object { "startup.why.$_" }) +
+            @('startup.notRecommended.work-app', 'transcript.request.startup', 'reapply.startupEntry')
+        $keys.Count | Should -BeGreaterThan 30
+        foreach ($lang in 'es', 'en') {
+            $json = Get-Content -LiteralPath (Join-Path $I18nRoot "$lang.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($key in $keys) { [string]::IsNullOrWhiteSpace([string]$json.$key) | Should -BeFalse -Because "$lang $key" }
+        }
+    }
+}
