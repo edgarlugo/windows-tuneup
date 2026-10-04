@@ -109,3 +109,36 @@ function ConvertTo-TuneupStartupTweak {
     if ($problems.Count) { throw "Startup entry $($Entry.id) cannot be turned off: $($problems -join '; ')" }
     $tweak
 }
+
+# Whether a tweak is one that -Startup -Disable built: an id of -Startup and what it turns off.
+function Test-TuneupStartupTweak {
+    param([AllowNull()]$Tweak)
+    $null -ne $Tweak -and $null -ne $Tweak.PSObject.Properties['startup'] -and (Test-TuneupStartupId -Id ([string]$Tweak.id))
+}
+
+# Whether the entry a startup tweak turned off is still there: the value of its Run key, the file of its
+# startup folder, the key of its Store task (gone with the app), its scheduled task or its service. Once it
+# was uninstalled there is nothing to check or to give back: -Status says not-present (never drift) and
+# -Undo leaves it as it is, without making keys or values for something that no longer exists.
+function Test-TuneupStartupTweakPresent {
+    param([Parameter(Mandatory)]$Tweak)
+    $source = [string]$Tweak.startup.source
+    $key = [string]$Tweak.startup.key
+    switch -Regex ($source) {
+        '^(run|run32)-' {
+            $run = @($script:StartupRunKeys | Where-Object { $_.Source -ceq $source })[0]
+            if ($null -eq $run -or -not (Test-Path -LiteralPath $run.Path)) { return $false }
+            $item = Get-Item -LiteralPath $run.Path -ErrorAction Stop
+            try { return [bool](@($item.GetValueNames()) -contains $key) } finally { $item.Close() }
+        }
+        '^folder-' {
+            $folder = @($script:StartupFolders | Where-Object { $_.Source -ceq $source })[0]
+            $path = $(if ($null -ne $folder) { Get-TuneupStartupFolderPath -Name $folder.Folder } else { $null })
+            return [bool]($path -and (Test-Path -LiteralPath (Join-Path $path $key) -PathType Leaf))
+        }
+        '^store-app$' { return [bool](Test-Path -LiteralPath ([string]$Tweak.set.path)) }
+        '^task$' { return $null -ne (Get-TuneupScheduledTask -Tweak $Tweak) }
+        '^service$' { return [bool](Get-ServiceTweakState -Tweak $Tweak).present }
+    }
+    $true
+}

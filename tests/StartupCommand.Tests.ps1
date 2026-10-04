@@ -8,7 +8,20 @@ BeforeAll {
     $script:Approved = "$Key\StartupApproved\Run"
     $script:SteamId = 'startup.run-user.steam-eb4bc901e3d06cf1'
     $script:On = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    $script:Run = "$Key\Run"
+    # Whether an entry is still there is read from the Run key of the test, never from the one of the account.
+    InModuleScope Tuneup -Parameters @{ Run = $Run } {
+        param($Run)
+        $script:StartupRunKeys = @(
+            [pscustomobject]@{ Source = 'run-user'; Path = $Run }
+            [pscustomobject]@{ Source = 'run-machine'; Path = "$Run-machine" }
+        )
+    }
     function Remove-TestKey { if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force } }
+    function Add-TestRunValue([string]$Name) {
+        if (-not (Test-Path -LiteralPath $Run)) { New-Item -Path $Run -Force | Out-Null }
+        New-ItemProperty -LiteralPath $Run -Name $Name -Value "`"C:\Games\$Name\$Name.exe`"" -PropertyType String -Force | Out-Null
+    }
     function Get-TestApproved([string]$Name = 'Steam') {
         $item = Get-Item -LiteralPath $Approved
         try { , [byte[]]$item.GetValue($Name) } finally { $item.Close() }
@@ -47,6 +60,7 @@ Describe 'Invoke-TuneupStartupCommand' {
     BeforeEach {
         Remove-TestKey
         New-Item -Path $Key -Force | Out-Null
+        Add-TestRunValue 'Steam'
         $script:Entries = @(New-TestSteam)
         Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
         Mock -ModuleName Tuneup Get-TuneupPreflight { }
@@ -210,6 +224,7 @@ Describe 'Invoke-TuneupStartupCommand' {
         New-Item -Path $Approved -Force | Out-Null
         New-ItemProperty -LiteralPath $Approved -Name 'Discord' -Value $offBytes -PropertyType Binary | Out-Null
         $discord = New-TestSteam -Enabled $false -Value $offBytes -Name 'Discord'
+        Add-TestRunValue 'Discord'
         $script:Entries = @((New-TestSteam), $discord)
         $context = New-TestContext -Json
         $plan = Invoke-TestStartup $context -Disable @($SteamId, $discord.id) -PlanOnly
@@ -274,6 +289,8 @@ Describe 'Invoke-TuneupStartupCommand' {
     It 'needs administrator only when a chosen entry is of the machine, and then changes nothing at all' {
         $machine = New-TuneupStartupEntry -Source 'run-machine' -Key 'Tray' -Name 'Tray' -Target @{ ApprovedPath = 'HKLM:\Software\windows-tuneup-test\StartupApproved\Run'; ApprovedName = 'Tray' }
         $machine.canDisable = $true
+        New-Item -Path "$Run-machine" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$Run-machine" -Name 'Tray' -Value 'C:\Tray\tray.exe' -PropertyType String | Out-Null
         $script:Entries = @((New-TestSteam), $machine)
         $context = New-TestContext -Json
         $plan = Invoke-TestStartup $context -Disable @($machine.id) -PlanOnly
@@ -394,6 +411,21 @@ Describe 'Turning off a scheduled task and a service' {
         Should -Invoke -ModuleName Tuneup Stop-Service -Times 0
     }
 
+    It 'says not-present for a task and a service uninstalled since, and -Undo gives nothing back for them' {
+        $elevated = New-TestEnvironment -IsAdmin $true
+        $context = New-TestContext -Json -Environment $elevated
+        (Invoke-TestStartup $context -Disable @($Entries | ForEach-Object { $_.id }) -Yes).results.status -join ';' | Should -Be 'applied;applied'
+        # Both uninstalled.
+        Mock -ModuleName Tuneup Get-ScheduledTask { }
+        Mock -ModuleName Tuneup Get-ServiceTweakState { [pscustomobject]@{ present = $false; startType = $null; running = $false } }
+        @((Invoke-TestStatus $context.StateRoot -Environment $elevated).items | ForEach-Object { $_.status }) -join ';' | Should -Be 'not-present;not-present'
+        $undoContext = New-TestContext -Json -StateRoot $context.StateRoot -Environment $elevated
+        $undo = Invoke-TuneupUndoCommand -Context $undoContext -RunId 'last' | ConvertFrom-Json
+        $undoContext.ExitCode | Should -Be 0
+        @($undo.results | ForEach-Object { "$($_.status):$($_.reason)" }) -join ';' | Should -Be 'restored:not-present;restored:not-present'
+        @($Calls) -join ';' | Should -Be 'task off;sc VendorSvc demand'
+    }
+
     It 'refuses them without administrator, with the reason needs-admin, and touches nothing' {
         $context = New-TestContext -Json
         $refused = Invoke-TestStartup $context -Disable @($Entries | ForEach-Object { $_.id }) -Yes
@@ -408,6 +440,7 @@ Describe 'Re-applying a startup entry that came back' {
     BeforeEach {
         Remove-TestKey
         New-Item -Path $Key -Force | Out-Null
+        Add-TestRunValue 'Steam'
         $script:Entries = @(New-TestSteam)
         Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
         Mock -ModuleName Tuneup Get-TuneupPreflight { }
@@ -456,5 +489,66 @@ Describe 'Re-applying a startup entry that came back' {
         $refused = Invoke-TuneupStatusCommand -Context $named -Reapply -PlanOnly -Include @('test.unknown') | ConvertFrom-Json
         $named.ExitCode | Should -Be 1
         $refused.message | Should -Be (Get-TuneupText -Key 'err.unknownTweak' -Format 'test.unknown')
+    }
+}
+
+Describe 'A startup entry that is no longer there' {
+    BeforeEach {
+        Remove-TestKey
+        New-Item -Path $Key -Force | Out-Null
+        Add-TestRunValue 'Steam'
+        $script:Entries = @(New-TestSteam)
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
+        Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Mock -ModuleName Tuneup Test-TuneupWow64Process { $false }
+    }
+    AfterAll { Remove-TestKey }
+
+    It 'is not-present once its Run value is gone: -Status does not call it reverted, -Reapply says nothing and -Undo leaves it' {
+        $context = New-TestContext -Json
+        (Invoke-TestStartup $context -Disable @($SteamId) -Yes).results[0].status | Should -Be 'applied'
+        $off = Get-TestApproved
+        Remove-ItemProperty -LiteralPath $Run -Name 'Steam'
+        (Invoke-TestStatus $context.StateRoot).items[0].status | Should -Be 'not-present'
+        $reapply = New-TestContext -Json -StateRoot $context.StateRoot
+        $plan = Invoke-TuneupStatusCommand -Context $reapply -Reapply -PlanOnly | ConvertFrom-Json
+        $reapply.ExitCode | Should -Be 0
+        @($plan.items).Count | Should -Be 0
+        @($plan.warnings | Where-Object { $_ -eq (Get-TuneupText -Key 'reapply.startupEntry' -Format $SteamId) }).Count | Should -Be 0
+        $undoContext = New-TestContext -Json -StateRoot $context.StateRoot
+        $undo = Invoke-TuneupUndoCommand -Context $undoContext -RunId 'last' | ConvertFrom-Json
+        $undoContext.ExitCode | Should -Be 0
+        "$($undo.results[0].status):$($undo.results[0].reason)" | Should -Be 'restored:not-present'
+        # Left as it was: nothing is written for an entry that no longer starts.
+        (Get-TestApproved) -join ',' | Should -Be ($off -join ',')
+    }
+
+    It 'leaves out of the plan an entry whose Run value went away after the list was read' {
+        Remove-ItemProperty -LiteralPath $Run -Name 'Steam'
+        $context = New-TestContext -Json
+        $plan = Invoke-TestStartup $context -Disable @($SteamId) -Yes
+        $context.ExitCode | Should -Be 0
+        "$($plan.items[0].action):$($plan.items[0].reason)" | Should -Be 'skip:not-present'
+        Test-Path -LiteralPath $Approved | Should -BeFalse
+    }
+
+    It 'never makes again the key of a Store app that was uninstalled' {
+        $package = "$Key\SystemAppData\Vendor.App_abc"
+        New-Item -Path "$package\StartAtLogon" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$package\StartAtLogon" -Name 'State' -Value 2 -PropertyType DWord | Out-Null
+        $store = New-TuneupStartupEntry -Source 'store-app' -Key 'Vendor.App_abc\StartAtLogon' -Name 'Vendor App' -Target @{ StoreKeyPath = "$package\StartAtLogon"; StoreState = 2 }
+        $store.canDisable = $true
+        $script:Entries = @($store)
+        $context = New-TestContext -Json
+        (Invoke-TestStartup $context -Disable @($store.id) -Yes).results[0].status | Should -Be 'applied'
+        (Get-ItemProperty -LiteralPath "$package\StartAtLogon").State | Should -Be 1
+        Remove-Item -LiteralPath $package -Recurse -Force
+        (Invoke-TestStatus $context.StateRoot).items[0].status | Should -Be 'not-present'
+        $undoContext = New-TestContext -Json -StateRoot $context.StateRoot
+        $undo = Invoke-TuneupUndoCommand -Context $undoContext -RunId 'last' | ConvertFrom-Json
+        $undoContext.ExitCode | Should -Be 0
+        "$($undo.results[0].status):$($undo.results[0].reason)" | Should -Be 'restored:not-present'
+        Test-Path -LiteralPath $package | Should -BeFalse
     }
 }

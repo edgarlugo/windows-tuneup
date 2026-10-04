@@ -7,6 +7,11 @@ BeforeAll {
     # 03 00 00 00 and the FILETIME of 2026-10-04 12:00 UTC, little endian.
     $script:Expected = @(@(3, 0, 0, 0) + @([BitConverter]::GetBytes([int64]$DisabledAt.ToFileTimeUtc())))
     function Remove-TestKey { if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force } }
+    # Whether an entry is still there is read from the Run key of the test, never from the one of the account.
+    InModuleScope Tuneup -Parameters @{ Run = "$Key\Run" } {
+        param($Run)
+        $script:StartupRunKeys = @([pscustomobject]@{ Source = 'run-user'; Path = $Run })
+    }
     function New-TestEntry([string]$Source, [string]$Key, [hashtable]$Target = @{}, [bool]$Enabled = $true) {
         $entry = New-TuneupStartupEntry -Source $Source -Key $Key -Name "Name $Key" -Enabled $Enabled -Target $Target
         $entry.canDisable = $Enabled
@@ -137,7 +142,8 @@ Describe 'ConvertTo-TuneupStartupTweak' {
 Describe 'A startup tweak through the registry handler' {
     BeforeEach {
         Remove-TestKey
-        New-Item -Path $Key -Force | Out-Null
+        New-Item -Path "$Key\Run" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$Key\Run" -Name 'Steam' -Value 'C:\Games\Steam\steam.exe' -PropertyType String | Out-Null
     }
     AfterAll { Remove-TestKey }
 
@@ -262,5 +268,23 @@ Describe 'The compare field of a registry tweak' {
         } finally {
             Remove-TestKey
         }
+    }
+}
+
+Describe 'Test-TuneupStartupTweakPresent' {
+    It 'follows the shortcut of a startup folder' {
+        $folder = Join-Path $TestDrive 'Startup'
+        New-Item -ItemType Directory -Path $folder -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $folder 'Tool.lnk') -Value 'x'
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderPath { $folder }.GetNewClosure()
+        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'folder-user' 'Tool.lnk' @{ ApprovedPath = "$Key\StartupApproved\StartupFolder"; ApprovedName = 'Tool.lnk' })
+        Test-TuneupStartupTweakPresent -Tweak $tweak | Should -BeTrue
+        Remove-Item -LiteralPath (Join-Path $folder 'Tool.lnk')
+        Test-TuneupStartupTweakPresent -Tweak $tweak | Should -BeFalse
+        Test-TuneupState -Tweak $tweak | Should -Be 'not-present'
+    }
+
+    It 'leaves a tweak of the catalog alone' {
+        Test-TuneupStartupTweak -Tweak (New-TestTweak -Id 'test.plain') | Should -BeFalse
     }
 }
