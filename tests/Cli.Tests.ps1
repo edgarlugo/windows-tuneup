@@ -428,6 +428,27 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
         (Get-Item -LiteralPath $SubKey).GetValueNames() -contains 'Four' | Should -BeFalse
     }
 
+    It 'exits with 2 when a tweak fails for a reason other than access denied' {
+        # A copy of the fixture catalog with a tweak that Windows rejects: a value name longer than the
+        # 16383 characters the registry allows.
+        $catalog = Join-Path $TestDrive ('catalog-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $catalog | Out-Null
+        $data = Get-Content -LiteralPath (Join-Path $Fixtures 'catalog\test.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $broken = ($data.tweaks | Where-Object { $_.id -eq 'test.four' } | ConvertTo-Json -Depth 10) | ConvertFrom-Json
+        $broken.id = 'test.broken'
+        $broken.set.name = 'x' * 16384
+        $data.tweaks = @($data.tweaks) + @($broken)
+        [System.IO.File]::WriteAllText((Join-Path $catalog 'test.json'), ($data | ConvertTo-Json -Depth 10))
+        $result = Invoke-Tuneup @('-Profile', 'base', '-Include', 'test.broken', '-Yes', '-Json') -Catalog $catalog
+        $result.ExitCode | Should -Be 2
+        $json = ConvertFrom-PureJson $result.Output
+        $json.summary.applied | Should -Be 2
+        $json.summary.failed | Should -Be 1
+        $failed = $json.results | Where-Object { $_.id -eq 'test.broken' }
+        $failed.status | Should -Be 'failed'
+        $failed.refused | Should -BeFalse
+    }
+
     It 'exits with 1 when the journal cannot be written before any change' {
         # Windows PowerShell 5.1 does not take paths of 260 characters or more: the run folder and
         # its small files fit, the journal (snapshot.jsonl) does not.
