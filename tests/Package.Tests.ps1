@@ -32,6 +32,25 @@ BeforeAll {
         # its width (even inside a word), so messages are matched against it (Get-Flat on both sides).
         [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $text; Flat = (Get-Flat $text) }
     }
+    # Runs an installer inside a session, as a script (& or .) of a powershell -Command, from -Location
+    # while the process folder is -ProcessFolder; after it, the session writes the errors it holds, whether
+    # PSModulePath came back and how many variables of the installer were left in it.
+    function Invoke-InstallerInSession([string]$Operator, [string]$Installer, [string]$Arguments, [string]$Location = $TestDrive, [string]$ProcessFolder = $TestDrive) {
+        $ErrorActionPreference = 'Continue'
+        $command = "`$before = `$env:PSModulePath; Set-Location -LiteralPath '$Location'; " +
+            "`$process = [Environment]::CurrentDirectory; $Operator '$Installer' $Arguments; " +
+            "'errors=' + `$Error.Count; `$Error | ForEach-Object { 'error: ' + `$_.ToString() }; " +
+            "'modulepath=' + (`$before -eq `$env:PSModulePath); 'variables=' + @(Get-Variable -Name 'windowsTuneup*').Count; " +
+            "'process=' + `$process"
+        Push-Location -LiteralPath $ProcessFolder
+        try {
+            $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -Command $command 2>&1
+        } finally {
+            Pop-Location
+        }
+        $text = $output | Out-String
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $text; Flat = (Get-Flat $text) }
+    }
     function Get-Flat([string]$Text) { $Text -replace '\s+', '' }
     function Get-ZipEntry([string]$Path) {
         $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
@@ -302,6 +321,30 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         $output = & $PowerShell -NoProfile -ExecutionPolicy Bypass -File $script
         $output | Should -Be 'callers-version|callers-destination|callers-sha|callers-source|Continue|Continue|0|True|True|0'
         Test-Path -LiteralPath (Join-Path $destination 'tuneup.ps1') | Should -BeTrue
+    }
+
+    # powershell -File and iex run the installer in a scope whose variables can be removed; a script run
+    # with & or . inside a session (.\install.ps1 in a console) does not, and nothing must fail there.
+    It 'runs as a script inside a session with <Operator>, without errors and leaving nothing behind' -ForEach @(
+        @{ Operator = '&' }
+        @{ Operator = '.' }
+    ) {
+        $destination = Get-TestDestination ('in-session-' + [guid]::NewGuid().ToString('N'))
+        $run = Invoke-InstallerInSession $Operator $Built.Installer "-Source '$Dist' -Destination '$destination'"
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Match 'errors=0' -Because $run.Output
+        $run.Output | Should -Match 'modulepath=True'
+        $run.Output | Should -Match 'variables=0'
+        Test-Path -LiteralPath (Join-Path $destination 'tuneup.ps1') | Should -BeTrue
+    }
+
+    It 'fails with its own error when run as a script inside a session' {
+        $destination = Get-TestDestination 'in-session-mismatch'
+        $run = Invoke-InstallerInSession '&' (Join-Path $Repo 'install.ps1') "-Version '$Version' -Sha256 '$('0' * 64)' -Source '$Dist' -Destination '$destination'"
+        $run.ExitCode | Should -Be 1
+        $run.Flat | Should -Match (Get-Flat 'it is not that release. Nothing was installed.')
+        $run.Output | Should -Not -Match 'windowsTuneupCallerModulePath'
+        Test-Path -LiteralPath $destination | Should -BeFalse
     }
 
     It 'fails on a parameter it does not have' {
