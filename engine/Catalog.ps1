@@ -59,6 +59,15 @@ function Test-TuneupTweak {
     if ($Tweak.rebootRequired -isnot [bool]) { $errors.Add("$id rebootRequired must be true or false") }
     $signOutProperty = $Tweak.PSObject.Properties['signOutRequired']
     if ($null -ne $signOutProperty -and $signOutProperty.Value -isnot [bool]) { $errors.Add("$id signOutRequired must be true or false") }
+    # Optional: where a person changes it by hand when Windows does not let programs change it.
+    $manualProperty = $Tweak.PSObject.Properties['manualSetting']
+    if ($null -ne $manualProperty) {
+        foreach ($lang in 'es', 'en') {
+            if ($manualProperty.Value -isnot [System.Management.Automation.PSCustomObject] -or [string]::IsNullOrWhiteSpace([string]$manualProperty.Value.$lang)) {
+                $errors.Add("$id is missing manualSetting.$lang")
+            }
+        }
+    }
     $requiresProperty = $Tweak.PSObject.Properties['requires']
     if ($null -ne $requiresProperty) {
         # A bare string is not a list, even though it would work as a list of one.

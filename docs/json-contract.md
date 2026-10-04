@@ -120,7 +120,7 @@ Also saved, without `warnings` and `toolVersion`, as `result.json` in the run fo
 | `results[].id` | string | Tweak id. |
 | `results[].title` | string | Tweak title. |
 | `results[].status` | string | `applied`, `partial`, `not-applied`, `failed`, `skipped`. |
-| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, `aborted` (the run stopped because of an error that was not Ctrl+C), or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`). |
+| `results[].reason` | string or null | For `skipped`: the reason of the plan, `journal-error`, `interrupted`, `aborted` (the run stopped because of an error that was not Ctrl+C), or the reason of a refusal (`onedrive-known-folders`, `onedrive-online-only-files`, `onedrive-scan-incomplete`, `onedrive-other-accounts`, `onedrive-session-user`, `session-user`, `protected-by-windows`: Windows denies programs, even elevated, writing or removing that registry value, as it does on build 26300 for the Widgets policy; `detail` says where to change it by hand). |
 | `results[].error` | string or null | What failed. |
 | `results[].detail` | string or null | Explanation of a partial result or a refusal. |
 | `results[].rebootRequired` | boolean | This tweak needs a restart. |

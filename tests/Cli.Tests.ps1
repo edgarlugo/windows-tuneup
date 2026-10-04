@@ -411,15 +411,21 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
         $again.summary.apply | Should -Be 0
     }
 
-    It 'exits with 2 when part of the plan fails' {
+    # Access denied to a value of the account is what Windows answers for a value it keeps from
+    # programs: the tweak is refused, changing nothing, and the run counts as done.
+    It 'refuses a value it is denied, changing nothing, and exits with 0' {
         New-Item -Path $SubKey -Force | Out-Null
         Set-TestSetValueDeny
         $result = Invoke-Tuneup @('-Profile', 'nested', '-Yes', '-Json')
-        $result.ExitCode | Should -Be 2
+        $result.ExitCode | Should -Be 0
         $json = ConvertFrom-PureJson $result.Output
         $json.summary.applied | Should -Be 2
-        $json.summary.failed | Should -Be 1
-        ($json.results | Where-Object { $_.id -eq 'test.four' }).status | Should -Be 'failed'
+        $json.summary.refused | Should -Be 1
+        $four = $json.results | Where-Object { $_.id -eq 'test.four' }
+        $four.status | Should -Be 'skipped'
+        $four.reason | Should -Be 'protected-by-windows'
+        $four.refused | Should -BeTrue
+        (Get-Item -LiteralPath $SubKey).GetValueNames() -contains 'Four' | Should -BeFalse
     }
 
     It 'exits with 1 when the journal cannot be written before any change' {

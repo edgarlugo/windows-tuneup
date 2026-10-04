@@ -256,5 +256,9 @@
   "err.readResultIncomplete": "The result {0} is not complete: the command is still running, or it was stopped before it ended (its window was closed). Check what was applied with -Status.",
   "err.readResultUntrusted": "The result {0} was not read: it, or the folder {1} that holds it, is not protected like the state of the machine, so an account that is not an administrator could have written it. Delete {1} as administrator and run the command again.",
   "err.stateFolderUntrusted": "State folder {0} is not trusted. Delete it as administrator and run again.",
-  "err.stateBaseUntrusted": "Folder {0} is not trusted to hold the machine state folder"
+  "err.stateBaseUntrusted": "Folder {0} is not trusted to hold the machine state folder",
+  "reason.protected-by-windows": "left alone: Windows does not let programs change this value",
+  "run.protectedByWindows": "Windows does not let programs change {0}, not even as administrator (access denied): nothing was changed. Change it by hand in the settings of Windows.",
+  "run.protectedByWindowsManual": "Windows does not let programs change {0}, not even as administrator (access denied): nothing was changed. Change it by hand: {1}.",
+  "undo.emptyKeyLeft": "the empty key {0} could not be removed ({1}); it holds nothing, so it changes nothing"
 }
