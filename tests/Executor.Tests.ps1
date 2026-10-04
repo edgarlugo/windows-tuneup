@@ -235,17 +235,39 @@ Describe 'Invoke-TuneupPlan when Set fails' {
         if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
     }
 
-    It 'notes a tweak whose Set failed without changing anything as needing no undo, and the undo finishes' {
+    # A Set can fail while work it started goes on (an uninstaller still running after the wait, a
+    # removal Windows finishes later): the tweak is never noted as needing no undo when Set fails.
+    It 'keeps a tweak whose Set failed undoable; the undo finds it unchanged and finishes' {
         Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw 'Attempted to perform an unauthorized operation.' } -ParameterFilter { $Tweak.id -eq 'test.one' }
         $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
         $results[0].status | Should -Be 'failed'
         $results[1].status | Should -Be 'applied'
-        @(Get-TuneupUndoneTweakId -Run $Run) -join ',' | Should -Be 'test.one'
+        @(Get-TuneupUndoneTweakId -Run $Run) | Should -BeNullOrEmpty
         Mock -ModuleName Tuneup Restore-RegistryTweakState { throw 'Attempted to perform an unauthorized operation.' } -ParameterFilter { $Tweak.id -eq 'test.one' }
         $undo = @(Invoke-TuneupUndo -Run $Run)
-        ($undo | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored'
+        ($undo | ForEach-Object { "$($_.id)=$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.two=restored:,test.one=restored:unchanged'
         Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Tweak.id -eq 'test.one' }
         Test-Path -LiteralPath (Join-Path $Run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'restores a tweak whose Set failed and whose change landed afterwards' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw 'timed out waiting for the uninstaller' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'One' -PropertyType DWord -Value 1 -Force | Out-Null
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        ($undo | ForEach-Object { "$($_.id)=$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.two=restored:,test.one=restored:'
+        (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).One | Should -BeNullOrEmpty
+    }
+
+    It 'undoes a run whose tweaks all failed without a change, reporting them unchanged' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw 'boom' }
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $failed = New-TuneupRun -StateRoot $root
+        Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $failed.Dir | Out-Null
+        (Resolve-TuneupRun -StateRoot $root -RunId 'last').Id | Should -Be $failed.Id
+        $undo = @(Invoke-TuneupUndo -Run $failed)
+        ($undo | ForEach-Object { "$($_.id)=$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.two=restored:unchanged,test.one=restored:unchanged'
+        Test-Path -LiteralPath (Join-Path $failed.Dir 'undone.json') | Should -BeTrue
     }
 
     It 'keeps a tweak whose Set failed after a change undoable' {
@@ -284,6 +306,27 @@ Describe 'Invoke-TuneupUndo of a tweak that is already as it was' {
         @($undo[0].manual).Count | Should -Be 0
         Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 0 -Exactly
         Test-Path -LiteralPath (Join-Path $Run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'asks for no restart or sign-out for a tweak it did not restore' {
+        $tweak = New-TestTweak -Id 'test.one' -RebootRequired $true -Set $One.set
+        $tweak | Add-Member -NotePropertyName signOutRequired -NotePropertyValue $true
+        Add-TuneupJournalEntry -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Tweak $tweak -State (Get-TuneupState -Tweak $tweak)
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        $undo[0].reason | Should -Be 'unchanged'
+        $undo[0].signOutRequired | Should -BeFalse
+        $undo[0].rebootRequired | Should -BeFalse
+    }
+
+    It 'reads the lists of apps, capabilities and features again before an undo' {
+        Add-TuneupJournalEntry -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Tweak $One -State (Get-TuneupState -Tweak $One)
+        Mock -ModuleName Tuneup Clear-TuneupAppxCache { }
+        Mock -ModuleName Tuneup Clear-TuneupCapabilityCache { }
+        Mock -ModuleName Tuneup Clear-TuneupFeatureCache { }
+        Invoke-TuneupUndo -Run $Run | Out-Null
+        Should -Invoke Clear-TuneupAppxCache -ModuleName Tuneup -Times 1
+        Should -Invoke Clear-TuneupCapabilityCache -ModuleName Tuneup -Times 1
+        Should -Invoke Clear-TuneupFeatureCache -ModuleName Tuneup -Times 1
     }
 
     It 'still restores a tweak whose state cannot be read now' {

@@ -2,6 +2,10 @@
 # engine/handlers/<Name>.ps1 with Get-<Name>TweakState, Test-<Name>TweakState,
 # Set-<Name>TweakDesired, Restore-<Name>TweakState and Test-<Name>TweakDefinition (the catalog
 # check of its set block). ReadNeedsAdmin: reading the state needs an elevated process.
+# The contract of Get (handlers and action scripts alike): its state holds everything that Restore
+# gives back. -Undo skips Restore when Get reads the same state that was journaled before Set (the
+# tweak is reported restored, reason unchanged), and the executor believes a refusal on the same
+# comparison: a change that Get does not see would never be undone.
 $script:TuneupHandlers = [ordered]@{
     registry   = [pscustomobject]@{ Name = 'Registry'; ReadNeedsAdmin = $false }
     service    = [pscustomobject]@{ Name = 'Service'; ReadNeedsAdmin = $false }
@@ -57,6 +61,7 @@ function Restore-TuneupState {
 # tweak is reported as skipped with that reason instead of failed. The contract: a refusal is only
 # valid before anything was changed. The executor reads the state again and compares it with the
 # journaled one; if it differs, the refusal is not believed (the tweak fails and stays undoable).
+# That comparison, like the one -Undo makes before Restore, only sees what Get reads (see above).
 function New-TuneupOutcome {
     param([switch]$Partial, [string]$Detail, [switch]$RebootRequired, [string]$Reason, [switch]$Refused)
     if ($Partial -and -not $Detail) { throw 'A partial outcome needs a detail' }

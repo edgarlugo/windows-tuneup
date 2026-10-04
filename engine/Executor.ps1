@@ -131,11 +131,9 @@ function Invoke-TuneupPlanItem {
         }
         New-TuneupResult -Item $Item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
     } catch {
-        $message = $_.Exception.Message
-        # A Set that failed before changing anything leaves nothing to undo: like a refusal, the tweak is
-        # noted as needing no undo (only when its state is read again and matches the journaled one), so
-        # -Undo neither fails on it nor puts back a stale value over a later change.
-        if (Test-TuneupStateUnchanged -Tweak $tweak -Before $state) { Add-TuneupRefusedMark -RunDir $RunDir -Tweak $tweak }
-        New-TuneupResult -Item $Item -Status 'failed' -ErrorText $message
+        # Never noted as needing no undo, even when the state reads as before right now: what a Set
+        # started can still land after it failed (an uninstaller that goes on after the wait, a removal
+        # that Windows finishes later). -Undo compares the state again when it runs.
+        New-TuneupResult -Item $Item -Status 'failed' -ErrorText $_.Exception.Message
     }
 }

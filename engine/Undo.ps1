@@ -11,6 +11,10 @@ function Invoke-TuneupUndo {
     }
     $journal = Get-TuneupRunJournal -Run $Run
     $alreadyUndone = @(Get-TuneupUndoneTweakId -Run $Run)
+    # The menu runs an undo in the same process as the apply: the lists read then are old now.
+    Clear-TuneupAppxCache
+    Clear-TuneupCapabilityCache
+    Clear-TuneupFeatureCache
     $entries = @($journal.Entries)
     # Entries of another user are reported as skipped: they stay pending for their owner.
     $foreign = @($journal.SkippedEntries)
@@ -27,7 +31,7 @@ function Invoke-TuneupUndo {
             error           = $errorText
             detail          = $(if ($outcome) { $outcome.detail } else { $null })
             rebootRequired  = $(if ($outcome) { [bool]$outcome.rebootRequired } else { $false })
-            signOutRequired = ($status -eq 'restored' -and $null -ne $signOut -and $signOut.Value -eq $true)
+            signOutRequired = ($status -eq 'restored' -and $reason -ne 'unchanged' -and $null -ne $signOut -and $signOut.Value -eq $true)
             manual          = [string[]]@(if ($status -eq 'failed') { Get-TuneupManualRestoreLine -Tweak $entry.tweak -State $entry.state })
         }
     }
@@ -47,8 +51,9 @@ function Invoke-TuneupUndo {
     [array]::Reverse($entries)
     [array]::Reverse($foreign)
     $results = @(foreach ($entry in $entries) {
-        # A tweak that is already as the journal saved it (its Set failed before changing anything, in a
-        # run that did not note it) has nothing to give back: its restore is not called, so it cannot fail.
+        # A tweak that is already as the journal saved it (its Set failed before changing anything) has
+        # nothing to give back: its restore is not called, so it cannot fail. This is why Get must read
+        # everything that Restore gives back (see Dispatch.ps1).
         if (Test-TuneupStateUnchanged -Tweak $entry.tweak -Before $entry.state) {
             & $newResult $entry 'restored' 'unchanged' $null $null
             continue
