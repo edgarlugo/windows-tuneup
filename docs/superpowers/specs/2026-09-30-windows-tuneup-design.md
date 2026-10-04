@@ -714,3 +714,102 @@ La versión 0.1.0, instalada y corrida elevada en una VM con Windows 11 Pro 26H2
 2. **Deshacer lo que no cambió.** `-Undo` compara el estado actual de cada entrada con el del diario antes de llamar a `Restore`; si es igual, el resultado es `restored` con el motivo `unchanged`, sin reinicio ni cierre de sesión. Así termina la corrida de un ajuste que falló sin cambiar nada (antes cada `-Undo` volvía a fallar en él). El ejecutor no anota un `Set` que falló como sin deshacer pendiente, aunque el estado se lea igual en ese momento: un desinstalador que sigue después de la espera de `onedrive` o una baja que Windows termina más tarde cambiarían el estado después, y `-Undo` tiene que poder restaurarlo. Una ejecución cuyos ajustes fallaron todos sin cambiar nada no es "ya deshecha": `last` la elige y `-Undo` informa cada ajuste `unchanged`. **Contrato de `Get`** (manejadores y acciones): su estado contiene todo lo que `Restore` devuelve; un cambio que `Get` no ve no se deshace.
 3. **appx.** En 26300 `Remove-AppxPackage -AllUsers` ya quita el aprovisionamiento y el `Remove-AppxProvisionedPackage` que sigue falla con "no se puede encontrar la ruta especificada". Después de un desaprovisionamiento fallido se vuelve a leer la lista: si no queda ningún paquete aprovisionado con ese nombre, cuenta como quitado; si queda alguno (otra versión incluida) o la lista no se puede leer, el ajuste es `partial` con el error original. El orden (quitar para todos y después desaprovisionar) no cambia: la documentación de Microsoft no fija uno y así el diario y el deshacer siguen iguales. `-Undo` vacía las cachés de `appx`, `capability` y `feature` al empezar (el menú deshace en el mismo proceso que aplicó).
 4. **Textos.** Los dos avisos de carpeta de estado de la máquina no confiable salen en el idioma de la corrida (`err.stateFolderUntrusted`, `err.stateBaseUntrusted`). `result.json` sigue en UTF-8 sin escapar, como dice el contrato; solo la salida estándar va en ASCII.
+
+## 15. Arranque y segundo plano (`-Startup`, 2026-10-04)
+
+Diseño aprobado por el usuario el 2026-10-04 y precisado al escribir el Plan 6 (`docs/superpowers/plans/2026-10-04-plan-6-arranque.md`). Donde contradice secciones anteriores, manda esta. Cumple la promesa pendiente de la sección 11.6 ("revisión de apps de inicio").
+
+### 15.1 Qué hace
+
+`-Startup` muestra lo que arranca con Windows o queda en segundo plano y, con `-Disable`, apaga lo que el usuario elige, de forma reversible. **Nunca desinstala ni borra nada**: una entrada apagada sigue en su lugar y `-Undo` la vuelve a encender.
+
+| Comando | Qué hace |
+|---|---|
+| `-Startup [-Json]` | Lista, solo lectura y sin administrador (documento `startup`) |
+| `-Startup -Disable '<ids>' [-WhatIf\|-Yes] [-Json]` | Apaga las entradas nombradas por su `id`, como una corrida de la herramienta (documentos `plan` y `apply` con `source` = `startup`) |
+
+`-Startup` se excluye con los demás comandos (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`, `-ReadResult`) y con las opciones de aplicar; `-Disable` exige `-Startup` y trae de vuelta `-Yes` y `-WhatIf` (como `-Reapply` con `-Status`). `-Startup -Yes` o `-Startup -WhatIf` sin `-Disable` es una combinación inválida. Necesita administrador solo si alguna entrada elegida es de máquina (`needsAdmin`); el plan lo dice en `requiresAdmin` y aplicar sin elevar se niega con `err.notAdmin`, como siempre.
+
+### 15.2 Fuentes que se leen (sin administrador)
+
+| `source` | Dónde | Alcance | Cómo se apaga |
+|---|---|---|---|
+| `run-user` | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` | usuario | `StartupApproved\Run` de HKCU |
+| `run-machine` | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run` | máquina | `StartupApproved\Run` de HKLM |
+| `run32-machine` | `HKLM\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Run` | máquina | `StartupApproved\Run32` de HKLM |
+| `runonce-user`, `runonce-machine`, `runonce32-machine` | las claves `RunOnce` equivalentes | según la clave | no se apaga: corre una vez y Windows la borra |
+| `policy-user`, `policy-machine` | `...\CurrentVersion\Policies\Explorer\Run` | según la clave | no se apaga: la fija una directiva |
+| `folder-user` | carpeta Inicio del usuario (`GetFolderPath('Startup')`) | usuario | `StartupApproved\StartupFolder` de HKCU |
+| `folder-machine` | carpeta Inicio común (`GetFolderPath('CommonStartup')`) | máquina | `StartupApproved\StartupFolder` de HKLM |
+| `store-app` | `HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\<familia>\<tarea>`, valor `State`, solo si el manifiesto del paquete declara esa tarea `windows.startupTask` | usuario | `State` = 1 |
+| `task` | tareas programadas fuera de `\Microsoft\` con un desencadenador de inicio de sesión o de arranque | máquina | tarea deshabilitada |
+| `service` | servicios `Automatic` (o con inicio retrasado) cuyo programa no firma Windows | máquina | `Manual` (nunca `Disabled`) |
+| `driver` | controladores `Auto` cuyo archivo no firma Windows | máquina | no se apaga |
+
+Los servicios, controladores y tareas que son de Windows (firmados por el editor de Windows o bajo `\Microsoft\`) no se listan: no son de terceros. Las entradas de Windows de las demás fuentes (por ejemplo, `SecurityHealth` en `Run`) sí se listan, como protegidas. `HKCU\...\WOW6432Node\...\Run` no existe en un Windows de 64 bits (HKCU no se redirige) y no se lee. Sin elevar, Windows oculta algunas tareas programadas: el documento lo dice con un aviso y `isAdmin`.
+
+Por entrada: nombre, editor (el firmante Authenticode del programa cuando la firma es válida; el editor del paquete en una app de la Store), si corre ahora y su memoria (conjunto de trabajo, MB) y su tiempo de CPU acumulado (segundos) cuando se pueden leer. El tiempo de CPU es el acumulado del proceso, no un porcentaje instantáneo: medir un porcentaje obligaría a esperar entre dos lecturas. Un programa que se aloja en otro (`rundll32.exe`, `cmd.exe`, `powershell.exe`...) no tiene editor ni uso propio: su firma sería la de Windows.
+
+### 15.3 Formato de `StartupApproved` y de las tareas de la Store
+
+- **`StartupApproved`** (`...\Explorer\StartupApproved\Run|Run32|StartupFolder`, en HKCU o HKLM según la fuente): un valor binario de 12 bytes con el nombre de la entrada (el nombre del valor de `Run`, o el nombre de archivo en la carpeta Inicio). Primer byte par = encendida (`02`, o `06` en algunas entradas de Windows), impar = apagada (`03`); los bytes 4 a 11 son un FILETIME (UTC) de cuándo se apagó, o ceros. Sin valor = encendida. Microsoft no lo documenta; es el comportamiento conocido del Administrador de tareas (por ejemplo, el tutorial de Eleven Forum "Enable or Disable Startup Apps in Windows 11") y se comprobó en este equipo (Windows 11 Pro 26H2, 26300): `02 00…00` en las encendidas, `03` + FILETIME en las que apagó el Administrador de tareas y `06 00…00` en `SecurityHealth`. Hay valores sin entrada en `Run` (apps desinstaladas): la lista sale de `Run` y de la carpeta, nunca de `StartupApproved`.
+- **Apagar** escribe `03 00 00 00` + el FILETIME de ahora, como el Administrador de tareas. **Nunca** se borra la entrada de `Run` ni el acceso directo.
+- **Tareas de la Store** (`StartupTask`): el valor `State` sigue el enum documentado `Windows.ApplicationModel.StartupTaskState` (0 `Disabled`, 1 `DisabledByUser`, 2 `Enabled`, 3 `DisabledByPolicy`, 4 `EnabledByPolicy`). Apagar escribe 1, lo mismo que Configuración > Aplicaciones > Inicio: con `DisabledByUser` la app no puede volver a encenderse sola. El Administrador de tareas también escribe `LastDisabledTime`; la herramienta escribe solo `State` (un valor por ajuste). El lugar en el registro no está documentado; se comprobó en este equipo (Teams con `State` = 1 tras apagarlo) y la VM lo verifica (15.8). Una tarea que nunca se inicializó no tiene clave y no se lista (limitación).
+
+### 15.4 Protegidas (se muestran, no se apagan)
+
+En este orden; la primera regla que se cumple da el motivo (`protected`):
+
+1. `policy`: la fuente es `policy-*`, o el `State` de la Store es 3 o 4.
+2. `driver`: la fuente es `driver` (tipo de servicio controlador de núcleo o de sistema de archivos).
+3. `windows-component`: el firmante válido del programa es uno de `windowsSigners` (`Microsoft Windows`, `Microsoft Windows Publisher`), el servicio está en `windowsServices` (los servicios protegidos de la lista negra, 11.8, más los de Defender), o el paquete de la Store es de Windows (`SignatureKind` = `System`).
+4. `security`: el programa está en la carpeta de un producto que el Centro de seguridad de Windows registra (`root/SecurityCenter2`, `AntiVirusProduct` y `FirewallProduct`, rutas `pathToSignedProductExe` y `pathToSignedReportingExe`), o una regla `security` del archivo de reglas lo nombra.
+5. `vpn`, `device`, `updates`: una regla de esa categoría lo nombra. `updates` son los actualizadores de navegadores y de Office (Edge, Chrome, Firefox, Brave, Click-to-Run): apagarlos deja sin parches de seguridad, el mismo principio que Windows Update en la lista negra.
+
+Además no se pueden apagar, sin ser protegidas: `runonce-*` (motivo `run-once`) y una tarea cuyo nombre o carpeta tiene `*`, `?`, `[` o `]` (`unsupported-name`; el manejador `task` busca por nombre exacto con comodines de PowerShell). `canDisable` = encendida, no protegida y sin esos dos motivos.
+
+Las reglas viven en `catalog/startup/rules.json` (un archivo de datos revisable, que entra en el zip; `catalog/*.json` no lo carga como ajustes porque está en una subcarpeta). Cada regla es `{ category, pattern }` (más `wingetId` en las recomendaciones): una expresión regular, sin distinguir mayúsculas, que se prueba contra el nombre de la entrada, su editor, el nombre de archivo de su programa y su clave (valor, archivo, tarea o servicio). Las reglas salen siempre de la copia de la herramienta: `-CatalogPath` no las cambia.
+
+### 15.5 Recomendadas
+
+Una entrada que se puede apagar y que nombra una regla `recommend` lleva `recommended: true` y `recommendedReason` = `updater`, `game-launcher`, `sync-client` o `chat-helper`. Es solo una marca: **nada se apaga por estar recomendado**; el usuario elige cada entrada. Si la regla trae `wingetId`, la entrada lleva `uninstall` = `winget uninstall --id <id> --exact`: se muestra, nunca se ejecuta. Sin `wingetId` (apps de la Store, OneDrive, Teams), `uninstall` es nulo. El perfil `gaming` declara `offersStartup: true` (campo opcional nuevo de un perfil, booleano): al aplicarlo o planearlo sin `-Json`, la herramienta termina con una línea que ofrece `-Startup`; `-List -Json` lo informa en `profiles[].offersStartup`.
+
+### 15.6 Ids
+
+`startup.<source>.<slug>-<hash>`: `slug` es la clave en minúsculas con todo lo que no sea `a-z0-9` cambiado por `-` (máximo 32 caracteres, `entry` si queda vacía) y `hash` los primeros 8 dígitos hexadecimales del SHA256 de `<source>|<clave en minúsculas>`. Es estable entre corridas, con y sin elevar, y cumple el patrón de ids del catálogo (`^[a-z]+(\.[a-z0-9-]+)+$`), así que la skill y `-Undo -Tweak` lo aceptan sin cambios. Patrón propio: `^startup\.[a-z0-9-]+\.[a-z0-9-]+$`.
+
+### 15.7 Cómo se apaga: ajustes sintéticos
+
+Cada entrada elegida se convierte en un **ajuste sintético** de un tipo que ya existe, con su `id`, título (el nombre de la entrada), `why` en el idioma de la corrida, riesgo `low`, `ask` falso y un campo extra `startup` (`source`, `key`):
+
+| Fuente | Tipo | `set` |
+|---|---|---|
+| `run-*`, `run32-*`, `folder-*` | `registry` | `{ path: <StartupApproved>, name: <entrada>, kind: Binary, value: 03 00 00 00 + FILETIME }` |
+| `store-app` | `registry` | `{ path: <clave de la tarea>, name: State, kind: DWord, value: 1 }` |
+| `task` | `task` | `{ path, name, state: Disabled }` |
+| `service` | `service` | `{ name, startType: Manual, stop: false }` |
+
+**Por qué así y no un manejador nuevo.** El diario guarda el ajuste completo con su estado anterior, y `-Undo` y `-Status` trabajan con lo que está en el diario, no con el catálogo: un ajuste sintético se deshace, se verifica y se informa con los manejadores probados, sin tocar `Undo.ps1`, `Runs.ps1`, el diario ni la regla de la carpeta de usuario (un ajuste `registry` de `HKCU:` con `scope: user` ya es lo único que acepta). La reversa es exacta: `registry` devuelve el valor anterior o lo quita (y quita las claves vacías que creó, por ejemplo `StartupApproved\Run` cuando no existía), `task` vuelve a habilitar y `service` devuelve `Automatic` o `AutomaticDelayed`. Las líneas de deshacer a mano (12.7) ya cubren `Binary`. El plan, la confirmación, el punto de restauración, los avisos, Ctrl+C, `result.json` y `transcript.log` son los de aplicar perfiles (`Invoke-TuneupPlannedApply`), con `source` = `startup`.
+
+Consecuencias, decididas:
+
+- **Ya apagada.** El ajuste de una entrada ya apagada pide el valor que tiene (los mismos bytes, o el mismo `State`): el plan la deja fuera con `already-applied` y aplicar dos veces no cambia nada.
+- **Deriva.** `-Status` compara los bytes exactos: si el usuario la enciende, es `drift`; si la vuelve a apagar desde el Administrador de tareas, la fecha cambia y también sale `drift` (falso positivo inofensivo). `-Status -Reapply` no vuelve a aplicar entradas de arranque (no están en el catálogo): las deja fuera con el aviso `reapply.startupEntry`, que dice que se miren con `-Startup` y se apaguen con `-Startup -Disable`; nombradas en `-Include` tampoco son un `error`.
+- **Servicio en Manual.** Deja de listarse (solo se listan los `Automatic`): un segundo `-Disable` con ese id es "no está en la lista" (`err.startupUnknown`). Deshacerlo sigue funcionando por el diario.
+- **No se detiene nada ahora.** Ni el servicio (`stop: false`) ni el programa abierto: el cambio rige desde el próximo inicio de Windows o de sesión, y el reporte para personas lo dice (`startup.nextStart`). Por eso los ajustes no piden reinicio ni cierre de sesión.
+
+### 15.8 Barreras
+
+- Un id que no está en la lista actual es `error` (`err.startupUnknown`, código 1) y no se hace nada; uno protegido o que no se puede apagar también (`err.startupProtected`, con un detalle por entrada). Nada se apaga a medias por un id malo.
+- Elevado con la contraseña de otro administrador (`IsSessionUser` falso), el HKCU visible no es el del escritorio: un id de alcance usuario es `error` con `reason` = `session-user` antes de leer nada. La skill apaga las entradas de usuario sin elevar y solo las de máquina con UAC.
+- En un Windows no soportado, `-Disable` se niega como aplicar (salvo `-Force`); listar no se niega.
+- La lista negra sigue vigente: los servicios que protege nunca se pasan a Manual (están en `windowsServices`), y una directiva nunca se toca.
+- `command` y `path` de las entradas pueden llevar la carpeta del perfil: en la carpeta de máquina, `out\<id>.json` las oculta como los demás textos libres (`command` se agrega a esa lista).
+
+### 15.9 Skill
+
+El modo asistido suma un paso después de informar lo aplicado: "¿Revisamos lo que arranca con Windows?". Con un sí, `-Startup -Json` sin elevar, una tabla con lo recomendado marcado (y su motivo), lo protegido aparte y la memoria de lo que corre; el usuario elige cada entrada (nunca por estar recomendada); plan con `-Startup -Disable '<ids>' -WhatIf -Json`; aplicar las de usuario sin elevar y las de máquina con un UAC. El comando `uninstall` se muestra y nunca se ejecuta. El modo directo ofrece el mismo paso cuando un perfil pedido tiene `offersStartup`.
+
+### 15.10 Pruebas
+
+Pester con cada detector simulado por fuente (claves de registro de prueba bajo `HKCU:\Software\windows-tuneup-test`, carpetas en `$TestDrive`, `Get-ScheduledTask`, `Get-CimInstance`, `Get-AppxPackage`, `Get-AuthenticodeSignature` y `Get-Process` simulados), las reglas con casos de cada motivo, el ida y vuelta completo (`-Startup -Disable -Yes`, `-Status`, deriva, `-Status -Reapply`, `-Undo`) sobre una clave de prueba, `JsonContract.Tests.ps1` con el documento `startup` y `Plugin.Tests.ps1` con los pasos nuevos de la skill. Manual en la VM (`docs/{es,en}/vm-checklist.md`): apagar una entrada de cada fuente, comprobar en el Administrador de tareas y en Configuración > Aplicaciones > Inicio, reiniciar, `-Status` y `-Undo`.
