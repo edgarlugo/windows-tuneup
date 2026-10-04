@@ -1,0 +1,128 @@
+# -Startup (design, sections 15.4 and 15.5): the rules that say which startup entries are protected and
+# which are recommended. They are data, in catalog\startup\rules.json of the copy of the tool itself
+# (-CatalogPath never changes them, so nobody can plant another list of what is protected), so a person
+# can review them; this file loads them, checks them and applies them to one entry.
+
+$script:StartupRulesPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'catalog\startup\rules.json'
+$script:StartupRuleCategories = [ordered]@{
+    protect   = @('security', 'vpn', 'device', 'updates')
+    recommend = @('updater', 'game-launcher', 'sync-client', 'chat-helper', 'companion-app')
+}
+# Every value of protected, in the order the checks give them.
+$script:StartupProtections = @('policy', 'driver', 'windows-component') + $script:StartupRuleCategories.protect
+$script:StartupWingetIdPattern = '^[A-Za-z0-9][A-Za-z0-9.+_-]*$'
+
+# The problems of a set of rules; nothing when it is valid.
+function Test-TuneupStartupRuleSet {
+    param([Parameter(Mandatory)]$Rules)
+    if ($Rules.schemaVersion -ne 1) { 'schemaVersion must be 1' }
+    foreach ($field in 'windowsSigners', 'hostPrograms', 'windowsServices') {
+        $values = @($Rules.$field | Where-Object { $null -ne $_ })
+        if (-not $values.Count -or @($values | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count) {
+            "$field must be a list of names"
+        }
+    }
+    foreach ($list in $script:StartupRuleCategories.Keys) {
+        $categories = $script:StartupRuleCategories[$list]
+        $items = @($Rules.$list | Where-Object { $null -ne $_ })
+        if (-not $items.Count) { "$list has no rules" }
+        foreach ($rule in $items) {
+            $pattern = [string]$rule.pattern
+            if ($categories -cnotcontains [string]$rule.category) { "$list rule '$pattern' has an unknown category '$($rule.category)'" }
+            if ([string]::IsNullOrWhiteSpace($pattern)) {
+                "$list has a rule without a pattern"
+                continue
+            }
+            try {
+                [void][regex]::new($pattern)
+            } catch {
+                "$list rule '$pattern' is not a valid pattern: $($_.Exception.Message)"
+            }
+            # Why the rule is there, for whoever reviews the list (JSON has no comments).
+            if ([string]::IsNullOrWhiteSpace([string]$rule.why)) { "$list rule '$pattern' has no why" }
+            $workApp = $rule.PSObject.Properties['workApp']
+            if ($null -ne $workApp) {
+                if ($list -ne 'recommend') { "$list rule '$pattern' cannot have workApp" }
+                elseif ($workApp.Value -isnot [bool]) { "$list rule '$pattern' workApp must be true or false" }
+            }
+            $winget = $rule.PSObject.Properties['wingetId']
+            if ($null -eq $winget) { continue }
+            if ($list -ne 'recommend') { "$list rule '$pattern' cannot have a wingetId" }
+            elseif ([string]$winget.Value -cnotmatch $script:StartupWingetIdPattern) { "$list rule '$pattern' has an invalid wingetId '$($winget.Value)'" }
+        }
+    }
+}
+
+# The rules of the tool; rules with problems stop the command (a list of what is protected that cannot be
+# read is never taken as "nothing is protected").
+function Import-TuneupStartupRuleSet {
+    param([string]$Path = $script:StartupRulesPath)
+    $rules = [System.IO.File]::ReadAllText($Path, $script:Utf8NoBom) | ConvertFrom-Json
+    $problems = @(Test-TuneupStartupRuleSet -Rules $rules)
+    if ($problems.Count) { throw "The startup rules $Path are not valid: $($problems -join '; ')" }
+    $rules
+}
+
+# The texts a pattern is tried on: the name of the entry, its publisher, the file name of its program and
+# its key (a value, file, task or service name).
+function Get-TuneupStartupMatchText {
+    param([Parameter(Mandatory)]$Entry)
+    $file = $(if ($Entry.path) { [System.IO.Path]::GetFileName([string]$Entry.path) } else { $null })
+    @([string]$Entry.name, [string]$Entry.publisher, [string]$file, [string]$Entry.key) | Where-Object { $_ }
+}
+
+# The first rule of the list whose pattern matches one of those texts, without case.
+function Find-TuneupStartupRule {
+    param([Parameter(Mandatory)]$Entry, [AllowEmptyCollection()][object[]]$Rules = @())
+    $texts = @(Get-TuneupStartupMatchText -Entry $Entry)
+    foreach ($rule in @($Rules | Where-Object { $null -ne $_ })) {
+        foreach ($text in $texts) {
+            if ([regex]::IsMatch($text, [string]$rule.pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) { return $rule }
+        }
+    }
+}
+
+# Why an entry must stay as it is, or nothing; the first check that holds gives the reason. -SecurityFolder:
+# the folders of the products that Windows Security lists (antivirus, firewall).
+function Get-TuneupStartupProtection {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Rules, [AllowEmptyCollection()][string[]]$SecurityFolder = @())
+    if ($Entry.policy) { return 'policy' }
+    if ($Entry.source -eq 'driver') { return 'driver' }
+    if ($Entry.publisher -and @($Rules.windowsSigners) -contains [string]$Entry.publisher) { return 'windows-component' }
+    if (@('service', 'driver') -contains $Entry.source -and @($Rules.windowsServices) -contains [string]$Entry.key) { return 'windows-component' }
+    $windowsPart = $(if ($null -ne $Entry.target) { $Entry.target.PSObject.Properties['WindowsPart'] } else { $null })
+    if ($null -ne $windowsPart -and $windowsPart.Value) { return 'windows-component' }
+    if ($Entry.path) {
+        $folder = (Split-Path -Path ([string]$Entry.path) -Parent).TrimEnd('\') + '\'
+        foreach ($product in @($SecurityFolder | Where-Object { $_ })) {
+            if ($folder.StartsWith(([string]$product).TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)) { return 'security' }
+        }
+    }
+    $rule = Find-TuneupStartupRule -Entry $Entry -Rules @($Rules.protect)
+    if ($null -ne $rule) { return [string]$rule.category }
+}
+
+# Why an entry cannot be turned off, or nothing: its protection, a run-once entry (Windows deletes it once
+# it ran; turning it off would mean deleting it), or a task whose name or folder holds a wildcard character
+# (the task handler looks tasks up with PowerShell wildcards and could not be sure it found that one).
+function Get-TuneupStartupFixedReason {
+    param([Parameter(Mandatory)]$Entry)
+    if ($Entry.protected) { return [string]$Entry.protected }
+    if ([string]$Entry.source -like 'runonce*') { return 'run-once' }
+    if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]]') { return 'unsupported-name' }
+}
+
+# The recommend rule that names an entry, or nothing. Only a mark: nothing is turned off for it.
+function Get-TuneupStartupRecommendation {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Rules)
+    Find-TuneupStartupRule -Entry $Entry -Rules @($Rules.recommend)
+}
+
+# The command that would uninstall what a rule recommends turning off, to show and never to run; nothing
+# when the rule has no winget id.
+function Get-TuneupStartupUninstallCommand {
+    param([AllowNull()]$Rule)
+    if ($null -eq $Rule) { return }
+    $winget = $Rule.PSObject.Properties['wingetId']
+    if ($null -ne $winget -and [string]$winget.Value -cmatch $script:StartupWingetIdPattern) { "winget uninstall --id $($winget.Value) --exact" }
+}
