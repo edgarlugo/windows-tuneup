@@ -222,6 +222,8 @@
             $name = "windows-tuneup-$Version.zip"
             $fromFolder = Test-Path -LiteralPath $Source -PathType Container
             if (-not $fromFolder -and $Source -notmatch '^https://') { throw "This installer only downloads over HTTPS: -Source must start with https:// (or be a folder that holds $name)." }
+            # .NET resolves a relative path against the folder of the process, which Set-Location does not change.
+            if ($fromFolder) { $Source = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Source) }
 
             if ($admin) {
                 if (([uri]$Destination).IsUnc) { throw "As administrator the installer does not install on a network folder ($Destination): its access list is not decided by this computer. Nothing was installed." }

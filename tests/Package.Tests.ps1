@@ -347,6 +347,19 @@ Invoke-Expression ([IO.File]::ReadAllText('$installer')) *> `$null
         Test-Path -LiteralPath $destination | Should -BeFalse
     }
 
+    # A console keeps the folder it started in as the folder of its process: Set-Location does not change
+    # it, and .NET resolves relative paths against it. The installer resolves them against the location.
+    It 'takes a relative -Source and -Destination from the location of PowerShell, not from the process folder' -Skip:$Elevated {
+        $elsewhere = Join-Path $TestDrive 'process-folder'
+        New-Item -ItemType Directory -Path $elsewhere | Out-Null
+        $run = Invoke-InstallerInSession '&' $Built.Installer '-Source .\dist -Destination .\relative-out' -ProcessFolder $elsewhere
+        $run.ExitCode | Should -Be 0 -Because $run.Output
+        $run.Output | Should -Match 'errors=0' -Because $run.Output
+        $run.Output | Should -Match ([regex]::Escape("process=$elsewhere")) -Because 'the process folder must differ from the location'
+        Test-Path -LiteralPath (Join-Path $TestDrive 'relative-out\tuneup.ps1') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath $elsewhere -Force).Count | Should -Be 0
+    }
+
     It 'fails on a parameter it does not have' {
         $run = Invoke-Installer $Built.Installer @('-Source', $Dist, '-Destinaton', (Join-Path $TestDrive 'typo'))
         $run.ExitCode | Should -Be 1
