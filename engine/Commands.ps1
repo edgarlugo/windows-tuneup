@@ -686,11 +686,14 @@ function Invoke-TuneupCli {
         [int]$IdleSeconds = 0,
         [switch]$List,
         [switch]$Suggest,
+        [switch]$Startup,
+        [string[]]$Disable = @(),
         [AllowEmptyString()][string]$ReadResult
     )
     $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
     $Include = @(Get-TuneupCleanList ($Include -split ','))
     $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
+    $Disable = @(Get-TuneupCleanList ($Disable -split ','))
 
     # A parameter counts as given when it was bound and carries a value (a switch only when it is on).
     $present = @()
@@ -710,6 +713,8 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
     if ($PSBoundParameters.ContainsKey('List') -and $List) { $present += 'List' }
     if ($PSBoundParameters.ContainsKey('Suggest') -and $Suggest) { $present += 'Suggest' }
+    if ($PSBoundParameters.ContainsKey('Startup') -and $Startup) { $present += 'Startup' }
+    if ($PSBoundParameters.ContainsKey('Disable') -and $Disable.Count) { $present += 'Disable' }
     if ($PSBoundParameters.ContainsKey('ReadResult')) { $present += 'ReadResult' }
     $conflict = Get-TuneupArgumentConflict -Present $present
     if ($conflict) {
@@ -766,6 +771,7 @@ function Invoke-TuneupCli {
         return
     }
     if ($List) { Invoke-TuneupListCommand -Context $Context; return }
+    if ($Startup) { Invoke-TuneupStartupCommand -Context $Context -Disable $Disable -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes -Include $Include; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

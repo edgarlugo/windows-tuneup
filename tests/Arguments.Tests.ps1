@@ -18,6 +18,9 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'the list'; Present = @('List') }
         @{ Name = 'the suggestions'; Present = @('Suggest') }
         @{ Name = 'reading a result'; Present = @('ReadResult') }
+        @{ Name = 'what starts with Windows'; Present = @('Startup') }
+        @{ Name = 'turning startup entries off'; Present = @('Startup', 'Disable', 'Yes') }
+        @{ Name = 'the plan of turning them off'; Present = @('Startup', 'Disable', 'WhatIf') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -51,6 +54,17 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('ReadResult', 'Profile'); Expected = '-ReadResult -Profile' }
         @{ Present = @('ReadResult', 'Yes'); Expected = '-ReadResult -Yes' }
         @{ Present = @('ReadResult', 'WhatIf'); Expected = '-ReadResult -WhatIf' }
+        @{ Present = @('Disable'); Expected = '-Disable (-Startup)' }
+        @{ Present = @('Status', 'Disable'); Expected = '-Disable (-Startup)' }
+        @{ Present = @('Startup', 'Yes'); Expected = '-Startup -Yes' }
+        @{ Present = @('Startup', 'WhatIf'); Expected = '-Startup -WhatIf' }
+        @{ Present = @('Startup', 'List'); Expected = '-List -Startup' }
+        @{ Present = @('Startup', 'Suggest'); Expected = '-Suggest -Startup' }
+        @{ Present = @('Startup', 'ReadResult'); Expected = '-Startup -ReadResult' }
+        @{ Present = @('Startup', 'Profile'); Expected = '-Startup -Profile' }
+        @{ Present = @('Startup', 'Disable', 'Include', 'Yes'); Expected = '-Startup -Include' }
+        @{ Present = @('Startup', 'Disable', 'Exclude'); Expected = '-Startup -Exclude' }
+        @{ Present = @('Startup', 'Reapply'); Expected = '-Reapply (-Status)' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected

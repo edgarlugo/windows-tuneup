@@ -10,6 +10,10 @@
 .EXAMPLE
     .\tuneup.ps1 -Suggest
 .EXAMPLE
+    .\tuneup.ps1 -Startup
+.EXAMPLE
+    .\tuneup.ps1 -Startup -Disable 'startup.run-user.steam-eb4bc901' -WhatIf
+.EXAMPLE
     .\tuneup.ps1 -List -Json -ResultId 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12
 .EXAMPLE
     .\tuneup.ps1 -ReadResult 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12 -Json
@@ -18,6 +22,13 @@
 .PARAMETER Suggest
     Shows what this machine has (development tools, games, a battery, an organization, modest
     hardware) and the profiles that fit it. Read only.
+.PARAMETER Startup
+    Shows what starts with Windows or runs in the background (Run keys, Startup folders, Store apps,
+    scheduled tasks and services of other publishers), with what is protected and what is recommended to
+    turn off. Read only, no administrator needed.
+.PARAMETER Disable
+    With -Startup only: turns off the entries named by their id, as a run that -Undo restores. Nothing is
+    uninstalled or deleted. Takes -WhatIf and -Yes; needs administrator only for entries of the machine.
 .PARAMETER ResultId
     With -Json only: also writes the JSON document to out\<id>.json in the state folder (the machine
     one when elevated, which only administrators can change), so a program that started the tool
@@ -63,6 +74,8 @@ param(
     [int]$IdleSeconds = 0,
     [switch]$List,
     [switch]$Suggest,
+    [switch]$Startup,
+    [string[]]$Disable = @(),
     [string]$ResultId,
     [string]$ReadResult,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$_Rest = @()
