@@ -77,6 +77,23 @@ Describe 'docs/json-contract.md' {
             Problems = [string[]]@()
         }
         $Documents.list = Write-TuneupListReport -Document (Get-TuneupListDocument -Definition $listDefinition -Environment (New-TestEnvironment)) -Json | ConvertFrom-Json
+        # Startup entries with every field filled, so every field of the document is checked.
+        $startupEntry = New-TuneupStartupEntry -Source 'run-user' -Key 'Steam' -Name 'Steam' -Command '"C:\Games\Steam\steam.exe"' -Path 'C:\Games\Steam\steam.exe'
+        $startupEntry.publisher = 'Valve Corp.'
+        $startupEntry.running = $true
+        $startupEntry.memoryMB = 220
+        $startupEntry.cpuSeconds = 10
+        $startupEntry.canDisable = $true
+        $startupEntry.recommended = $true
+        $startupEntry.recommendedReason = 'game-launcher'
+        $startupEntry.uninstall = 'winget uninstall --id Valve.Steam --exact'
+        $workEntry = New-TuneupStartupEntry -Source 'run-user' -Key 'OneDrive' -Name 'OneDrive'
+        $workEntry.canDisable = $true
+        $workEntry.notRecommendedReason = 'work-app'
+        $protectedEntry = New-TuneupStartupEntry -Source 'service' -Key 'PanGPS' -Name 'PanGPS'
+        $protectedEntry.protected = 'vpn'
+        $startupDocument = Get-TuneupStartupDocument -Entry @($startupEntry, $workEntry, $protectedEntry) -IsAdmin $false -WorkPc $true
+        $Documents.startup = Write-TuneupStartupReport -Document $startupDocument -Warnings @('w') -Json | ConvertFrom-Json
         # Every signal found, so every field of the document has a value.
         Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { 'Steam', 'Git' }
         Mock -ModuleName Tuneup Get-TuneupUserAppxName { 'Microsoft.GamingServices' }
@@ -120,6 +137,27 @@ Describe 'docs/json-contract.md' {
         $paths.suggest | Should -Contain 'signals[].evidence'
         $paths.suggest | Should -Contain 'suggestions[].signals'
         $paths.suggest | Should -Contain 'questions[].text'
+        $paths.startup | Should -Contain 'entries[].recommendedReason'
+        $paths.startup | Should -Contain 'entries[].notRecommendedReason'
+        $paths.startup | Should -Contain 'summary.protected'
+        $paths.startup | Should -Contain 'workPc'
+        $paths.startup | Should -Contain 'isAdmin'
+    }
+
+    It 'names the values of the startup document and the errors of -Startup' {
+        $section = Get-ContractSection 'startup'
+        foreach ($value in 'run-user', 'run32-machine', 'runonce-user', 'policy-machine', 'folder-user', 'store-app', 'task', 'service', 'driver',
+            'policy', 'windows-component', 'unverified', 'security', 'vpn', 'device', 'updates',
+            'updater', 'game-launcher', 'sync-client', 'chat-helper', 'companion-app', 'work-app',
+            'run-once', 'unsupported-name', 'unreadable', 'ambiguous', 'session-user', 'needs-admin', 'not-present',
+            'err.startupUnknown', 'err.startupFixed', 'err.startupNeedsAdmin', 'err.startupSessionUser', 'err.startupWow64') {
+            $section.Contains("``$value``") | Should -BeTrue -Because $value
+        }
+        $errorSection = Get-ContractSection 'error'
+        foreach ($reason in 'session-user', 'needs-admin') { $errorSection.Contains("``$reason``") | Should -BeTrue -Because $reason }
+        foreach ($name in 'plan', 'apply') { (Get-ContractSection $name).Contains('`startup`') | Should -BeTrue -Because $name }
+        foreach ($name in 'status', 'undo') { (Get-ContractSection $name).Contains('`not-present`') | Should -BeTrue -Because $name }
+        foreach ($term in '`-Startup -Json`', '`-Startup -Disable', '`title`, `name`, `key` and `command`') { $Contract.Contains($term) | Should -BeTrue -Because $term }
     }
 
     It 'catches a field that the page does not name' {
@@ -136,6 +174,7 @@ Describe 'docs/json-contract.md' {
         @{ Command = 'health' }
         @{ Command = 'list' }
         @{ Command = 'suggest' }
+        @{ Command = 'startup' }
         @{ Command = 'error' }
     ) {
         param($Command)
