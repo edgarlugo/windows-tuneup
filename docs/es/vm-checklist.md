@@ -12,7 +12,7 @@ Windows Sandbox (`tests/sandbox/Start-E2E.ps1`) prueba cada perfil de punta a pu
 
 ## Instalar la versión candidata
 
-Copia a una carpeta de la máquina virtual el zip, `install.ps1` y `SHA256SUMS` del borrador de la release (o genéralos con `build/package.ps1 -OutputPath <carpeta>`). En PowerShell como administrador, en esa carpeta:
+Copia a una carpeta de la máquina virtual el zip, `install.ps1` y `SHA256SUMS` del borrador de la release (o genéralos en la carpeta del repositorio con `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\package.ps1 -OutputPath <carpeta>`). En PowerShell como administrador, en esa carpeta:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <carpeta> -Version <versión> -Sha256 <hash del zip>

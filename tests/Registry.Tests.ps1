@@ -1,6 +1,7 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     function New-RegTweak([string]$Path, [string]$Name, $Kind, $Value) {
         New-TestTweak -Set ([pscustomobject]@{ path = $Path; name = $Name; kind = $Kind; value = $Value })
@@ -111,12 +112,92 @@ Describe 'Registry handler' {
         (Get-ItemProperty -LiteralPath $Key).A | Should -Be 1
     }
 
-    It 'fails when a value cannot be removed for a null desired value' {
+    It 'refuses, changing nothing, a value that cannot be removed for a null desired value' {
         New-Item -Path $Key -Force | Out-Null
         New-ItemProperty -LiteralPath $Key -Name 'A' -PropertyType DWord -Value 7 | Out-Null
         Set-TestSetValueDeny
-        { Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null) } | Should -Throw
+        $outcome = Get-TuneupOutcome -Output @(Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' $null $null))
+        $outcome.refused | Should -BeTrue
+        $outcome.reason | Should -Be 'protected-by-windows'
         (Get-ItemProperty -LiteralPath $Key).A | Should -Be 7
+    }
+
+    # Windows keeps some values from scripts even for an administrator (AllowNewsAndInterests on build
+    # 26300): writing them is access denied while other values of the same key can be written.
+    It 'refuses a value that Windows does not let it write, changing nothing' {
+        New-Item -Path $Key -Force | Out-Null
+        Set-TestSetValueDeny
+        $tweak = New-RegTweak $Key 'A' 'DWord' 1
+        $before = Get-RegistryTweakState -Tweak $tweak | ConvertTo-Json -Compress
+        $outcome = Get-TuneupOutcome -Output @(Set-RegistryTweakDesired -Tweak $tweak)
+        $outcome.refused | Should -BeTrue
+        $outcome.reason | Should -Be 'protected-by-windows'
+        $outcome.detail | Should -BeLike "*$Key\A*"
+        Get-RegistryTweakState -Tweak $tweak | ConvertTo-Json -Compress | Should -Be $before
+    }
+
+    It 'removes the keys it created for a value it could not write, and names where to change it by hand' {
+        Mock -ModuleName Tuneup New-ItemProperty { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'Attempted to perform an unauthorized operation.') }
+        $tweak = New-RegTweak "$Key\Sub\Deep" 'A' 'DWord' 1
+        $tweak | Add-Member -NotePropertyName manualSetting -NotePropertyValue ([pscustomobject]@{ es = 'Configuracion > Widgets'; en = 'Settings > Widgets' })
+        $before = Get-RegistryTweakState -Tweak $tweak | ConvertTo-Json -Compress
+        $outcome = Get-TuneupOutcome -Output @(Set-RegistryTweakDesired -Tweak $tweak)
+        $outcome.refused | Should -BeTrue
+        $outcome.detail | Should -BeLike '*Settings > Widgets*'
+        Test-Path -LiteralPath $Key | Should -BeFalse
+        Get-RegistryTweakState -Tweak $tweak | ConvertTo-Json -Compress | Should -Be $before
+    }
+
+    It 'still fails on access denied to a machine value without elevation' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup New-Item { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'denied') }
+        $tweak = New-TestTweak -Scope 'machine' -Set ([pscustomobject]@{ path = 'HKLM:\SOFTWARE\windows-tuneup-test-missing'; name = 'A'; kind = 'DWord'; value = 1 })
+        { Set-RegistryTweakDesired -Tweak $tweak } | Should -Throw '*denied*'
+    }
+
+    It 'still fails on access denied to a policy of the account without elevation' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup New-ItemProperty { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'denied') }
+        $tweak = New-RegTweak "$Key\Policies\Sub" 'A' 'DWord' 1
+        { Set-RegistryTweakDesired -Tweak $tweak } | Should -Throw '*denied*'
+    }
+
+    It 'says only that access is denied, not who denied it' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        New-Item -Path $Key -Force | Out-Null
+        Set-TestSetValueDeny
+        $outcome = Get-TuneupOutcome -Output @(Set-RegistryTweakDesired -Tweak (New-RegTweak $Key 'A' 'DWord' 1))
+        $outcome.detail | Should -BeLike '*access to*is denied*'
+        $outcome.detail | Should -Not -BeLike '*administrator*'
+        Get-TuneupText -Key 'reason.protected-by-windows' | Should -Not -BeLike '*administrator*'
+    }
+
+    It 'removes the keys it created also when a deeper one was never created' {
+        $tweak = New-RegTweak "$Key\Sub\Deep" 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        New-Item -Path "$Key\Sub" -Force | Out-Null
+        Restore-RegistryTweakState -Tweak $tweak -State $state
+        Test-Path -LiteralPath $Key | Should -BeFalse
+    }
+
+    It 'keeps an existing key above the missing ones when it holds anything' {
+        $tweak = New-RegTweak "$Key\Sub\Deep" 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        New-Item -Path "$Key\Sub" -Force | Out-Null
+        New-ItemProperty -LiteralPath $Key -Name 'Other' -PropertyType DWord -Value 1 | Out-Null
+        Restore-RegistryTweakState -Tweak $tweak -State $state
+        Test-Path -LiteralPath "$Key\Sub" | Should -BeFalse
+        (Get-ItemProperty -LiteralPath $Key).Other | Should -Be 1
+    }
+
+    It 'restores a value whose empty key cannot be removed, saying the key is left' {
+        $tweak = New-RegTweak "$Key\Sub" 'A' 'DWord' 1
+        $state = Get-RegistryTweakState -Tweak $tweak
+        New-Item -Path "$Key\Sub" -Force | Out-Null
+        Mock -ModuleName Tuneup Remove-Item { throw (New-Object System.UnauthorizedAccessException -ArgumentList 'denied') }
+        $outcome = Get-TuneupOutcome -Output @(Restore-RegistryTweakState -Tweak $tweak -State $state)
+        $outcome.detail | Should -BeLike "*$Key\Sub*denied*"
+        (Get-Item -LiteralPath "$Key\Sub").GetValueNames() -contains 'A' | Should -BeFalse
     }
 
     It 'treats removing an absent value or key as done' {

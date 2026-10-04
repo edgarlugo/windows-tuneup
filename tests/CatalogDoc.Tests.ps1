@@ -27,6 +27,22 @@ Describe 'Generated catalog documentation' {
         foreach ($tweak in $Catalog) { $text.Contains("### ``$($tweak.id)``") | Should -BeTrue -Because $tweak.id }
     }
 
+    It 'says where to change by hand every tweak that names it (<Lang>)' -TestCases @(
+        @{ Lang = 'es' }
+        @{ Lang = 'en' }
+    ) {
+        param($Lang)
+        $text = Get-DocText (Join-Path $Repo "docs\$Lang\catalog.md")
+        $named = @($Catalog | Where-Object { $null -ne $_.PSObject.Properties['manualSetting'] })
+        $named.Count | Should -BeGreaterThan 0
+        foreach ($tweak in $named) {
+            $start = $text.IndexOf("### ``$($tweak.id)``")
+            $end = $text.IndexOf("`n### ", $start + 1)
+            $section = $(if ($end -lt 0) { $text.Substring($start) } else { $text.Substring($start, $end - $start) })
+            $section.Contains($tweak.manualSetting.$Lang) | Should -BeTrue -Because "$Lang $($tweak.id)"
+        }
+    }
+
     It 'writes the pages in UTF-8 without a byte order mark' {
         foreach ($lang in 'es', 'en') {
             $bytes = [System.IO.File]::ReadAllBytes((Join-Path $Repo "docs\$lang\catalog.md"))

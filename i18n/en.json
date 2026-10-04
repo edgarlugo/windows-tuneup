@@ -254,5 +254,12 @@
   "err.readResultInvalid": "-ReadResult takes 8 to 64 letters (A-Z), digits or hyphens, starting with a letter or a digit, such as a GUID. Nothing was read.",
   "err.readResultMissing": "There is no result {0}. If an elevated window ran the command, it refused before it started (exit code 1: run the same command in PowerShell as administrator to see why) or it was stopped before it wrote, by Ctrl+C or because its document could not be saved (exit code 2: check what is in place with -Status).",
   "err.readResultIncomplete": "The result {0} is not complete: the command is still running, or it was stopped before it ended (its window was closed). Check what was applied with -Status.",
-  "err.readResultUntrusted": "The result {0} was not read: it, or the folder {1} that holds it, is not protected like the state of the machine, so an account that is not an administrator could have written it. Delete {1} as administrator and run the command again."
+  "err.readResultUntrusted": "The result {0} was not read: it, or the folder {1} that holds it, is not protected like the state of the machine, so an account that is not an administrator could have written it. Delete {1} as administrator and run the command again.",
+  "err.stateFolderUntrusted": "State folder {0} is not trusted. Delete it as administrator and run again.",
+  "err.stateBaseUntrusted": "Folder {0} is not trusted to hold the machine state folder",
+  "reason.protected-by-windows": "left alone: access to this value is denied (Windows or a security program protects it)",
+  "run.protectedByWindows": "Access to {0} is denied (Windows or a security program protects it): nothing was changed. Change it by hand in the settings of Windows.",
+  "run.protectedByWindowsManual": "Access to {0} is denied (Windows or a security program protects it): nothing was changed. Change it by hand: {1}.",
+  "undo.emptyKeyLeft": "the empty key {0} could not be removed ({1}); it holds nothing, so it changes nothing",
+  "reason.unchanged": "it was already as before: there was nothing to restore"
 }

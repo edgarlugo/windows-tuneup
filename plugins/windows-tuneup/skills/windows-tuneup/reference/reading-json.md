@@ -74,7 +74,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 - `runId`: what `-Undo` takes. Give it to the user.
 - `summary`: `applied`, `partial`, `notApplied`, `failed`, `skipped`, `refused`, `journalErrors`, `interrupted`.
-- `results[]`: `status` (`applied`, `partial`, `not-applied`, `failed`, `skipped`), `reason`, `error`, `detail`. Explain each one that is not `applied` with its `detail` or `error`. A `skipped` one with `refused` true left itself alone (for example, OneDrive with files that only live in the cloud), and its `reason` says why.
+- `results[]`: `status` (`applied`, `partial`, `not-applied`, `failed`, `skipped`), `reason`, `error`, `detail`. Explain each one that is not `applied` with its `detail` or `error`. A `skipped` one with `refused` true left itself alone (for example, OneDrive with files that only live in the cloud), and its `reason` says why. `protected-by-windows`: access to that value is denied (Windows or a security program protects it); give the user the place to change it by hand from `detail` and do not retry.
 - `restorePoint`: `created`, `skipped-recent` (Windows makes one every 24 hours), `failed`, `unavailable`, `not-needed`. Without one, `-Undo` still restores.
 - `rebootRequired`: recommend restarting. Else `signOutRequired`: recommend signing out.
 - In a document read with `-ReadResult` the profile folder and the account name in paths show as `%USERPROFILE%` and `%USERNAME%`: that is expected.
@@ -85,7 +85,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 ## `undo`
 
-- `summary`: `restored`, `failed`, `skipped`; `results[]` with `status`, `reason` (`already-undone`, `other-user`, `reinstalled`...), `error`, `detail`.
+- `summary`: `restored`, `failed`, `skipped`; `results[]` with `status`, `reason` (`already-undone`, `other-user`, `unchanged` (it was already as before), `reinstalled`...), `error`, `detail`.
 - `results[].manual`: PowerShell lines that restore a failed tweak by hand. Show them as they are, in a code block, for the user to run in a PowerShell opened as administrator; do not run them yourself.
 - `rebootRequired` and `signOutRequired`: as in `apply`.
 

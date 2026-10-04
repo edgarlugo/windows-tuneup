@@ -1,3 +1,4 @@
 TestResults/
 *.log
 !tests/fixtures/cbs/*.log
+dist/

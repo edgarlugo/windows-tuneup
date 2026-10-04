@@ -302,6 +302,25 @@ Describe 'Test-TuneupTweak requires' {
     }
 }
 
+Describe 'Test-TuneupTweak manualSetting' {
+    It 'accepts a tweak without manualSetting and one with both languages' {
+        $tweak = New-TestTweak
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -BeNullOrEmpty
+        $tweak | Add-Member -NotePropertyName manualSetting -NotePropertyValue ([pscustomobject]@{ es = 'Configuracion > Widgets'; en = 'Settings > Widgets' })
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a manualSetting without <Case>' -TestCases @(
+        @{ Case = 'Spanish'; Value = [pscustomobject]@{ en = 'Settings' }; Missing = 'manualSetting.es' }
+        @{ Case = 'English'; Value = [pscustomobject]@{ es = 'Configuracion'; en = ' ' }; Missing = 'manualSetting.en' }
+        @{ Case = 'languages'; Value = 'Settings'; Missing = 'manualSetting.es' }
+    ) {
+        $tweak = New-TestTweak
+        $tweak | Add-Member -NotePropertyName manualSetting -NotePropertyValue $Value
+        (Test-TuneupTweak -Tweak $tweak) -join '; ' | Should -Match ([regex]::Escape("is missing $Missing"))
+    }
+}
+
 Describe 'Test-TuneupTweak signOutRequired' {
     It 'accepts a tweak without signOutRequired and one with a boolean' {
         $tweak = New-TestTweak

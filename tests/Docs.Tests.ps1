@@ -63,6 +63,28 @@ Describe 'Skill checklist' {
             }
         }
     }
+
+    It 'prepares the virtual machine and builds the package it installs, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'skill-checklist.md'
+            foreach ($term in 'powershell -NoProfile -ExecutionPolicy Bypass -File .\build\package.ps1 -OutputPath .\dist', 'ipconfig /renew', 'Default Switch', 'Git for Windows', 'msstore') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+}
+
+Describe 'build/package.ps1 in the documentation' {
+    # -OutputPath is mandatory: a command without it stops to ask for it.
+    It 'is always given its -OutputPath' {
+        $pages = @(Join-Path $Repo 'README.md') + @(Get-ChildItem -LiteralPath (Join-Path $Repo 'docs\es'), (Join-Path $Repo 'docs\en') -Filter '*.md' | ForEach-Object { $_.FullName })
+        foreach ($page in $pages) {
+            $text = [System.IO.File]::ReadAllText($page, (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+            foreach ($span in [regex]::Matches($text, '`[^`\r\n]*package\.ps1[^`\r\n]*`')) {
+                $span.Value | Should -Match '-OutputPath ' -Because "$page $($span.Value)"
+            }
+        }
+    }
 }
 
 Describe 'Documentation in both languages' {

@@ -158,16 +158,77 @@ function Test-RegistryTweakState {
     'not-applied'
 }
 
+# True when an error is access denied: what Windows answers for a value it keeps from programs (on
+# build 26300, AllowNewsAndInterests under the policies of Dsh, even for an administrator, while other
+# values of that key can be written) or for a key or value whose access list denies the change.
+function Test-TuneupAccessDenied {
+    param([Parameter(Mandatory)]$ErrorRecord)
+    if ([string]$ErrorRecord.CategoryInfo.Category -eq 'PermissionDenied') { return $true }
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) {
+        if ($exception -is [System.UnauthorizedAccessException] -or $exception -is [System.Security.SecurityException]) { return $true }
+        $exception = $exception.InnerException
+    }
+    $false
+}
+
+# Removes the keys from -Path up to -StopAt (not included), the deepest existing one first, that hold
+# nothing, and stops at the first one that holds something. A level that is missing (the creation
+# stopped above it) is passed over: every key between -Path and -StopAt was created after the state was
+# saved. Without a -StopAt above -Path nothing is removed. Gives the key that could not be removed and
+# why, or nothing.
+function Remove-TuneupEmptyRegistryKey {
+    param([Parameter(Mandatory)][string]$Path, [AllowEmptyString()][string]$StopAt)
+    if (-not $StopAt -or -not $Path.StartsWith($StopAt.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { return }
+    $current = $Path
+    while ($current -and $current -ne $StopAt) {
+        if (-not (Test-Path -LiteralPath $current)) {
+            $current = Split-Path -Path $current -Parent
+            continue
+        }
+        $key = Get-Item -LiteralPath $current
+        $isEmpty = ($key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0)
+        $key.Close()
+        if (-not $isEmpty) { return }
+        try {
+            Remove-Item -LiteralPath $current -Force -ErrorAction Stop
+        } catch {
+            return [pscustomobject]@{ Path = $current; Message = $_.Exception.Message }
+        }
+        $current = Split-Path -Path $current -Parent
+    }
+}
+
+# A value that Windows does not let programs change is refused, with what was created for it removed, so
+# the state stays as it was journaled (the executor checks it). Without elevation a tweak that needs an
+# administrator (a machine value, or a policy of the account) is denied for that reason alone: that stays
+# a failure.
 function Set-RegistryTweakDesired {
     param([Parameter(Mandatory)]$Tweak)
     $desired = $Tweak.set
-    if ($null -eq $desired.value) {
-        Remove-TuneupRegistryValue -Path $desired.path -Name $desired.name
-        return
+    $before = Get-RegistryTweakState -Tweak $Tweak
+    try {
+        if ($null -eq $desired.value) {
+            Remove-TuneupRegistryValue -Path $desired.path -Name $desired.name
+        } else {
+            Write-TuneupRegistryValue -Path $desired.path -Name $desired.name -Kind $desired.kind -Value $desired.value
+        }
+    } catch {
+        if (-not (Test-TuneupAccessDenied -ErrorRecord $_) -or ((Test-TuneupTweakNeedsAdmin -Tweak $Tweak) -and -not (Test-TuneupAdmin))) { throw }
+        if (-not $before.keyExisted) { [void](Remove-TuneupEmptyRegistryKey -Path $desired.path -StopAt $before.existingAncestor) }
+        $target = "$($desired.path)\$($desired.name)"
+        $manual = $Tweak.PSObject.Properties['manualSetting']
+        $detail = $(if ($null -ne $manual -and $manual.Value) {
+                Get-TuneupText -Key 'run.protectedByWindowsManual' -Format $target, (Get-TuneupLocalizedText -Text $manual.Value)
+            } else {
+                Get-TuneupText -Key 'run.protectedByWindows' -Format $target
+            })
+        return (New-TuneupOutcome -Refused -Reason 'protected-by-windows' -Detail $detail)
     }
-    Write-TuneupRegistryValue -Path $desired.path -Name $desired.name -Kind $desired.kind -Value $desired.value
 }
 
+# The value goes back as it was; the keys the tweak created go too when they are empty again. An empty
+# key that cannot be removed holds nothing and changes nothing: the restore says so instead of failing.
 function Restore-RegistryTweakState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
     $path = [string]$Tweak.set.path
@@ -177,13 +238,6 @@ function Restore-RegistryTweakState {
         return
     }
     Remove-TuneupRegistryValue -Path $path -Name $name
-    $current = $path
-    while ($current -and $current -ne $State.existingAncestor -and (Test-Path -LiteralPath $current)) {
-        $key = Get-Item -LiteralPath $current
-        $isEmpty = ($key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0)
-        $key.Close()
-        if (-not $isEmpty) { break }
-        Remove-Item -LiteralPath $current -Force -ErrorAction Stop
-        $current = Split-Path -Path $current -Parent
-    }
+    $left = Remove-TuneupEmptyRegistryKey -Path $path -StopAt ([string]$State.existingAncestor)
+    if ($left) { New-TuneupOutcome -Detail (Get-TuneupText -Key 'undo.emptyKeyLeft' -Format $left.Path, $left.Message) }
 }

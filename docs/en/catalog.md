@@ -725,12 +725,13 @@ Frees taskbar space; Win+Tab still works.
 
 **Turn off Widgets (policy)**
 
-Removes the Widgets board and its background web processes. Does not work on Home.
+Removes the Widgets board and its background web processes. Does not work on Home. On build 26300 Windows does not let programs write this value, not even as administrator: it is reported as refused, changing nothing.
 
 - **Type:** `registry`; **Scope:** machine (administrator); **Risk:** low; **Asks:** no
 - **In profiles:** `legacy`, `lite`; **Kept by:** none
 - **Windows:** 11, build 22000 or later; **Editions:** Pro, Enterprise, Education
 - **After applying:** sign out
+- **If access is denied, change it by hand in:** Settings > Personalization > Taskbar > Widgets
 - **Sources:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-newsandinterests>, <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
 
 ### `ui.news-interests-win10`

@@ -725,12 +725,13 @@ Libera espacio en la barra de tareas; Win+Tab sigue funcionando.
 
 **Desactivar Widgets (directiva)**
 
-Quita el panel de Widgets y sus procesos web en segundo plano. No funciona en Home.
+Quita el panel de Widgets y sus procesos web en segundo plano. No funciona en Home. En la compilación 26300 Windows no deja que los programas escriban este valor, ni como administrador: se informa como rechazado sin cambiar nada.
 
 - **Tipo:** `registry`; **Ámbito:** equipo (administrador); **Riesgo:** bajo; **Pregunta:** no
 - **En perfiles:** `legacy`, `lite`; **Lo mantienen:** ninguno
 - **Windows:** 11, build 22000 o posterior; **Ediciones:** Pro, Enterprise, Education
 - **Después de aplicar:** cerrar sesión
+- **Si el acceso está denegado, cambiarlo a mano en:** Configuración > Personalización > Barra de tareas > Widgets
 - **Fuentes:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-newsandinterests>, <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
 
 ### `ui.news-interests-win10`

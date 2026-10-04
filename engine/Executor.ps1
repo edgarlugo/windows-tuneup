@@ -131,6 +131,9 @@ function Invoke-TuneupPlanItem {
         }
         New-TuneupResult -Item $Item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
     } catch {
+        # Never noted as needing no undo, even when the state reads as before right now: what a Set
+        # started can still land after it failed (an uninstaller that goes on after the wait, a removal
+        # that Windows finishes later). -Undo compares the state again when it runs.
         New-TuneupResult -Item $Item -Status 'failed' -ErrorText $_.Exception.Message
     }
 }

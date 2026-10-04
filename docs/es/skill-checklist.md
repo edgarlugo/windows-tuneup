@@ -4,9 +4,10 @@ El UAC no se puede probar en CI: este guion se corre a mano antes de cada releas
 
 ## Preparar
 
-1. Instala el plugin en Claude Code: `/plugin marketplace add edgarlugo/windows-tuneup` y `/plugin install windows-tuneup@windows-tuneup`. Antes de publicar, con la rama de la release copiada en la VM: `/plugin marketplace add <carpeta del repositorio>`. Reinicia Claude Code y comprueba en `/plugin` que la skill `windows-tuneup` está cargada.
-2. Antes de publicar la release no hay nada que descargar: instala el paquete de `build/package.ps1` a mano con `powershell -NoProfile -ExecutionPolicy Bypass -File .\dist\install.ps1 -Source .\dist`. Tiene que quedar `%ProgramFiles%\windows-tuneup\.windows-tuneup` con la versión.
-3. Guarda la lista de `%TEMP%` (`Get-ChildItem $env:TEMP | Select-Object Name`) para compararla al final.
+1. La máquina virtual necesita red: con el Default Switch de Hyper-V, después de reiniciar el anfitrión corre `ipconfig /renew` en la VM, o puede quedar sin dirección y sin internet. Instala Git for Windows y Claude Code, e inicia la sesión de Claude Code. Un Windows recién instalado puede pedir que aceptes los términos del origen `msstore` la primera vez que winget lista paquetes: corre `winget list` una vez y acéptalos antes de empezar.
+2. Instala el plugin en Claude Code: `/plugin marketplace add edgarlugo/windows-tuneup` y `/plugin install windows-tuneup@windows-tuneup`. Antes de publicar, con la rama de la release copiada en la VM: `/plugin marketplace add <carpeta del repositorio>`. Reinicia Claude Code y comprueba en `/plugin` que la skill `windows-tuneup` está cargada.
+3. Antes de publicar la release no hay nada que descargar: en la carpeta del repositorio arma el paquete con `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\package.ps1 -OutputPath .\dist` e instálalo a mano con `powershell -NoProfile -ExecutionPolicy Bypass -File .\dist\install.ps1 -Source .\dist`. Tiene que quedar `%ProgramFiles%\windows-tuneup\.windows-tuneup` con la versión.
+4. Guarda la lista de `%TEMP%` (`Get-ChildItem $env:TEMP | Select-Object Name`) para compararla al final.
 
 ## Instalar desde la skill (solo con la release publicada)
 

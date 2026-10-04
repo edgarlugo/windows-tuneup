@@ -55,7 +55,7 @@
     {
       "id": "ui.widgets-off",
       "title": { "es": "Desactivar Widgets (directiva)", "en": "Turn off Widgets (policy)" },
-      "why": { "es": "Quita el panel de Widgets y sus procesos web en segundo plano. No funciona en Home.", "en": "Removes the Widgets board and its background web processes. Does not work on Home." },
+      "why": { "es": "Quita el panel de Widgets y sus procesos web en segundo plano. No funciona en Home. En la compilación 26300 Windows no deja que los programas escriban este valor, ni como administrador: se informa como rechazado sin cambiar nada.", "en": "Removes the Widgets board and its background web processes. Does not work on Home. On build 26300 Windows does not let programs write this value, not even as administrator: it is reported as refused, changing nothing." },
       "risk": "low",
       "ask": false,
       "os": { "families": ["11"], "minBuild": 22000, "editions": ["Pro", "Enterprise", "Education"] },
@@ -64,6 +64,7 @@
       "set": { "path": "HKLM:\\SOFTWARE\\Policies\\Microsoft\\Dsh", "name": "AllowNewsAndInterests", "kind": "DWord", "value": 0 },
       "rebootRequired": false,
       "signOutRequired": true,
+      "manualSetting": { "es": "Configuración > Personalización > Barra de tareas > Widgets", "en": "Settings > Personalization > Taskbar > Widgets" },
       "sources": ["https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-newsandinterests", "https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
     },
     {

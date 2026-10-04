@@ -103,7 +103,7 @@ Describe 'Undo and status' {
         Add-TuneupJournalEntry -Path $journal -Tweak $appx -State ([pscustomobject]@{ installedUsers = $true; currentUserHad = $true; currentUserSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'; otherUsers = 0; provisioned = $false })
         Mock -ModuleName Tuneup Restore-AppxTweakState { }
         $results = @(Invoke-TuneupUndo -Run $run -WarningAction SilentlyContinue)
-        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:restored:,test.appx:skipped:other-user'
+        ($results | ForEach-Object { "$($_.id):$($_.status):$($_.reason)" }) -join ',' | Should -Be 'test.one:restored:unchanged,test.appx:skipped:other-user'
         Should -Invoke Restore-AppxTweakState -ModuleName Tuneup -Times 0 -Exactly
         Test-Path -LiteralPath (Join-Path $run.Dir 'undone.json') | Should -BeFalse
         (Get-Content -LiteralPath (Join-Path $run.Dir 'undone-tweaks.txt')) -join ',' | Should -Be 'test.one'

@@ -4,9 +4,10 @@ UAC cannot be tested in CI: this script is run by hand before every release, in 
 
 ## Prepare
 
-1. Install the plugin in Claude Code: `/plugin marketplace add edgarlugo/windows-tuneup` and `/plugin install windows-tuneup@windows-tuneup`. Before publishing, with the release branch copied to the VM: `/plugin marketplace add <repository folder>`. Restart Claude Code and check in `/plugin` that the `windows-tuneup` skill is loaded.
-2. Before the release is published there is nothing to download: install the package of `build/package.ps1` by hand with `powershell -NoProfile -ExecutionPolicy Bypass -File .\dist\install.ps1 -Source .\dist`. `%ProgramFiles%\windows-tuneup\.windows-tuneup` must hold the version.
-3. Save the list of `%TEMP%` (`Get-ChildItem $env:TEMP | Select-Object Name`) to compare at the end.
+1. The virtual machine needs a network: with the Default Switch of Hyper-V, after the host restarts run `ipconfig /renew` in the VM, or it can be left without an address and without internet. Install Git for Windows and Claude Code, and sign in to Claude Code. A freshly installed Windows can ask you to accept the terms of the `msstore` source the first time winget lists packages: run `winget list` once and accept them before you start.
+2. Install the plugin in Claude Code: `/plugin marketplace add edgarlugo/windows-tuneup` and `/plugin install windows-tuneup@windows-tuneup`. Before publishing, with the release branch copied to the VM: `/plugin marketplace add <repository folder>`. Restart Claude Code and check in `/plugin` that the `windows-tuneup` skill is loaded.
+3. Before the release is published there is nothing to download: in the repository folder build the package with `powershell -NoProfile -ExecutionPolicy Bypass -File .\build\package.ps1 -OutputPath .\dist` and install it by hand with `powershell -NoProfile -ExecutionPolicy Bypass -File .\dist\install.ps1 -Source .\dist`. `%ProgramFiles%\windows-tuneup\.windows-tuneup` must hold the version.
+4. Save the list of `%TEMP%` (`Get-ChildItem $env:TEMP | Select-Object Name`) to compare at the end.
 
 ## Install from the skill (published release only)
 

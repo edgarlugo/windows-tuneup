@@ -1,6 +1,7 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:AdminSid = 'S-1-5-32-544'
     $script:OtherSid = 'S-1-5-21-1000000000-2000000000-3000000000-1001'
     $script:TrustedInstallerSid = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
@@ -332,6 +333,33 @@ Describe 'Temporary folder of an elevated run' {
         { Use-TuneupElevatedTemp -MachineRoot (Join-Path $Folder 'windows-tuneup') } | Should -Throw '*is not trusted*'
         $env:TEMP | Should -Be $Temp
         $env:TMP | Should -Be $Tmp
+    }
+
+    # The refusal is the message of an elevated run: it comes in the language of the run.
+    It 'refuses in the language of the run, for <Case>' -TestCases @(
+        @{ Case = 'a machine folder someone else owns'; Key = 'err.stateFolderUntrusted'; Base = $false }
+        @{ Case = 'a folder that cannot hold the machine folder'; Key = 'err.stateBaseUntrusted'; Base = $true }
+    ) {
+        New-Item -ItemType Directory -Path $Folder | Out-Null
+        $root = Join-Path $Folder 'windows-tuneup'
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        if (-not $Base) {
+            New-Item -ItemType Directory -Path $root | Out-Null
+            Mock -ModuleName Tuneup Test-TuneupBaseFolder { $true }
+            Mock -ModuleName Tuneup Get-Acl { New-OwnedSecurity 'S-1-5-21-1000000000-2000000000-3000000000-1001' } -ParameterFilter { $LiteralPath -eq $root }
+            Mock -ModuleName Tuneup Set-Acl { }
+        }
+        $i18n = Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n'
+        $spanish = Get-Content -LiteralPath (Join-Path $i18n 'es.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+        $spanish.$Key | Should -Not -BeNullOrEmpty
+        $path = $(if ($Base) { $Folder } else { $root })
+        Initialize-TuneupI18n -Root $i18n -Lang 'es'
+        try {
+            { Use-TuneupElevatedTemp -MachineRoot $root } | Should -Throw -ExpectedMessage ($spanish.$Key -f $path)
+        } finally {
+            Initialize-TuneupI18n -Root $i18n -Lang 'en'
+        }
+        $env:TEMP | Should -Be $Temp
     }
 }
 
