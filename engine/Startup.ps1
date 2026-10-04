@@ -836,3 +836,127 @@ function Test-TuneupStartupWorkPc {
     $entra = Invoke-TuneupStartupDetector -What 'the Entra ID join' -Detector { Test-TuneupEntraJoined }
     [bool]($entra.Ok -and $entra.Value -eq $true)
 }
+
+# What the startup document gives of an entry: everything but what turning it off needs (target, policy).
+# target holds registry paths, the StartupApproved value and the id of a process: it stays in memory.
+function ConvertTo-TuneupStartupView {
+    param([Parameter(Mandatory)]$Entry)
+    [pscustomobject]@{
+        id                   = [string]$Entry.id
+        name                 = [string]$Entry.name
+        source               = [string]$Entry.source
+        scope                = [string]$Entry.scope
+        key                  = [string]$Entry.key
+        publisher            = $Entry.publisher
+        command              = $Entry.command
+        path                 = $Entry.path
+        enabled              = [bool]$Entry.enabled
+        running              = $Entry.running
+        memoryMB             = $Entry.memoryMB
+        cpuSeconds           = $Entry.cpuSeconds
+        protected            = $Entry.protected
+        canDisable           = [bool]$Entry.canDisable
+        needsAdmin           = [bool]$Entry.needsAdmin
+        recommended          = [bool]$Entry.recommended
+        recommendedReason    = $Entry.recommendedReason
+        notRecommendedReason = $Entry.notRecommendedReason
+        uninstall            = $Entry.uninstall
+    }
+}
+
+function Get-TuneupStartupDocument {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entry, [bool]$IsAdmin, [bool]$WorkPc)
+    $views = @($Entry | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-TuneupStartupView -Entry $_ })
+    [pscustomobject]@{
+        schemaVersion = 1
+        command       = 'startup'
+        isAdmin       = $IsAdmin
+        workPc        = $WorkPc
+        entries       = $views
+        summary       = [pscustomobject]@{
+            total       = $views.Count
+            enabled     = @($views | Where-Object { $_.enabled }).Count
+            canDisable  = @($views | Where-Object { $_.canDisable }).Count
+            recommended = @($views | Where-Object { $_.recommended }).Count
+            protected   = @($views | Where-Object { $_.protected }).Count
+        }
+    }
+}
+
+# Why an entry stays on, in the language of the run; nothing when it can be turned off. Works on an entry
+# of the list and on its view in the document (the reason of an entry that could not be read is only in
+# the list: the view gives it as canDisable false with no protection).
+function Get-TuneupStartupFixedText {
+    param([Parameter(Mandatory)]$Entry)
+    $reason = $(if ($null -ne $Entry.PSObject.Properties['target']) { Get-TuneupStartupFixedReason -Entry $Entry } else { Get-TuneupStartupViewFixedReason -View $Entry })
+    if (-not $reason) { return }
+    if ($Entry.protected) { return (Get-TuneupText -Key "startup.protected.$reason") }
+    Get-TuneupText -Key "startup.fixed.$reason"
+}
+
+# The reason of Get-TuneupStartupFixedReason, from what the document gives of an entry.
+function Get-TuneupStartupViewFixedReason {
+    param([Parameter(Mandatory)]$View)
+    if ($View.protected) { return [string]$View.protected }
+    if ([string]$View.source -like 'runonce*') { return 'run-once' }
+    if ($View.source -eq 'task' -and [string]$View.key -match '[*?\[\]`]') { return 'unsupported-name' }
+    if ($View.enabled -and -not $View.canDisable) { return 'unreadable' }
+}
+
+# The mark of an entry for people: a word in brackets, never only a color.
+function Get-TuneupStartupMark {
+    param([Parameter(Mandatory)]$Entry)
+    if ($Entry.protected) { return (Get-TuneupText -Key 'startup.state.protected' -Format (Get-TuneupStartupFixedText -Entry $Entry)) }
+    if (-not $Entry.enabled) { return (Get-TuneupText -Key 'startup.state.off') }
+    $fixed = Get-TuneupStartupFixedText -Entry $Entry
+    if ($fixed) { return (Get-TuneupText -Key 'startup.state.fixed' -Format $fixed) }
+    Get-TuneupText -Key 'startup.state.on'
+}
+
+function Get-TuneupStartupUsageText {
+    param([Parameter(Mandatory)]$Entry)
+    if ($Entry.running -eq $true) {
+        if ($null -ne $Entry.memoryMB) { return (Get-TuneupText -Key 'startup.usage.running' -Format $Entry.memoryMB) }
+        return (Get-TuneupText -Key 'startup.usage.runningNoMemory')
+    }
+    if ($Entry.running -eq $false) { return (Get-TuneupText -Key 'startup.usage.stopped') }
+    Get-TuneupText -Key 'startup.usage.unknown'
+}
+
+# The startup document as JSON, or for people: what is recommended first, then what can be turned off,
+# then what stays on; each entry with its id, so it can be named in -Disable.
+function Write-TuneupStartupReport {
+    param(
+        [Parameter(Mandatory)]$Document,
+        [AllowEmptyCollection()][string[]]$Warnings = @(),
+        [switch]$Json
+    )
+    if ($Json) { Write-TuneupJson (Add-TuneupJsonWarning -Document $Document -Warnings $Warnings); return }
+    $entries = @($Document.entries)
+    if (-not $entries.Count) {
+        Write-Host (Get-TuneupText -Key 'startup.empty')
+        return
+    }
+    Write-Host (Get-TuneupText -Key 'startup.header' -Format $entries.Count)
+    $ordered = @($entries | Where-Object { $_.recommended }) + @($entries | Where-Object { -not $_.recommended -and $_.canDisable }) +
+        @($entries | Where-Object { -not $_.canDisable })
+    $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
+    foreach ($entry in $ordered) {
+        $publisher = $(if ($entry.publisher) { Get-TuneupText -Key 'startup.publisher' -Format $entry.publisher } else { '' })
+        $admin = $(if ($entry.canDisable -and $entry.needsAdmin) { $adminMark } else { '' })
+        $color = $(if ($entry.recommended) { 'Cyan' } elseif ($entry.canDisable) { 'Gray' } else { 'DarkGray' })
+        $line = Get-TuneupText -Key 'startup.entry' -Format (Get-TuneupStartupMark -Entry $entry), $entry.name, $publisher,
+            (Get-TuneupText -Key "startup.source.$($entry.source)"), (Get-TuneupStartupUsageText -Entry $entry), $admin
+        Write-Host $line -ForegroundColor $color
+        Write-Host (Get-TuneupText -Key 'startup.id' -Format $entry.id) -ForegroundColor DarkGray
+        if ($entry.recommended) {
+            Write-Host (Get-TuneupText -Key 'startup.recommended' -Format (Get-TuneupText -Key "startup.recommend.$($entry.recommendedReason)")) -ForegroundColor Cyan
+        }
+        if ($entry.notRecommendedReason) {
+            Write-Host (Get-TuneupText -Key 'startup.notRecommended' -Format (Get-TuneupText -Key "startup.notRecommended.$($entry.notRecommendedReason)")) -ForegroundColor DarkGray
+        }
+        if ($entry.uninstall) { Write-Host (Get-TuneupText -Key 'startup.uninstall' -Format $entry.uninstall) }
+    }
+    Write-Host ''
+    Write-Host (Get-TuneupText -Key 'startup.howTo')
+}

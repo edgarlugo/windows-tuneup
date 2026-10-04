@@ -827,3 +827,187 @@ Describe 'Test-TuneupStartupWorkPc' {
         Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) 3>$null | Should -BeFalse
     }
 }
+
+Describe 'Startup document and report' {
+    BeforeAll {
+        function New-TestDocument {
+            $steam = New-TuneupStartupEntry -Source 'run-user' -Key 'Steam' -Name 'Steam' -Command '"C:\Games\Steam\steam.exe"' -Path 'C:\Games\Steam\steam.exe' `
+                -Target @{ ApprovedPath = 'HKCU:\Software\windows-tuneup-test\StartupApproved\Run'; ApprovedName = 'Steam'; ApprovedValue = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0) }
+            $steam.publisher = 'Valve Corp.'
+            $steam.running = $true
+            $steam.memoryMB = 220
+            $steam.cpuSeconds = 10
+            $steam.canDisable = $true
+            $steam.recommended = $true
+            $steam.recommendedReason = 'game-launcher'
+            $steam.uninstall = 'winget uninstall --id Valve.Steam --exact'
+            $vpn = New-TuneupStartupEntry -Source 'service' -Key 'PanGPS' -Name 'PanGPS' -Path 'C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPS.exe' `
+                -Target @{ ServiceName = 'PanGPS'; StartType = 'Automatic'; ProcessId = 4321 }
+            $vpn.protected = 'vpn'
+            $vpn.running = $false
+            $old = New-TuneupStartupEntry -Source 'run-machine' -Key 'OldTool' -Name 'OldTool' -Enabled $false
+            $once = New-TuneupStartupEntry -Source 'runonce-user' -Key 'Cleanup' -Name 'Cleanup'
+            Get-TuneupStartupDocument -Entry @($steam, $vpn, $old, $once) -IsAdmin $false
+        }
+    }
+
+    It 'gives the entries without what turning them off needs, and counts them' {
+        $document = New-TestDocument
+        $document.schemaVersion | Should -Be 1
+        $document.command | Should -Be 'startup'
+        $document.isAdmin | Should -BeFalse
+        $document.workPc | Should -BeFalse
+        @($document.entries).Count | Should -Be 4
+        @($document.entries[0].PSObject.Properties.Name) -join ',' |
+            Should -Be 'id,name,source,scope,key,publisher,command,path,enabled,running,memoryMB,cpuSeconds,protected,canDisable,needsAdmin,recommended,recommendedReason,notRecommendedReason,uninstall'
+        $document.summary.total | Should -Be 4
+        $document.summary.enabled | Should -Be 3
+        $document.summary.canDisable | Should -Be 1
+        $document.summary.recommended | Should -Be 1
+        $document.summary.protected | Should -Be 1
+    }
+
+    It 'never writes the target of an entry (registry paths, values, process ids) to the JSON document' {
+        $text = (Write-TuneupStartupReport -Document (New-TestDocument) -Json) -join "`n"
+        $json = $text | ConvertFrom-Json
+        foreach ($entry in @($json.entries)) {
+            $entry.PSObject.Properties.Name | Should -Not -Contain 'target'
+            $entry.PSObject.Properties.Name | Should -Not -Contain 'policy'
+        }
+        $text | Should -Not -Match 'StartupApproved'
+        $text | Should -Not -Match 'ApprovedValue|ServiceName|ProcessId|4321'
+    }
+
+    It 'writes an empty list as an empty array, with the fields of every document' {
+        $json = Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry @() -IsAdmin $true) -Json | ConvertFrom-Json
+        $json.command | Should -Be 'startup'
+        @($json.entries).Count | Should -Be 0
+        $json.summary.total | Should -Be 0
+        $json.PSObject.Properties.Name | Should -Contain 'warnings'
+        $json.PSObject.Properties.Name | Should -Contain 'toolVersion'
+    }
+
+    It 'shows people the recommended entries first, with marks that need no colors' {
+        Initialize-TuneupI18n -Root $I18nRoot -Lang 'es'
+        try {
+            $text = (Write-TuneupStartupReport -Document (New-TestDocument) 6>&1 | Out-String)
+        } finally {
+            Initialize-TuneupI18n -Root $I18nRoot -Lang 'en'
+        }
+        $text | Should -Match 'Lo que arranca con Windows o queda en segundo plano \(4\):'
+        $text.IndexOf('Steam') | Should -BeLessThan $text.IndexOf('PanGPS')
+        $text | Should -Match '\[encendido\] Steam \(Valve Corp\.\) - al iniciar sesi.n \(Run del usuario\) - en ejecuci.n, 220 MB'
+        $text | Should -Match 'id: startup\.run-user\.steam-eb4bc901'
+        $text | Should -Match 'Se recomienda apagarlo: lanzador de juegos\.'
+        $text | Should -Match 'winget uninstall --id Valve\.Steam --exact'
+        $text | Should -Match '\[protegido: VPN\] PanGPS'
+        $text | Should -Match '\[apagado\] OldTool'
+        $text | Should -Match '\[no se apaga: corre una sola vez y Windows lo borra\] Cleanup'
+        $text | Should -Match ([regex]::Escape("-Startup -Disable '<id>,<id>'"))
+    }
+
+    It 'says why an entry stays on: <Name>' -TestCases @(
+        @{ Name = 'unverified'; Protected = 'unverified'; Incomplete = $false; Expected = '[protected: it runs from the folder of Windows and its signature could not be checked] Odd' }
+        @{ Name = 'unreadable'; Protected = $null; Incomplete = $true; Expected = '[stays on: it could not be read completely (a warning above says why)] Odd' }
+    ) {
+        param($Protected, $Incomplete, $Expected)
+        $entry = New-TuneupStartupEntry -Source 'service' -Key 'Odd' -Name 'Odd' -Target @{ Incomplete = $Incomplete }
+        $entry.protected = $Protected
+        $text = (Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry @($entry) -IsAdmin $true) 6>&1 | Out-String)
+        $text | Should -Match ([regex]::Escape($Expected))
+    }
+
+    It 'marks what needs administrator to be turned off' {
+        $tray = New-TuneupStartupEntry -Source 'run-machine' -Key 'Tray' -Name 'Tray'
+        $tray.canDisable = $true
+        $text = (Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry @($tray) -IsAdmin $false) 6>&1 | Out-String)
+        $text | Should -Match ('\[on\] Tray - .* ' + [regex]::Escape((Get-TuneupText -Key 'menu.profile.admin')))
+    }
+
+    It 'tells people why an app of work is not recommended on a work PC' {
+        $teams = New-TuneupStartupEntry -Source 'store-app' -Key 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask' -Name 'MSTeams'
+        $teams.canDisable = $true
+        $teams.notRecommendedReason = 'work-app'
+        $document = Get-TuneupStartupDocument -Entry @($teams) -IsAdmin $false -WorkPc $true
+        $document.workPc | Should -BeTrue
+        $text = (Write-TuneupStartupReport -Document $document 6>&1 | Out-String)
+        $text | Should -Match 'Turning it off is not recommended: on a work PC it is used for work'
+        $text | Should -Not -Match 'Turning it off is recommended'
+    }
+
+    It 'says when nothing starts with Windows' {
+        $text = (Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry @() -IsAdmin $true) 6>&1 | Out-String)
+        $text | Should -Match 'Nothing that starts with Windows was found\.'
+    }
+}
+
+Describe 'A startup document in the machine folder' {
+    BeforeAll {
+        $script:ProfileFolder = [Environment]::GetFolderPath('UserProfile')
+        $script:Sid = 'S-1-5-21-1111111111-2222222222-3333333333-1001'
+        $script:EntraSid = 'S-1-12-1-1234567890-1234567890-1234567890-1234567890'
+    }
+
+    It 'hides the profile folder, the account name and the SID of the account in name, key, command and path' {
+        $task = "OneDrive Standalone Update Task-$Sid"
+        $text = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
+                schemaVersion = 1
+                command       = 'startup'
+                warnings      = [string[]]@("Could not read the startup item the task \$task, so it is left out of the list: x")
+                entries       = @(
+                    [pscustomobject]@{
+                        id = 'startup.task.onedrive-standalone-update-task-12345678'; name = $task; key = "\$task"; source = 'task'
+                        command = "`"$ProfileFolder\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe`""
+                        path = "$ProfileFolder\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe"
+                    }
+                    [pscustomobject]@{
+                        id = 'startup.folder-user.x-00000000'; name = "Tool of $EntraSid"; key = "$ProfileFolder\x.lnk"; source = 'folder-user'
+                        command = "`"$ProfileFolder\Apps\x.exe`" -a"; path = "$ProfileFolder\Apps\x.exe"
+                    }
+                )
+            })
+        $hiddenText = Hide-TuneupResultPersonalData -Text $text
+        $hiddenText | Should -Not -Match '1111111111|1234567890'
+        $hidden = $hiddenText | ConvertFrom-Json
+        $hidden.command | Should -Be 'startup'
+        $hidden.warnings[0] | Should -Be 'Could not read the startup item the task \OneDrive Standalone Update Task-%SID%, so it is left out of the list: x'
+        $hidden.entries[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-12345678'
+        $hidden.entries[0].name | Should -Be 'OneDrive Standalone Update Task-%SID%'
+        $hidden.entries[0].key | Should -Be '\OneDrive Standalone Update Task-%SID%'
+        $hidden.entries[0].command | Should -Be '"%USERPROFILE%\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe"'
+        $hidden.entries[0].path | Should -Be '%USERPROFILE%\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe'
+        $hidden.entries[0].source | Should -Be 'task'
+        $hidden.entries[1].name | Should -Be 'Tool of %SID%'
+        $hidden.entries[1].key | Should -Be '%USERPROFILE%\x.lnk'
+        $hidden.entries[1].command | Should -Be '"%USERPROFILE%\Apps\x.exe" -a'
+        $hidden.entries[1].path | Should -Be '%USERPROFILE%\Apps\x.exe'
+    }
+
+    It 'hides the SID in the titles of what -Startup -Disable plans and applies' {
+        $text = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
+                command = 'apply'; source = 'startup'
+                results = @([pscustomobject]@{ id = 'startup.task.onedrive-standalone-update-task-12345678'; title = "OneDrive Standalone Update Task-$Sid"; status = 'applied' })
+            })
+        $hidden = Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json
+        $hidden.results[0].title | Should -Be 'OneDrive Standalone Update Task-%SID%'
+        $hidden.results[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-12345678'
+    }
+
+    It 'leaves name, key and title of other documents as they are, and hides the SID in their free texts' {
+        $text = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
+                command  = 'apply'; source = 'profiles'
+                warnings = [string[]]@("Could not read $ProfileFolder\x of $Sid")
+                results  = @([pscustomobject]@{ id = 'test.x'; title = "Title $Sid"; name = "$ProfileFolder\n"; key = $Sid; status = 'applied' })
+            })
+        $hidden = Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json
+        $hidden.warnings[0] | Should -Be 'Could not read %USERPROFILE%\x of %SID%'
+        $hidden.results[0].title | Should -Be "Title $Sid"
+        $hidden.results[0].name | Should -Be "$ProfileFolder\n"
+        $hidden.results[0].key | Should -Be $Sid
+    }
+
+    It 'leaves the SIDs of Windows accounts (not of a person) alone' {
+        $text = ConvertTo-Json -InputObject ([pscustomobject]@{ command = 'startup'; warnings = [string[]]@('S-1-5-18 and S-1-5-32-545'); entries = @() })
+        (Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json).warnings[0] | Should -Be 'S-1-5-18 and S-1-5-32-545'
+    }
+}
