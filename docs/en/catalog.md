@@ -731,6 +731,7 @@ Removes the Widgets board and its background web processes. Does not work on Hom
 - **In profiles:** `legacy`, `lite`; **Kept by:** none
 - **Windows:** 11, build 22000 or later; **Editions:** Pro, Enterprise, Education
 - **After applying:** sign out
+- **If access is denied, change it by hand in:** Settings > Personalization > Taskbar > Widgets
 - **Sources:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-newsandinterests>, <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
 
 ### `ui.news-interests-win10`

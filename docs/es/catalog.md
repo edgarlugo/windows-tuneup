@@ -731,6 +731,7 @@ Quita el panel de Widgets y sus procesos web en segundo plano. No funciona en Ho
 - **En perfiles:** `legacy`, `lite`; **Lo mantienen:** ninguno
 - **Windows:** 11, build 22000 o posterior; **Ediciones:** Pro, Enterprise, Education
 - **Después de aplicar:** cerrar sesión
+- **Si el acceso está denegado, cambiarlo a mano en:** Configuración > Personalización > Barra de tareas > Widgets
 - **Fuentes:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-newsandinterests>, <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
 
 ### `ui.news-interests-win10`

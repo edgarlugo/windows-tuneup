@@ -119,6 +119,9 @@ function New-DocPage {
             if ($null -ne $tweak.PSObject.Properties['signOutRequired'] -and $tweak.signOutRequired) { $after += $text.'after.signOut' }
             if (-not $after.Count) { $after = @($text.'after.nothing') }
             & $add "- **$($text.afterApplying):** $($after -join ', ')"
+            if ($null -ne $tweak.PSObject.Properties['manualSetting']) {
+                & $add "- **$($text.manualSetting):** $($tweak.manualSetting.$Lang)"
+            }
             & $add "- **$($text.sources):** $(@($tweak.sources | ForEach-Object { "<$_>" }) -join ', ')"
             & $add ''
         }
