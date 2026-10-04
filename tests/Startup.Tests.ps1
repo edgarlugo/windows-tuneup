@@ -1041,6 +1041,31 @@ Describe 'A startup document in the machine folder' {
         $hidden.results[0].key | Should -Be $Sid
     }
 
+    It 'hides title, name, key and command of every item of a startup entry, in any document (-Status, -Undo)' {
+        $profiles = Split-Path $ProfileFolder -Parent
+        $text = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
+                command = 'status'
+                items   = @(
+                    [pscustomobject]@{ id = 'startup.task.onedrive-standalone-update-task-1234567812345678'; title = "OneDrive Standalone Update Task-$Sid"; status = 'ok' }
+                    [pscustomobject]@{ id = 'privacy.x'; title = "Title $Sid"; status = 'ok' }
+                )
+            })
+        $hidden = Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json
+        $hidden.items[0].title | Should -Be 'OneDrive Standalone Update Task-%SID%'
+        $hidden.items[1].title | Should -Be "Title $Sid"
+        $undo = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
+                command = 'undo'
+                results = @([pscustomobject]@{
+                        id = 'startup.folder-user.tool-lnk-1234567812345678'; title = "Tool of $profiles\Other"; status = 'failed'
+                        manual = [string[]]@("Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'Task-$Sid'")
+                    })
+            })
+        $hidden = Hide-TuneupResultPersonalData -Text $undo | ConvertFrom-Json
+        $hidden.results[0].title | Should -Be "Tool of $profiles\%USERNAME%"
+        # A command to run keeps what it names.
+        $hidden.results[0].manual[0] | Should -Be "Remove-ItemProperty -LiteralPath 'HKCU:\X' -Name 'Task-$Sid'"
+    }
+
     It 'leaves the SIDs of Windows accounts (not of a person) alone' {
         $text = ConvertTo-Json -InputObject ([pscustomobject]@{ command = 'startup'; warnings = [string[]]@('S-1-5-18 and S-1-5-32-545'); entries = @() })
         (Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json).warnings[0] | Should -Be 'S-1-5-18 and S-1-5-32-545'

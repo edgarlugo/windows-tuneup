@@ -388,6 +388,33 @@ Describe 'Invoke-TuneupStartupCommand' {
         $context.Io.Output | Should -Contain (Get-TuneupText -Key 'startup.nextStart')
     }
 
+    It 'keeps in the run only the warnings about the entries it turns off' {
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry {
+            Write-Warning 'Could not read the startup item PrivateThing in the startup folder, so it is left out of the list: denied'
+            Write-Warning 'Could not read the signature of C:\Games\Steam\Steam.exe, so the list of what starts with Windows may be incomplete: x'
+            $script:Entries
+        }
+        $context = New-TestContext -Json
+        $report = Invoke-TestStartup $context -Disable @($SteamId) -Yes
+        $context.ExitCode | Should -Be 0
+        @($report.warnings) -join "`n" | Should -Match 'signature of C:\\Games\\Steam'
+        @($report.warnings) -join "`n" | Should -Not -Match 'PrivateThing'
+        $transcript = [System.IO.File]::ReadAllText((Join-Path $report.runDir 'transcript.log'))
+        $transcript | Should -Not -Match 'PrivateThing'
+        $transcript | Should -Match 'signature of C:\\Games\\Steam'
+    }
+
+    It 'hides the SID of the account in the transcript and in result.json' {
+        $task = 'Vendor Sync-S-1-5-21-1111111111-2222222222-3333333333-1001'
+        $script:Entries = @(New-TestSteam)
+        $script:Entries[0].name = $task
+        $context = New-TestContext -Json
+        $report = Invoke-TestStartup $context -Disable @($SteamId) -Yes
+        $report.results[0].title | Should -Be $task
+        [System.IO.File]::ReadAllText((Join-Path $report.runDir 'transcript.log')) | Should -Not -Match '1111111111'
+        [System.IO.File]::ReadAllText((Join-Path $report.runDir 'result.json')) | Should -Not -Match '1111111111'
+    }
+
     It 'writes the request of the run in its transcript' {
         $context = New-TestContext -Json
         $report = Invoke-TestStartup $context -Disable @($SteamId) -Yes

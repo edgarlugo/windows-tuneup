@@ -320,6 +320,7 @@ function Invoke-TuneupStartupCommand {
             }
         }
     }
+    $warningsBefore = $Context.Warnings.Count
     # On a work PC (managed, or joined to Entra ID) the apps of work are not recommended.
     $workArguments = @{ Environment = $environment }
     $workPc = [bool](@(Invoke-TuneupContextStep -Context $Context -Step { Test-TuneupStartupWorkPc @workArguments }) | Select-Object -Last 1)
@@ -342,6 +343,13 @@ function Invoke-TuneupStartupCommand {
     }
     # An id that more than one entry has could name the wrong one: none of them is turned off.
     Invoke-TuneupContextStep -Context $Context -Step { Set-TuneupStartupAmbiguity -Entry $entries }
+    # What reading the list warned about other entries is not part of this run (its document and
+    # transcript): only the warnings that name a chosen entry stay.
+    $chosenTexts = @($entries | Where-Object { $ids -contains [string]$_.id } | ForEach-Object { [string]$_.id; [string]$_.name; [string]$_.key; [string]$_.path } | Where-Object { $_ })
+    for ($index = $Context.Warnings.Count - 1; $index -ge $warningsBefore; $index--) {
+        $warning = $Context.Warnings[$index]
+        if (-not @($chosenTexts | Where-Object { $warning.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count) { $Context.Warnings.RemoveAt($index) }
+    }
     $byId = @{}
     $names = @{}
     foreach ($entry in $entries) {

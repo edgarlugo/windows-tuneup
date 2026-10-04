@@ -239,6 +239,19 @@ Describe 'Hide-TuneupPersonalData' {
         Hide-TuneupPersonalData -Text "$($env:USERNAME)s and x$($env:USERNAME)" | Should -Be "$($env:USERNAME)s and x$($env:USERNAME)"
     }
 
+    It 'hides the SID of an account, of a domain or of Entra ID, and leaves the ones of Windows' {
+        Hide-TuneupPersonalData -Text 'Task-S-1-5-21-1111111111-2222222222-3333333333-1001 and s-1-12-1-1-2-3-4' | Should -Be 'Task-%SID% and %SID%'
+        Hide-TuneupPersonalData -Text 'S-1-5-18, S-1-5-32-545 and S-1-5-19' | Should -Be 'S-1-5-18, S-1-5-32-545 and S-1-5-19'
+    }
+
+    It 'hides the folder of any account under the profiles folder, but not the shared ones' {
+        $profiles = Split-Path ([Environment]::GetFolderPath('UserProfile')) -Parent
+        Hide-TuneupPersonalData -Text "Read $profiles\Someone Else\AppData\x.exe and $profiles\Public\Desktop" |
+            Should -Be "Read $profiles\%USERNAME%\AppData\x.exe and $profiles\Public\Desktop"
+        Hide-TuneupPersonalData -Text "`"$($profiles.Replace('\', '\\'))\\Other\\x`"" -JsonEscaped | Should -Be "`"$($profiles.Replace('\', '\\'))\\%USERNAME%\\x`""
+        Hide-TuneupPersonalData -Text "$profiles\Default\NTUSER.DAT" | Should -Be "$profiles\Default\NTUSER.DAT"
+    }
+
     It 'gives back text without either of them untouched' {
         Hide-TuneupPersonalData -Text 'Applied: 2 | Partial: 0' | Should -Be 'Applied: 2 | Partial: 0'
         Hide-TuneupPersonalData -Text '' | Should -Be ''
