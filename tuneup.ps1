@@ -12,7 +12,7 @@
 .EXAMPLE
     .\tuneup.ps1 -Startup
 .EXAMPLE
-    .\tuneup.ps1 -Startup -Disable 'startup.run-user.steam-eb4bc901' -WhatIf
+    .\tuneup.ps1 -Startup -Disable 'startup.run-user.steam-eb4bc901e3d06cf1' -WhatIf
 .EXAMPLE
     .\tuneup.ps1 -List -Json -ResultId 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12
 .EXAMPLE

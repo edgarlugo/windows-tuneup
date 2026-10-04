@@ -9,23 +9,23 @@ BeforeAll {
 
 Describe 'Startup ids' {
     It 'gives the same id for the same source and key, whatever the case' {
-        Get-TuneupStartupId -Source 'run-user' -Key 'Steam' | Should -BeExactly 'startup.run-user.steam-eb4bc901'
-        Get-TuneupStartupId -Source 'run-user' -Key 'STEAM' | Should -BeExactly 'startup.run-user.steam-eb4bc901'
+        Get-TuneupStartupId -Source 'run-user' -Key 'Steam' | Should -BeExactly 'startup.run-user.steam-eb4bc901e3d06cf1'
+        Get-TuneupStartupId -Source 'run-user' -Key 'STEAM' | Should -BeExactly 'startup.run-user.steam-eb4bc901e3d06cf1'
     }
 
     It 'gives another id for the same key in another source' {
-        Get-TuneupStartupId -Source 'run-machine' -Key 'Steam' | Should -BeExactly 'startup.run-machine.steam-bb5ab8ea'
+        Get-TuneupStartupId -Source 'run-machine' -Key 'Steam' | Should -BeExactly 'startup.run-machine.steam-bb5ab8ea20c71de2'
     }
 
     It 'keeps only safe characters, cuts long keys and never leaves the slug empty' {
-        Get-TuneupStartupId -Source 'task' -Key '\Vendor\Updater Task (Logon)' | Should -BeExactly 'startup.task.vendor-updater-task-logon-a94b661c'
+        Get-TuneupStartupId -Source 'task' -Key '\Vendor\Updater Task (Logon)' | Should -BeExactly 'startup.task.vendor-updater-task-logon-a94b661c77a50fd2'
         Get-TuneupStartupId -Source 'service' -Key 'AVeryLongServiceNameThatGoesOnAndOnForeverAndEver' |
-            Should -BeExactly 'startup.service.averylongservicenamethatgoesonan-57d0735c'
+            Should -BeExactly 'startup.service.averylongservicenamethatgoesonan-57d0735c9da35e24'
         Get-TuneupStartupId -Source 'store-app' -Key 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask' |
-            Should -BeExactly 'startup.store-app.msteams-8wekyb3d8bbwe-teamstfwst-119df735'
+            Should -BeExactly 'startup.store-app.msteams-8wekyb3d8bbwe-teamstfwst-119df735cb48144b'
         # Letters outside ASCII leave only what is left (here the extension of the shortcut).
-        Get-TuneupStartupId -Source 'folder-user' -Key ([string][char]0x5FAE + [char]0x4FE1 + '.lnk') | Should -BeExactly 'startup.folder-user.lnk-70476f0a'
-        Get-TuneupStartupId -Source 'folder-user' -Key ([string][char]0x5FAE + [char]0x4FE1) | Should -Match '^startup\.folder-user\.entry-[0-9a-f]{8}$'
+        Get-TuneupStartupId -Source 'folder-user' -Key ([string][char]0x5FAE + [char]0x4FE1 + '.lnk') | Should -BeExactly 'startup.folder-user.lnk-70476f0a1e114b6d'
+        Get-TuneupStartupId -Source 'folder-user' -Key ([string][char]0x5FAE + [char]0x4FE1) | Should -Match '^startup\.folder-user\.entry-[0-9a-f]{16}$'
     }
 
     It 'matches the id rule of the catalog and its own pattern' {
@@ -40,16 +40,20 @@ Describe 'Startup ids' {
     It 'keeps the SID of an account out of the readable part of an id, but not out of what tells two ids apart' {
         $one = Get-TuneupStartupId -Source 'task' -Key '\Vendor Sync-S-1-5-21-1111111111-2222222222-3333333333-1001'
         $two = Get-TuneupStartupId -Source 'task' -Key '\Vendor Sync-S-1-5-21-1111111111-2222222222-3333333333-1002'
-        $one | Should -Match '^startup\.task\.vendor-sync-[0-9a-f]{8}$'
+        $one | Should -Match '^startup\.task\.vendor-sync-[0-9a-f]{16}$'
         $one | Should -Not -Match '1111'
         $two | Should -Not -Be $one
         Test-TuneupStartupId -Id $one | Should -BeTrue
     }
 
+    It 'ends with 16 hexadecimal digits of the hash, so two entries practically never share an id' {
+        Get-TuneupStartupId -Source 'run-user' -Key 'Steam' | Should -MatchExactly '-[0-9a-f]{16}$'
+    }
+
     It 'tells the scope of an id from its source' {
-        Get-TuneupStartupIdScope -Id 'startup.run-user.steam-eb4bc901' | Should -Be 'user'
+        Get-TuneupStartupIdScope -Id 'startup.run-user.steam-eb4bc901e3d06cf1' | Should -Be 'user'
         Get-TuneupStartupIdScope -Id 'startup.store-app.x-00000000' | Should -Be 'user'
-        Get-TuneupStartupIdScope -Id 'startup.run-machine.steam-bb5ab8ea' | Should -Be 'machine'
+        Get-TuneupStartupIdScope -Id 'startup.run-machine.steam-bb5ab8ea20c71de2' | Should -Be 'machine'
         Get-TuneupStartupIdScope -Id 'startup.service.x-00000000' | Should -Be 'machine'
         Get-TuneupStartupIdScope -Id 'startup.nowhere.x-00000000' | Should -BeNullOrEmpty
         Get-TuneupStartupIdScope -Id 'privacy.advertising-id' | Should -BeNullOrEmpty
@@ -153,7 +157,7 @@ Describe 'Startup texts' {
         $module = Get-Module Tuneup
         $keys = @(& $module { $script:StartupSources.Keys } | ForEach-Object { "startup.source.$_" }) +
             @(& $module { $script:StartupProtections } | ForEach-Object { "startup.protected.$_" }) +
-            @('run-once', 'unsupported-name', 'unreadable' | ForEach-Object { "startup.fixed.$_" }) +
+            @('run-once', 'unsupported-name', 'unreadable', 'ambiguous' | ForEach-Object { "startup.fixed.$_" }) +
             @(& $module { $script:StartupRuleCategories.recommend } | ForEach-Object { "startup.recommend.$_" }) +
             @('registry', 'store', 'task', 'service' | ForEach-Object { "startup.why.$_" }) +
             @('startup.notRecommended.work-app', 'transcript.request.startup', 'reapply.startupEntry')
@@ -467,6 +471,27 @@ Describe 'Get-TuneupStartupEntry' {
         Mock -ModuleName Tuneup Get-TuneupStartupProcess { }
     }
 
+    It 'never offers to turn off entries that share an id, saying why, and keeps the rest of the list' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'Steam'; Command = '"C:\Games\Steam\steam.exe"' }
+            [pscustomobject]@{ Name = 'STEAM'; Command = '"C:\Other\steam.exe"' }
+            [pscustomobject]@{ Name = 'Discord'; Command = '"C:\Apps\Discord\Update.exe"' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        $entries = @(Get-TuneupStartupEntry -Rules $Rules -WarningVariable warned -WarningAction SilentlyContinue)
+        $twins = @($entries | Where-Object { $_.id -eq 'startup.run-user.steam-eb4bc901e3d06cf1' })
+        $twins.Count | Should -Be 2
+        foreach ($twin in $twins) {
+            $twin.canDisable | Should -BeFalse
+            $twin.recommended | Should -BeFalse
+            $twin.uninstall | Should -BeNullOrEmpty
+            Get-TuneupStartupFixedReason -Entry $twin | Should -Be 'ambiguous'
+        }
+        (Find-TestEntry $entries 'Discord').canDisable | Should -BeTrue
+        @($warned | Where-Object { "$_" -match 'startup\.run-user\.steam-eb4bc901e3d06cf1' }).Count | Should -Be 1
+        $text = (Write-TuneupStartupReport -Document (Get-TuneupStartupDocument -Entry $entries -IsAdmin $true) 6>&1 | Out-String)
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'startup.state.fixed' -Format (Get-TuneupText -Key 'startup.fixed.ambiguous')) + ' Steam'))
+    }
+
     It 'lists the Run entries with their state, publisher, use and recommendation' {
         Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Steam'; Command = '"C:\Games\Steam\steam.exe" -silent' } } -ParameterFilter { $Path -eq $UserRun }
         Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
@@ -482,7 +507,7 @@ Describe 'Get-TuneupStartupEntry' {
         }
         $entries = Get-TestEntry
         $steam = Find-TestEntry $entries 'Steam'
-        $steam.id | Should -BeExactly 'startup.run-user.steam-eb4bc901'
+        $steam.id | Should -BeExactly 'startup.run-user.steam-eb4bc901e3d06cf1'
         $steam.source | Should -Be 'run-user'
         $steam.enabled | Should -BeTrue
         $steam.publisher | Should -Be 'Valve Corp.'
@@ -897,7 +922,7 @@ Describe 'Startup document and report' {
         $text | Should -Match 'Lo que arranca con Windows o queda en segundo plano \(4\):'
         $text.IndexOf('Steam') | Should -BeLessThan $text.IndexOf('PanGPS')
         $text | Should -Match '\[encendido\] Steam \(Valve Corp\.\) - al iniciar sesi.n \(Run del usuario\) - en ejecuci.n, 220 MB'
-        $text | Should -Match 'id: startup\.run-user\.steam-eb4bc901'
+        $text | Should -Match 'id: startup\.run-user\.steam-eb4bc901e3d06cf1'
         $text | Should -Match 'Se recomienda apagarlo: lanzador de juegos\.'
         $text | Should -Match 'winget uninstall --id Valve\.Steam --exact'
         $text | Should -Match '\[protegido: VPN\] PanGPS'

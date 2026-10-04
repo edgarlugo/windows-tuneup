@@ -307,6 +307,7 @@
   "startup.fixed.run-once": "corre una sola vez y Windows lo borra",
   "startup.fixed.unsupported-name": "su nombre tiene caracteres comodín y no se puede buscar con exactitud",
   "startup.fixed.unreadable": "no se pudo leer completo (un aviso más arriba dice por qué)",
+  "startup.fixed.ambiguous": "otra entrada tiene el mismo id, así que el id podría nombrar la equivocada",
   "startup.recommend.updater": "actualizador en segundo plano",
   "startup.recommend.game-launcher": "lanzador de juegos",
   "startup.recommend.sync-client": "cliente de sincronización de archivos",

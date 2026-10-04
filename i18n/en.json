@@ -307,6 +307,7 @@
   "startup.fixed.run-once": "it runs only once and Windows deletes it",
   "startup.fixed.unsupported-name": "its name has wildcard characters and cannot be looked up exactly",
   "startup.fixed.unreadable": "it could not be read completely (a warning above says why)",
+  "startup.fixed.ambiguous": "another entry has the same id, so the id could name the wrong one",
   "startup.recommend.updater": "updater in the background",
   "startup.recommend.game-launcher": "game launcher",
   "startup.recommend.sync-client": "file sync client",

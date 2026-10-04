@@ -41,7 +41,7 @@ $script:StartupRunKeys = @(
 )
 
 # startup.<source>.<slug>-<hash>: the slug is the key in lowercase with everything but a-z and 0-9 turned
-# into hyphens (32 characters at most, 'entry' when nothing is left), and the hash the first 8 hexadecimal
+# into hyphens (32 characters at most, 'entry' when nothing is left), and the hash the first 16 hexadecimal
 # digits of the SHA256 of <source>|<key in lowercase>. The same entry gets the same id in every run,
 # elevated or not; the registry and the scheduled tasks do not tell case apart, so neither does the id.
 function Get-TuneupStartupId {
@@ -58,7 +58,7 @@ function Get-TuneupStartupId {
     } finally {
         $sha.Dispose()
     }
-    $short = -join ($hash[0..3] | ForEach-Object { $_.ToString('x2') })
+    $short = -join ($hash[0..7] | ForEach-Object { $_.ToString('x2') })
     "startup.$Source.$slug-$short"
 }
 
@@ -801,6 +801,27 @@ function Get-TuneupStartupEntry {
         }
         $entry
     }
+    Set-TuneupStartupAmbiguity -Entry $entries
+}
+
+# Entries that share an id (the same source and key, without case, or the hash of two keys): an id that
+# names more than one entry could turn off the wrong one, so none of them can be turned off. Marks them in
+# place, with a warning for each id.
+function Set-TuneupStartupAmbiguity {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entry)
+    $groups = @($Entry | Where-Object { $null -ne $_ } | Group-Object -Property { [string]$_.id } | Where-Object { $_.Count -gt 1 })
+    foreach ($group in $groups) {
+        Write-Warning "Several startup entries have the id $($group.Name), so none of them can be turned off from here: $((@($group.Group | ForEach-Object { [string]$_.name }) -join ', '))"
+        foreach ($twin in $group.Group) {
+            $twin.target | Add-Member -NotePropertyName Ambiguous -NotePropertyValue $true -Force
+            $twin.canDisable = $false
+            $twin.recommended = $false
+            $twin.recommendedReason = $null
+            $twin.notRecommendedReason = $null
+            $twin.uninstall = $null
+        }
+    }
 }
 
 # Windows on 64 bits shows a 32-bit process another HKLM\SOFTWARE and another System32 (WOW64): the list
@@ -887,28 +908,30 @@ function Get-TuneupStartupDocument {
 # of the list and on its view in the document (the reason of an entry that could not be read is only in
 # the list: the view gives it as canDisable false with no protection).
 function Get-TuneupStartupFixedText {
-    param([Parameter(Mandatory)]$Entry)
-    $reason = $(if ($null -ne $Entry.PSObject.Properties['target']) { Get-TuneupStartupFixedReason -Entry $Entry } else { Get-TuneupStartupViewFixedReason -View $Entry })
+    param([Parameter(Mandatory)]$Entry, [AllowEmptyCollection()][string[]]$Ambiguous = @())
+    $reason = $(if ($null -ne $Entry.PSObject.Properties['target']) { Get-TuneupStartupFixedReason -Entry $Entry } else { Get-TuneupStartupViewFixedReason -View $Entry -Ambiguous $Ambiguous })
     if (-not $reason) { return }
     if ($Entry.protected) { return (Get-TuneupText -Key "startup.protected.$reason") }
     Get-TuneupText -Key "startup.fixed.$reason"
 }
 
-# The reason of Get-TuneupStartupFixedReason, from what the document gives of an entry.
+# The reason of Get-TuneupStartupFixedReason, from what the document gives of an entry. -Ambiguous: the ids
+# that more than one entry of the document has.
 function Get-TuneupStartupViewFixedReason {
-    param([Parameter(Mandatory)]$View)
+    param([Parameter(Mandatory)]$View, [AllowEmptyCollection()][string[]]$Ambiguous = @())
     if ($View.protected) { return [string]$View.protected }
     if ([string]$View.source -like 'runonce*') { return 'run-once' }
+    if ($Ambiguous -contains [string]$View.id) { return 'ambiguous' }
     if ($View.source -eq 'task' -and [string]$View.key -match '[*?\[\]`]') { return 'unsupported-name' }
     if ($View.enabled -and -not $View.canDisable) { return 'unreadable' }
 }
 
 # The mark of an entry for people: a word in brackets, never only a color.
 function Get-TuneupStartupMark {
-    param([Parameter(Mandatory)]$Entry)
+    param([Parameter(Mandatory)]$Entry, [AllowEmptyCollection()][string[]]$Ambiguous = @())
     if ($Entry.protected) { return (Get-TuneupText -Key 'startup.state.protected' -Format (Get-TuneupStartupFixedText -Entry $Entry)) }
     if (-not $Entry.enabled) { return (Get-TuneupText -Key 'startup.state.off') }
-    $fixed = Get-TuneupStartupFixedText -Entry $Entry
+    $fixed = Get-TuneupStartupFixedText -Entry $Entry -Ambiguous $Ambiguous
     if ($fixed) { return (Get-TuneupText -Key 'startup.state.fixed' -Format $fixed) }
     Get-TuneupText -Key 'startup.state.on'
 }
@@ -941,11 +964,12 @@ function Write-TuneupStartupReport {
     $ordered = @($entries | Where-Object { $_.recommended }) + @($entries | Where-Object { -not $_.recommended -and $_.canDisable }) +
         @($entries | Where-Object { -not $_.canDisable })
     $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
+    $ambiguous = [string[]]@($entries | Group-Object -Property { [string]$_.id } | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
     foreach ($entry in $ordered) {
         $publisher = $(if ($entry.publisher) { Get-TuneupText -Key 'startup.publisher' -Format $entry.publisher } else { '' })
         $admin = $(if ($entry.canDisable -and $entry.needsAdmin) { $adminMark } else { '' })
         $color = $(if ($entry.recommended) { 'Cyan' } elseif ($entry.canDisable) { 'Gray' } else { 'DarkGray' })
-        $line = Get-TuneupText -Key 'startup.entry' -Format (Get-TuneupStartupMark -Entry $entry), $entry.name, $publisher,
+        $line = Get-TuneupText -Key 'startup.entry' -Format (Get-TuneupStartupMark -Entry $entry -Ambiguous $ambiguous), $entry.name, $publisher,
             (Get-TuneupText -Key "startup.source.$($entry.source)"), (Get-TuneupStartupUsageText -Entry $entry), $admin
         Write-Host $line -ForegroundColor $color
         Write-Host (Get-TuneupText -Key 'startup.id' -Format $entry.id) -ForegroundColor DarkGray

@@ -174,7 +174,8 @@ function Find-TuneupStartupSignerRule {
 }
 
 # Why an entry cannot be turned off, or nothing: its protection, a run-once entry (Windows deletes it once
-# it ran; turning it off would mean deleting it), or a task whose name or folder holds a wildcard character
+# it ran; turning it off would mean deleting it), one that could not be read completely, an id that more
+# than one entry has, or a task whose name or folder holds a wildcard character
 # or the backtick that escapes one (the task handler looks tasks up with PowerShell wildcards and could not
 # be sure it found that one).
 function Get-TuneupStartupFixedReason {
@@ -183,6 +184,8 @@ function Get-TuneupStartupFixedReason {
     if ([string]$Entry.source -like 'runonce*') { return 'run-once' }
     # The list could not finish reading it (a warning said so): what was not checked is never turned off.
     if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'Incomplete') -eq $true) { return 'unreadable' }
+    # More than one entry has its id (Set-TuneupStartupAmbiguity): the id could name the wrong one.
+    if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'Ambiguous') -eq $true) { return 'ambiguous' }
     if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]`]') { return 'unsupported-name' }
 }
 

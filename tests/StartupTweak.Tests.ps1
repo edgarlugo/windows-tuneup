@@ -30,7 +30,7 @@ Describe 'ConvertTo-TuneupStartupTweak' {
     It 'turns a Run entry off through StartupApproved of its hive' {
         $approved = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
         $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = $approved; ApprovedName = 'Steam' }) -DisabledAt $DisabledAt
-        $tweak.id | Should -BeExactly 'startup.run-user.steam-eb4bc901'
+        $tweak.id | Should -BeExactly 'startup.run-user.steam-eb4bc901e3d06cf1'
         $tweak.type | Should -Be 'registry'
         $tweak.scope | Should -Be 'user'
         $tweak.set.path | Should -Be $approved

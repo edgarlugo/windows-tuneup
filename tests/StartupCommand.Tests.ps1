@@ -6,7 +6,7 @@ BeforeAll {
     Import-TuneupActionLibrary -Path (Join-Path $Fixtures 'actions')
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:Approved = "$Key\StartupApproved\Run"
-    $script:SteamId = 'startup.run-user.steam-eb4bc901'
+    $script:SteamId = 'startup.run-user.steam-eb4bc901e3d06cf1'
     $script:On = [byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     function Remove-TestKey { if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force } }
     function Get-TestApproved([string]$Name = 'Steam') {
@@ -87,9 +87,9 @@ Describe 'Invoke-TuneupStartupCommand' {
 
     It 'refuses everything in a 32-bit PowerShell on a 64-bit Windows, before reading anything: <Name>' -TestCases @(
         @{ Name = 'the list'; Disable = @(); Environment = @{ IsAdmin = $false } }
-        @{ Name = 'turning an entry off'; Disable = @('startup.run-user.steam-eb4bc901'); Environment = @{ IsAdmin = $false } }
-        @{ Name = 'elevated as another account'; Disable = @('startup.run-user.steam-eb4bc901'); Environment = @{ IsAdmin = $true; IsSessionUser = $false } }
-        @{ Name = 'on a Windows it does not support'; Disable = @('startup.run-user.steam-eb4bc901'); Environment = @{ Build = 17763; IsAdmin = $false } }
+        @{ Name = 'turning an entry off'; Disable = @('startup.run-user.steam-eb4bc901e3d06cf1'); Environment = @{ IsAdmin = $false } }
+        @{ Name = 'elevated as another account'; Disable = @('startup.run-user.steam-eb4bc901e3d06cf1'); Environment = @{ IsAdmin = $true; IsSessionUser = $false } }
+        @{ Name = 'on a Windows it does not support'; Disable = @('startup.run-user.steam-eb4bc901e3d06cf1'); Environment = @{ Build = 17763; IsAdmin = $false } }
     ) {
         param($Disable, $Environment)
         Mock -ModuleName Tuneup Test-TuneupWow64Process { $true }
@@ -255,6 +255,18 @@ Describe 'Invoke-TuneupStartupCommand' {
             (Get-TuneupText -Key 'startup.refusedLine' -Format $wild.id, 'Up[1]', (Get-TuneupText -Key 'startup.fixed.unsupported-name'))
         )
         @($refused.details) -join "`n" | Should -Be ($expected -join "`n")
+        Test-Path -LiteralPath $Approved | Should -BeFalse
+        Get-TestRunCount $context.StateRoot | Should -Be 0
+    }
+
+    It 'refuses an id that two entries share, naming both, and turns neither off' {
+        $script:Entries = @((New-TestSteam), (New-TestSteam -Name 'STEAM'))
+        $script:Entries[1].id | Should -BeExactly $SteamId
+        $context = New-TestContext -Json
+        $refused = Invoke-TestStartup $context -Disable @($SteamId) -Yes
+        $context.ExitCode | Should -Be 1
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupFixed')
+        @($refused.details) -join "`n" | Should -Be (Get-TuneupText -Key 'startup.refusedLine' -Format $SteamId, 'Steam, STEAM', (Get-TuneupText -Key 'startup.fixed.ambiguous'))
         Test-Path -LiteralPath $Approved | Should -BeFalse
         Get-TestRunCount $context.StateRoot | Should -Be 0
     }

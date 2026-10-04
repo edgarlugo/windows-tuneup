@@ -328,8 +328,18 @@ function Invoke-TuneupStartupCommand {
         $Context.ExitCode = 0
         return
     }
+    # An id that more than one entry has could name the wrong one: none of them is turned off.
+    Invoke-TuneupContextStep -Context $Context -Step { Set-TuneupStartupAmbiguity -Entry $entries }
     $byId = @{}
-    foreach ($entry in $entries) { $byId[[string]$entry.id] = $entry }
+    $names = @{}
+    foreach ($entry in $entries) {
+        $id = [string]$entry.id
+        if (-not $byId.ContainsKey($id)) {
+            $byId[$id] = $entry
+            $names[$id] = New-Object System.Collections.Generic.List[string]
+        }
+        $names[$id].Add([string]$entry.name)
+    }
     $unknown = @($ids | Where-Object { -not $byId.ContainsKey($_) })
     if ($unknown.Count) {
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($unknown -join ', '))
@@ -340,7 +350,7 @@ function Invoke-TuneupStartupCommand {
     # for each, with why.
     $fixed = @($chosen | Where-Object { Get-TuneupStartupFixedReason -Entry $_ })
     if ($fixed.Count) {
-        $details = @($fixed | ForEach-Object { Get-TuneupText -Key 'startup.refusedLine' -Format $_.id, $_.name, (Get-TuneupStartupFixedText -Entry $_) })
+        $details = @($fixed | ForEach-Object { Get-TuneupText -Key 'startup.refusedLine' -Format $_.id, ($names[[string]$_.id] -join ', '), (Get-TuneupStartupFixedText -Entry $_) })
         Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupFixed') -Details $details
         return
     }
