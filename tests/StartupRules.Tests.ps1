@@ -17,6 +17,7 @@ Describe 'catalog/startup/rules.json' {
         @(Test-TuneupStartupRuleSet -Rules $Rules).Count | Should -Be 0
         @($Rules.protect).Count | Should -BeGreaterThan 3
         @($Rules.recommend).Count | Should -BeGreaterThan 10
+        @($Rules.protectSigners | Where-Object { $_.signer -eq 'Microsoft Windows Hardware Compatibility Publisher' }).Count | Should -Be 1
     }
 
     It 'is UTF-8 without a byte order mark' {
@@ -52,6 +53,11 @@ Describe 'Test-TuneupStartupRuleSet' {
         @{ Case = 'a rule without why'; Change = { param($r) $r.protect[0].PSObject.Properties.Remove('why') }; Expected = '*has no why*' }
         @{ Case = 'workApp on a protection'; Change = { param($r) $r.protect[0] | Add-Member -NotePropertyName workApp -NotePropertyValue $true }; Expected = '*cannot have workApp*' }
         @{ Case = 'a workApp that is not true or false'; Change = { param($r) $r.recommend[0] | Add-Member -NotePropertyName workApp -NotePropertyValue 'yes' }; Expected = '*workApp must be true or false*' }
+        @{ Case = 'a signer rule without a signer'; Change = { param($r) $r.protectSigners[0].signer = ' ' }; Expected = '*protectSigners has a rule without a signer*' }
+        @{ Case = 'a signer rule that is not a protection'; Change = { param($r) $r.protectSigners[0].category = 'updater' }; Expected = "*unknown category 'updater'*" }
+        @{ Case = 'a signer rule without sources'; Change = { param($r) $r.protectSigners[0].sources = @() }; Expected = '*must name the sources it applies to*' }
+        @{ Case = 'a signer rule with an unknown source'; Change = { param($r) $r.protectSigners[0].sources = @('service', 'nowhere') }; Expected = "*unknown source 'nowhere'*" }
+        @{ Case = 'a signer rule without why'; Change = { param($r) $r.protectSigners[0].PSObject.Properties.Remove('why') }; Expected = '*protectSigners rule*has no why*' }
     ) {
         param($Change, $Expected)
         $copy = Copy-TestRules
@@ -102,6 +108,18 @@ Describe 'Get-TuneupStartupProtection' {
         $companion = & $Entry
         Get-TuneupStartupProtection -Entry $companion -Rules $Rules | Should -BeNullOrEmpty
         (Get-TuneupStartupRecommendation -Entry $companion -Rules $Rules).category | Should -Be 'companion-app'
+    }
+
+    It 'protects the services of driver packages by their signer, and only services' {
+        $whcp = 'Microsoft Windows Hardware Compatibility Publisher'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'esifsvc' -Name 'Intel(R) Dynamic Tuning service' -Publisher $whcp) -Rules $Rules | Should -Be 'device'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'FMAPOService' -Name 'Fortemedia APO Control Service' -Publisher $whcp.ToUpperInvariant()) -Rules $Rules | Should -Be 'device'
+        foreach ($source in 'run-user', 'run-machine', 'folder-user', 'task', 'store-app') {
+            Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source $source -Key 'VendorTray' -Publisher $whcp) -Rules $Rules | Should -BeNullOrEmpty -Because $source
+        }
+        # A rule of a category that comes first in the order of protection still wins.
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'PanGPS' -Publisher $whcp) -Rules $Rules | Should -Be 'vpn'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'VendorSvc' -Publisher 'Vendor Inc.') -Rules $Rules | Should -BeNullOrEmpty
     }
 
     It 'protects what lives in the folder of a product of Windows Security' {

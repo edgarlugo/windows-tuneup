@@ -286,15 +286,18 @@ function Get-TuneupStartupPackage {
 }
 
 # The startup tasks (Extension windows.startupTask) that a package manifest declares. The document is
-# loaded without resolving anything outside it.
+# loaded without resolving anything outside it. Each task also carries the PublisherDisplayName of the
+# package (the publisher that Settings shows), so the manifest is read once.
 function Get-TuneupAppxManifestStartupTask {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
     $xml = New-Object System.Xml.XmlDocument
     $xml.XmlResolver = $null
     $xml.Load($Path)
+    $publisherNode = $xml.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='PublisherDisplayName']")
+    $publisher = $(if ($null -ne $publisherNode -and $publisherNode.InnerText.Trim()) { $publisherNode.InnerText.Trim() } else { $null })
     foreach ($node in @($xml.SelectNodes("//*[local-name()='Extension'][@Category='windows.startupTask']/*[local-name()='StartupTask']"))) {
-        [pscustomobject]@{ TaskId = $node.GetAttribute('TaskId'); DisplayName = $node.GetAttribute('DisplayName') }
+        [pscustomobject]@{ TaskId = $node.GetAttribute('TaskId'); DisplayName = $node.GetAttribute('DisplayName'); PublisherDisplayName = $publisher }
     }
 }
 
@@ -385,6 +388,13 @@ $script:StartupFolders = @(
     [pscustomobject]@{ Source = 'folder-machine'; Folder = 'CommonStartup' }
 )
 
+# Where a startup folder is (Startup or CommonStartup), from the folders of the account; empty when the
+# account has none.
+function Get-TuneupStartupFolderPath {
+    param([Parameter(Mandatory)][ValidateSet('Startup', 'CommonStartup')][string]$Name)
+    [Environment]::GetFolderPath($Name)
+}
+
 # The StartupApproved values of a key, or an empty table when they cannot be read (the detector warns).
 function Read-TuneupStartupApprovedSet {
     [CmdletBinding()]
@@ -418,7 +428,7 @@ function Get-TuneupStartupFolderEntry {
     [CmdletBinding()]
     param()
     foreach ($folder in $script:StartupFolders) {
-        $path = [Environment]::GetFolderPath($folder.Folder)
+        $path = Get-TuneupStartupFolderPath -Name $folder.Folder
         if (-not $path) { continue }
         $items = Invoke-TuneupDetector -What "the startup folder $path" -Detector { Get-TuneupStartupFolderItem -Path $path }
         if (-not $items.Ok) { continue }
@@ -469,7 +479,10 @@ function Get-TuneupStartupStoreEntry {
         $entry = New-TuneupStartupEntry -Source 'store-app' -Key "$($task.PackageFamilyName)\$($task.TaskId)" -Name $name `
             -Enabled (@(2, 4) -contains $task.State) -Policy (@(3, 4) -contains $task.State) `
             -Target @{ StoreKeyPath = [string]$task.KeyPath; StoreState = [int]$task.State; InstallLocation = [string]$package.InstallLocation; WindowsPart = ($package.SignatureKind -eq 'System') }
-        $entry.publisher = Get-TuneupCommonName -DistinguishedName $package.Publisher
+        # The publisher that Settings shows; the CN of the package (sometimes a GUID) when the manifest
+        # gives none or only a resource reference.
+        $display = [string]$startupTask.PublisherDisplayName
+        $entry.publisher = $(if ($display.Trim() -and $display -notlike 'ms-resource:*') { $display.Trim() } else { Get-TuneupCommonName -DistinguishedName $package.Publisher })
         $entry
     }
 }

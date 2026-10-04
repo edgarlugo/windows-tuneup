@@ -89,6 +89,11 @@ Describe 'Startup path helpers' {
         Get-TuneupCommonName -DistinguishedName $null | Should -BeNullOrEmpty
     }
 
+    It 'reads a startup folder from the folders of the account' {
+        Get-TuneupStartupFolderPath -Name 'Startup' | Should -Be ([Environment]::GetFolderPath('Startup'))
+        Get-TuneupStartupFolderPath -Name 'CommonStartup' | Should -Be ([Environment]::GetFolderPath('CommonStartup'))
+    }
+
     It 'reads a StartupApproved value as Task Manager does: <Case>' -TestCases @(
         @{ Case = 'no value is on'; Value = $null; Expected = $true }
         @{ Case = 'an empty value is on'; Value = [byte[]]@(); Expected = $true }
@@ -215,6 +220,10 @@ Describe 'Startup detectors' {
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10">
+  <Properties>
+    <DisplayName>Sample</DisplayName>
+    <PublisherDisplayName>Sample Publisher</PublisherDisplayName>
+  </Properties>
   <Applications>
     <Application Id="App">
       <Extensions>
@@ -233,6 +242,11 @@ Describe 'Startup detectors' {
         $tasks = @(Get-TuneupAppxManifestStartupTask -Path $manifest)
         @($tasks | ForEach-Object { $_.TaskId }) -join ',' | Should -Be 'TaskOne,TaskTwo'
         $tasks[0].DisplayName | Should -Be 'Sample One'
+        # The name of the publisher that Settings shows, on every task of the package (the manifest is read once).
+        @($tasks | ForEach-Object { $_.PublisherDisplayName }) -join ',' | Should -Be 'Sample Publisher,Sample Publisher'
+        $bare = Join-Path $TestDrive 'Bare.xml'
+        [System.IO.File]::WriteAllText($bare, ([System.IO.File]::ReadAllText($manifest) -replace '(?s)<Properties>.*</Properties>', ''))
+        @(Get-TuneupAppxManifestStartupTask -Path $bare)[0].PublisherDisplayName | Should -BeNullOrEmpty
         @(Get-TuneupAppxManifestStartupTask -Path (Join-Path $TestDrive 'none.xml')).Count | Should -Be 0
     }
 
@@ -319,6 +333,9 @@ Describe 'Get-TuneupStartupEntry' {
         $script:Rules = Import-TuneupStartupRuleSet
         $script:UserRun = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
         $script:MachineRun = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+        # The startup folders are never read from the account that runs the tests (a service account may have none).
+        $script:UserStartupFolder = 'C:\Users\me\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup'
+        $script:CommonStartupFolder = 'C:\ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp'
         function Get-TestEntry { @(Get-TuneupStartupEntry -Rules $Rules 3>$null) }
         function Find-TestEntry($Entries, [string]$Name) { @($Entries | Where-Object { $_.name -eq $Name })[0] }
     }
@@ -326,6 +343,8 @@ Describe 'Get-TuneupStartupEntry' {
     BeforeEach {
         Mock -ModuleName Tuneup Get-TuneupStartupRunValue { }
         Mock -ModuleName Tuneup Get-TuneupStartupApprovedValue { @{} }
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderPath { $UserStartupFolder } -ParameterFilter { $Name -eq 'Startup' }
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderPath { $CommonStartupFolder } -ParameterFilter { $Name -eq 'CommonStartup' }
         Mock -ModuleName Tuneup Get-TuneupStartupFolderItem { }
         Mock -ModuleName Tuneup Get-TuneupShortcutTarget { $null }
         Mock -ModuleName Tuneup Get-TuneupStartupStoreTask { }
@@ -395,7 +414,7 @@ Describe 'Get-TuneupStartupEntry' {
     }
 
     It 'lists a shortcut of the startup folder by where it points' {
-        $folder = [Environment]::GetFolderPath('Startup')
+        $folder = $UserStartupFolder
         Mock -ModuleName Tuneup Get-TuneupStartupFolderItem { [pscustomobject]@{ Name = 'Discord.lnk'; FullName = "$folder\Discord.lnk" } } -ParameterFilter { $Path -eq $folder }
         Mock -ModuleName Tuneup Get-TuneupShortcutTarget { [pscustomobject]@{ Target = 'C:\Users\me\AppData\Local\Discord\Update.exe'; Arguments = '--processStart Discord.exe' } }
         $discord = Find-TestEntry (Get-TestEntry) 'Discord'
@@ -420,15 +439,18 @@ Describe 'Get-TuneupStartupEntry' {
         Mock -ModuleName Tuneup Get-TuneupStartupPackage {
             [pscustomobject]@{ PackageFamilyName = 'MSTeams_8wekyb3d8bbwe'; Name = 'MSTeams'; Publisher = 'CN=Microsoft Corporation, O=Microsoft Corporation'; InstallLocation = 'C:\Program Files\WindowsApps\MSTeams_1_x64__8wekyb3d8bbwe'; SignatureKind = 'Store' }
             [pscustomobject]@{ PackageFamilyName = 'Windows.Part_cw5n1h2txyewy'; Name = 'Windows.Part'; Publisher = 'CN=Microsoft Windows'; InstallLocation = 'C:\Windows\SystemApps\Part'; SignatureKind = 'System' }
-            [pscustomobject]@{ PackageFamilyName = 'Corp.App_x'; Name = 'Corp.App'; Publisher = 'CN=Corp'; InstallLocation = 'C:\Program Files\WindowsApps\Corp'; SignatureKind = 'Developer' }
+            [pscustomobject]@{ PackageFamilyName = 'Corp.App_x'; Name = 'Corp.App'; Publisher = 'CN=EB51A5DA-0E72-4863-82E4-EA21C1F8DFE3'; InstallLocation = 'C:\Program Files\WindowsApps\Corp'; SignatureKind = 'Developer' }
         }
-        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'TeamsTfwStartupTask'; DisplayName = 'ms-resource:StartupTaskName' } } -ParameterFilter { $Path -like '*MSTeams*' }
-        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'Start'; DisplayName = 'Start' } } -ParameterFilter { $Path -notlike '*MSTeams*' }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'TeamsTfwStartupTask'; DisplayName = 'ms-resource:StartupTaskName'; PublisherDisplayName = 'ms-resource:PublisherDisplayName' } } -ParameterFilter { $Path -like '*MSTeams*' }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'Start'; DisplayName = 'Start'; PublisherDisplayName = '' } } -ParameterFilter { $Path -like '*\SystemApps\*' }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'Start'; DisplayName = 'Start'; PublisherDisplayName = 'Corp Inc.' } } -ParameterFilter { $Path -like '*\WindowsApps\Corp\*' }
         Mock -ModuleName Tuneup Get-TuneupStartupProcess { [pscustomobject]@{ Id = 300; Path = 'C:\Program Files\WindowsApps\MSTeams_1_x64__8wekyb3d8bbwe\ms-teams.exe'; WorkingSet = 150MB; CpuSeconds = 2 } }
         $entries = @(Get-TestEntry | Where-Object { $_.source -eq 'store-app' })
         $entries.Count | Should -Be 3
         $teams = Find-TestEntry $entries 'MSTeams'
         $teams.key | Should -Be 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask'
+        # The publisher that Settings shows (PublisherDisplayName of the manifest), or the CN of the package when
+        # the manifest gives none or only a resource reference.
         $teams.publisher | Should -Be 'Microsoft Corporation'
         $teams.enabled | Should -BeTrue
         $teams.running | Should -BeTrue
@@ -437,10 +459,13 @@ Describe 'Get-TuneupStartupEntry' {
         $teams.uninstall | Should -BeNullOrEmpty
         $teams.target.StoreKeyPath | Should -Be "$root\MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask"
         $teams.target.StoreState | Should -Be 2
-        (@($entries | Where-Object { $_.key -like 'Windows.Part*' })[0]).protected | Should -Be 'windows-component'
+        $part = @($entries | Where-Object { $_.key -like 'Windows.Part*' })[0]
+        $part.protected | Should -Be 'windows-component'
+        $part.publisher | Should -Be 'Microsoft Windows'
         $corp = @($entries | Where-Object { $_.key -like 'Corp.App*' })[0]
         $corp.protected | Should -Be 'policy'
         $corp.enabled | Should -BeTrue
+        $corp.publisher | Should -Be 'Corp Inc.'
         # A manifest is read once per package.
         Should -Invoke -ModuleName Tuneup Get-TuneupAppxManifestStartupTask -Times 1 -Exactly -ParameterFilter { $Path -like '*MSTeams*' }
     }

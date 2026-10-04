@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "about": "Rules of tuneup.ps1 -Startup (design, sections 15.4 and 15.5). Each pattern is a .NET regular expression, tried without case on the name of an entry, its publisher, the file name of its program and its key. protect: shown, never turned off. recommend: marked recommended, never turned off on its own; wingetId only gives the uninstall command that is shown, never run; workApp: not recommended on a work PC (managed or joined to Entra ID). Every rule says why. The first rule that matches wins, so the specific ones go first.",
+  "about": "Rules of tuneup.ps1 -Startup (design, sections 15.4 and 15.5). Each pattern is a .NET regular expression, tried without case on the name of an entry, its publisher, the file name of its program and its key. protect: shown, never turned off. protectSigners: the same, for the entries of the listed sources whose program has that valid signer (compared whole, without case); a protect rule of a category that comes first (security, vpn, device, updates) still wins. recommend: marked recommended, never turned off on its own; wingetId only gives the uninstall command that is shown, never run; workApp: not recommended on a work PC (managed or joined to Entra ID). Every rule says why. The first rule that matches wins, so the specific ones go first.",
   "windowsSigners": ["Microsoft Windows", "Microsoft Windows Publisher"],
   "hostPrograms": ["rundll32.exe", "regsvr32.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe", "conhost.exe", "explorer.exe", "msiexec.exe", "dllhost.exe"],
   "windowsServices": [
@@ -29,6 +29,10 @@
       "why": "Updaters of browsers and of Office: protected even though they are updaters, because without them the browser and Office get no security patches (the same principle as Windows Update in the blacklist)." },
     { "category": "updates", "pattern": "^(gupdatem?|edgeupdatem?|bravem)$",
       "why": "The same updaters by their service name; anchored, so the browser itself (brave.exe) is not taken for its updater. The first service of Brave is named just brave, which is also the name of the browser and its Run entry: it is protected by its display name (Brave Update Service), in the rule above." }
+  ],
+  "protectSigners": [
+    { "category": "device", "signer": "Microsoft Windows Hardware Compatibility Publisher", "sources": ["service"],
+      "why": "Microsoft signs the files of driver packages that pass its hardware tests with this name, so a service with this signer was installed with a driver: thermal and power management, the Management Engine, audio processing (APO), Thunderbolt, HDCP. Only services: a Run entry, task or Store app with this signer is left to the other rules." }
   ],
   "recommend": [
     { "category": "game-launcher", "pattern": "^steam(\\.exe)?$|^Valve\\b", "wingetId": "Valve.Steam",

@@ -67,13 +67,15 @@ Se heredan las de los Planes 1 a 5:
 | 24 | **Opción 6 del menú, "Lo que arranca con Windows"**: muestra la tabla y deja elegir por número (`Select-TuneupMenuItem`, nada marcado de antemano, lo recomendado primero) entre las entradas que se pueden apagar; después, el plan y la confirmación de `-Startup -Disable`. Si lo elegido necesita administrador y el menú no lo es, lo dice y vuelve sin cambiar nada | Task 12 |
 | 25 | **`companion-app`**, categoría nueva de recomendación: las apps de acompañamiento del fabricante (GeForce Experience o NVIDIA app, AMD Software Adrenalin, Armoury Crate, Logitech G HUB y Options+, Razer Synapse, Corsair iCUE, SteelSeries GG, Intel Driver & Support Assistant, Intel Graphics Software) no son controladores y suelen cargar overlays, iluminación o actualizadores; sin `wingetId` (no se comprobaron) | Task 2 |
 | 26 | **`why` en cada regla** de `rules.json` (obligatorio y validado): el porqué para quien revisa, en lugar de comentarios, que JSON no tiene | Task 2 |
+| 27 | **Servicios de paquetes de controladores protegidos por su firmante** (decidido al ejecutar las Tasks 1 a 5, tras el humo en este equipo: 17 de los 26 servicios listados eran de controladores, firmados WHCP, y quedaban apagables): `protectSigners` en `rules.json` (`category` `device`, `signer` `Microsoft Windows Hardware Compatibility Publisher`, `sources` `["service"]`, `why`), validado por `Test-TuneupStartupRuleSet` y aplicado por `Find-TuneupStartupSignerRule`. Solo servicios: una entrada de `Run`, una tarea o una app de la Store con esa firma no se protege por ella. Entre una regla de patrón y una de firmante gana la categoría que va antes en el orden de la decisión 6 | Task 2 (después) |
+| 28 | **Editor de una app de la Store**: el `PublisherDisplayName` del manifiesto (el que muestra Configuración; `Get-TuneupAppxManifestStartupTask` lo trae en cada tarea, así el manifiesto se lee una vez), o el CN del paquete, que a veces es un GUID, si viene vacío o como `ms-resource:` | Task 5 (después) |
 
 ## Estructura de archivos del Plan 6
 
 ```
 windows-tuneup/
 ├── tuneup.ps1                          + -Startup, -Disable
-├── catalog/startup/rules.json          (nuevo) windowsSigners, hostPrograms, windowsServices, protect, recommend
+├── catalog/startup/rules.json          (nuevo) windowsSigners, hostPrograms, windowsServices, protect, protectSigners, recommend
 ├── engine/
 │   ├── Startup.ps1                     (nuevo) fuentes, ids, ayudantes de rutas, detectores, entradas, documento y reporte
 │   ├── StartupRules.ps1                (nuevo) Import/Test de las reglas, protección, recomendación, desinstalar

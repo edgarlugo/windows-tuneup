@@ -51,6 +51,21 @@ function Test-TuneupStartupRuleSet {
             elseif ([string]$winget.Value -cnotmatch $script:StartupWingetIdPattern) { "$list rule '$pattern' has an invalid wingetId '$($winget.Value)'" }
         }
     }
+    # Protections by the signer of the program, each for the sources it names (optional list).
+    foreach ($rule in @($Rules.protectSigners | Where-Object { $null -ne $_ })) {
+        $signer = [string]$rule.signer
+        if ([string]::IsNullOrWhiteSpace($signer)) {
+            'protectSigners has a rule without a signer'
+            continue
+        }
+        if ($script:StartupRuleCategories.protect -cnotcontains [string]$rule.category) { "protectSigners rule '$signer' has an unknown category '$($rule.category)'" }
+        $sources = @($rule.sources | Where-Object { $null -ne $_ })
+        if (-not $sources.Count) { "protectSigners rule '$signer' must name the sources it applies to" }
+        foreach ($source in $sources) {
+            if (-not $script:StartupSources.Contains([string]$source)) { "protectSigners rule '$signer' has an unknown source '$source'" }
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$rule.why)) { "protectSigners rule '$signer' has no why" }
+    }
 }
 
 # The rules of the tool; rules with problems stop the command (a list of what is protected that cannot be
@@ -98,8 +113,22 @@ function Get-TuneupStartupProtection {
             if ($folder.StartsWith(([string]$product).TrimEnd('\') + '\', [System.StringComparison]::OrdinalIgnoreCase)) { return 'security' }
         }
     }
-    $rule = Find-TuneupStartupRule -Entry $Entry -Rules @($Rules.protect)
-    if ($null -ne $rule) { return [string]$rule.category }
+    $categories = @(@(Find-TuneupStartupRule -Entry $Entry -Rules @($Rules.protect)) + @(Find-TuneupStartupSignerRule -Entry $Entry -Rules $Rules) |
+            Where-Object { $null -ne $_ } | ForEach-Object { [string]$_.category })
+    # A pattern rule and a signer rule can both hold: the category that comes first in the order wins.
+    foreach ($category in $script:StartupRuleCategories.protect) {
+        if ($categories -contains $category) { return $category }
+    }
+}
+
+# The first protectSigners rule for the source of an entry whose signer is the publisher of the entry
+# (the valid Authenticode signer of its program), compared whole and without case.
+function Find-TuneupStartupSignerRule {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Rules)
+    if (-not $Entry.publisher) { return }
+    foreach ($rule in @($Rules.protectSigners | Where-Object { $null -ne $_ })) {
+        if (@($rule.sources) -contains [string]$Entry.source -and [string]$rule.signer -ieq [string]$Entry.publisher) { return $rule }
+    }
 }
 
 # Why an entry cannot be turned off, or nothing: its protection, a run-once entry (Windows deletes it once
