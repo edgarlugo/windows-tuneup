@@ -86,10 +86,14 @@ $ErrorActionPreference = 'Stop'
 # tool: they are left out of what is passed on. -WhatIf is ours (it is not ShouldProcess here).
 $commonParameters = @([System.Management.Automation.PSCmdlet]::CommonParameters)
 
-if ($PSVersionTable.PSEdition -eq 'Core') {
-    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
-    foreach ($entry in $PSBoundParameters.GetEnumerator()) {
-        if ($entry.Key -eq '_Rest' -or $commonParameters -contains $entry.Key) { continue }
+# The arguments that PowerShell 7 passes to Windows PowerShell to run this script again: each switch that is
+# on, each value (a list as one comma-separated value: -Profile, -Include, -Exclude and -Disable split it
+# again), and at the end what could not be bound, as it came, so Windows PowerShell rejects it with its report.
+function Get-TuneupRelaunchArgument {
+    param([Parameter(Mandatory)]$Bound, [AllowEmptyCollection()][string[]]$Rest = @(), [AllowEmptyCollection()][string[]]$CommonParameter = @(), [Parameter(Mandatory)][string]$ScriptPath)
+    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+    foreach ($entry in $Bound.GetEnumerator()) {
+        if ($entry.Key -eq '_Rest' -or $CommonParameter -contains $entry.Key) { continue }
         if ($entry.Value -is [System.Management.Automation.SwitchParameter]) {
             if ($entry.Value.IsPresent) { $argumentList += "-$($entry.Key)" }
         } else {
@@ -97,8 +101,11 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
             $argumentList += (@($entry.Value) -join ',')
         }
     }
-    # What could not be bound goes as it came, so Windows PowerShell rejects it with its report.
-    $argumentList += @($_Rest)
+    $argumentList + @($Rest)
+}
+
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    $argumentList = @(Get-TuneupRelaunchArgument -Bound $PSBoundParameters -Rest @($_Rest) -CommonParameter $commonParameters -ScriptPath $PSCommandPath)
     & ([System.IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\powershell.exe')) @argumentList
     exit $LASTEXITCODE
 }

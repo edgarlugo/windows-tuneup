@@ -112,3 +112,25 @@ Describe 'Invoke-TuneupStepCollectingWarning' {
         { Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { throw 'boom' } } | Should -Throw 'boom'
     }
 }
+
+Describe 'Forwarding the arguments from PowerShell 7 to Windows PowerShell' {
+    BeforeAll {
+        # tuneup.ps1 defines it before anything else runs; here it is taken from the script and defined alone.
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\tuneup.ps1'), [ref]$tokens, [ref]$errors)
+        $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-TuneupRelaunchArgument' }, $true)
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+
+    It 'passes -Startup -Disable with every id in one comma-separated value, and nothing else' {
+        $bound = [ordered]@{ Startup = [switch]$true; Disable = [string[]]@('startup.run-user.a-0000000000000000', 'startup.task.b-1111111111111111'); Yes = [switch]$true; Json = [switch]$true; WhatIf = [switch]$false; Verbose = [switch]$true }
+        $arguments = @(Get-TuneupRelaunchArgument -Bound $bound -Rest @() -CommonParameter @('Verbose') -ScriptPath 'C:\t\tuneup.ps1')
+        $arguments -join ' ' | Should -BeExactly '-NoProfile -ExecutionPolicy Bypass -File C:\t\tuneup.ps1 -Startup -Disable startup.run-user.a-0000000000000000,startup.task.b-1111111111111111 -Yes -Json'
+    }
+
+    It 'keeps what could not be bound at the end, as it came' {
+        $arguments = @(Get-TuneupRelaunchArgument -Bound ([ordered]@{ Startup = [switch]$true }) -Rest @('-Disabel', 'x') -CommonParameter @() -ScriptPath 'C:\t\tuneup.ps1')
+        $arguments[-3..-1] -join ' ' | Should -BeExactly '-Startup -Disabel x'
+    }
+}
