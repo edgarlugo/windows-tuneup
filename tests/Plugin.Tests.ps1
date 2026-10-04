@@ -242,6 +242,8 @@ Describe 'Skill' {
         @{ Phrase = 'Never open a result file yourself, never retry after `result-untrusted`' }
         @{ Phrase = 'never `last`' }
         @{ Phrase = 'Put on a command line only ids that the tool gave you, each checked against its form' }
+        @{ Phrase = 'Never list or read the state folders' }
+        @{ Phrase = 'never search the installed docs to find an id' }
     ) {
         param($Phrase)
         $Skill.Contains($Phrase) | Should -BeTrue -Because $Phrase
@@ -328,10 +330,22 @@ Describe 'Skill' {
         }
     }
 
+    It 'compares with an earlier measurement through -Compare last, never by looking for its id in folders' {
+        # The id is not in the conversation: `last`, and the date of what was compared is read from the document.
+        $Skill.Contains('-Measure -IdleSeconds 120 -Compare last -Json') | Should -BeTrue
+        $Commands.Contains('-Measure -IdleSeconds 120 -Compare last -Json') | Should -BeTrue
+        $Skill.Contains('say which measurement it compared') | Should -BeTrue
+        $Skill.Contains('instead of reading folders') | Should -BeTrue
+        $Commands.Contains('no way to list measurements') | Should -BeTrue
+        $Reading = Read-RepoText (Join-Path (Join-Path $SkillRoot 'reference') 'reading-json.md')
+        $Reading.Contains('comparison.againstId') | Should -BeTrue
+        $Reading.Contains('yyyyMMdd-HHmmss') | Should -BeTrue
+    }
+
     It 'reads results only through -ReadResult, never from the state folders' {
         foreach ($line in $SkillLines) {
             # A path into out, runs or the state folders is only named to say that it is never opened.
-            if ($line.Text -match '(?i)(^|[\\/''"\s])(out|runs)[\\/]|result\.json|ProgramData%\\windows-tuneup\\') {
+            if ($line.Text -match '(?i)(^|[\\/''"\s])(out|runs|measurements)[\\/]|result\.json|(ProgramData|LOCALAPPDATA)%\\windows-tuneup\\') {
                 $line.Text | Should -Match '(?i)\bnever\b' -Because "$($line.File): $($line.Text)"
             }
             $line.Text | Should -Not -Match '(?i)ReadAllText|ReadAllBytes|Import-Clixml|ConvertFrom-Json' -Because $line.File
