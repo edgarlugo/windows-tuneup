@@ -60,7 +60,8 @@ Describe 'Virtual machine checklist' {
     It 'covers what Windows Sandbox cannot, in both languages' {
         foreach ($lang in 'es', 'en') {
             $text = Get-DocText $lang 'vm-checklist.md'
-            foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md') {
+            foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md',
+                '-Startup -Disable', 'StartupApproved', 'winget show --id', 'work-app', 'not-present', 'SysWOW64', 'needs-admin', 'skill-checklist.md') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }
@@ -74,7 +75,7 @@ Describe 'Skill checklist' {
             foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
                 '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
                 'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl', "-Status -Reapply -Include '<ids>'", '-Status -Reapply -WhatIf -Json', 'run_in_background', 'needs-admin',
-                'high-risk-not-requested') {
+                'high-risk-not-requested', '-Startup -Json', "-Startup -Disable '<ids>' -WhatIf -Json", 'work-app', 'winget uninstall') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }
