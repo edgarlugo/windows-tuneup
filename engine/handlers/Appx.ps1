@@ -145,9 +145,10 @@ function Set-AppxTweakDesired {
             $failure = "removing the provisioned package $($package.PackageName) failed: $($_.Exception.Message)"
             # The removal for all users can take the provisioning away too (seen on build 26300, where
             # deprovisioning then fails with "path not found"): a package that is no longer provisioned
-            # is gone, whatever the error said. A list that cannot be read keeps the failure.
+            # is gone, whatever the error said. Any version still provisioned under its name, or a list that
+            # cannot be read, keeps the failure.
             try {
-                $gone = -not @(Get-TuneupAppxProvisionedPackage -Name $name | Where-Object { $_.PackageName -eq $package.PackageName }).Count
+                $gone = @(Get-TuneupAppxProvisionedPackage -Name $name).Count -eq 0
             } catch {
                 $gone = $false
             }

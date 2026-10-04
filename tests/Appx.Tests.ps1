@@ -150,6 +150,19 @@ Describe 'Appx handler' {
         Should -Invoke Get-TuneupAppxProvisionedPackage -ModuleName Tuneup -Times 2 -Exactly
     }
 
+    It 'still reports the failure when another version of the app is provisioned after deprovisioning failed' {
+        $installed = New-FakePackage
+        $other = [pscustomobject]@{ DisplayName = 'Microsoft.BingNews'; PackageName = 'Microsoft.BingNews_4.56.1.0_neutral_~_8wekyb3d8bbwe'; Version = '4.56.1.0' }
+        $state = @{ provisioned = @($Provisioned) }
+        Mock -ModuleName Tuneup Get-TuneupAppxPackage { $installed }.GetNewClosure()
+        Mock -ModuleName Tuneup Get-TuneupAppxProvisionedPackage { $state.provisioned }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxPackage { $state.provisioned = @($other) }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxProvisionedPackage { throw 'The system cannot find the path specified.' }
+        $outcome = Get-TuneupOutcome -Output @(Set-AppxTweakDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -Be 'removing the provisioned package Microsoft.BingNews_4.55.62231.0_neutral_~_8wekyb3d8bbwe failed: The system cannot find the path specified.'
+    }
+
     It 'still reports the failure when the package stays provisioned after deprovisioning failed' {
         $installed = New-FakePackage
         $provisioned = $Provisioned
