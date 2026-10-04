@@ -35,7 +35,7 @@ $powershell = $(if ($wow64) {
 if (Test-Path -LiteralPath $marker) { 'installed=' + (Get-Content -LiteralPath $marker -Raw).Trim() } else { 'installed=none' }
 ```
 
-The tool keeps its state in `%ProgramData%\windows-tuneup` for elevated runs and in `%LOCALAPPDATA%\windows-tuneup` for the rest. Never open those files yourself: `-Status`, `-Undo` and `-ReadResult` read them with their checks.
+The tool keeps its state in `%ProgramData%\windows-tuneup` for elevated runs and in `%LOCALAPPDATA%\windows-tuneup` for the rest. Never list, search or open those folders or their files yourself (`measurements`, `runs` and `out` included): `-Status`, `-Undo` and `-ReadResult` read them with their checks, `-Compare last` finds the last measurement, and ids come from the documents of the tool.
 
 ## Run without elevation
 
@@ -56,6 +56,7 @@ Put the arguments of the table in place of `-Suggest -Json -Lang en`, always wit
 | How each drifted tweak would be re-applied (only a plan) | `-Status -Reapply -WhatIf -Json` |
 | Re-apply when that plan has `requiresAdmin` false and no `needs-admin` item was added | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json` |
 | Measure | `-Measure -IdleSeconds 120 -Json`, or `-Measure -IdleSeconds 120 -Compare '<id>' -Json`; it waits two minutes ("Long runs") |
+| Measure and compare with the earlier one, id not in the conversation | `-Measure -IdleSeconds 120 -Compare last -Json`; `last` is the newest saved measurement, resolved before the new one is taken, so it is never the new one. Same rules as above (without elevation, "Long runs"). Report which one it compared with `comparison.againstId`. There is no way to list measurements and `last` is the only way to compare without an id: never look for the id in the state folders or in the installed docs |
 | Undo a run (try this first) | `-Undo '<runId>' -Json`; one tweak with `-Tweak '<id>'`. The `runId` comes from `-Status -Json`, never `last`. An `error` with `reason` = `needs-admin`: run it elevated |
 | The result of an elevated run | `-ReadResult '<id>' -Json` (see "Read the result") |
 

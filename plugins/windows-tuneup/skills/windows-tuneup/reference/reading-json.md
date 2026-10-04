@@ -96,7 +96,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 ## `measure`
 
-- `id`: keep it to compare after the restart. `measurement.metrics`: `ramInUseMB`, `processCount`, `runningServices`, `enabledTasks`, `systemDriveFreeGB`, `bootDurationMs` (it needs administrator: without it, `null` with `measurement.notes.bootDurationMs` = `needs-admin`), `uptimeMinutes`.
+- `id`: keep it to compare after the restart. `comparison.againstId`: the measurement that was compared (with `-Compare last`, the one the tool chose); its form `yyyyMMdd-HHmmss` is the local date and time it was taken, so tell the user which one it was. `measurement.metrics`: `ramInUseMB`, `processCount`, `runningServices`, `enabledTasks`, `systemDriveFreeGB`, `bootDurationMs` (it needs administrator: without it, `null` with `measurement.notes.bootDurationMs` = `needs-admin`), `uptimeMinutes`.
 - `comparison.items[]`: `metric`, `before`, `after`, `delta`. Report the differences honestly, small ones too, and compare only measurements taken the same way (both without elevation, after a restart and two idle minutes).
 
 ## `error`
