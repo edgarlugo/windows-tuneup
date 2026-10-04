@@ -260,5 +260,6 @@
   "reason.protected-by-windows": "left alone: Windows does not let programs change this value",
   "run.protectedByWindows": "Windows does not let programs change {0}, not even as administrator (access denied): nothing was changed. Change it by hand in the settings of Windows.",
   "run.protectedByWindowsManual": "Windows does not let programs change {0}, not even as administrator (access denied): nothing was changed. Change it by hand: {1}.",
-  "undo.emptyKeyLeft": "the empty key {0} could not be removed ({1}); it holds nothing, so it changes nothing"
+  "undo.emptyKeyLeft": "the empty key {0} could not be removed ({1}); it holds nothing, so it changes nothing",
+  "reason.unchanged": "it was already as before: there was nothing to restore"
 }

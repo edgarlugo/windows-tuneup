@@ -1,6 +1,7 @@
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..\engine\Tuneup.psm1') -Force
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
+    Initialize-TuneupI18n -Root (Join-Path (Split-Path $PSScriptRoot -Parent) 'i18n') -Lang 'en'
     $script:Key = 'HKCU:\Software\windows-tuneup-test'
     $script:One = New-TestTweak -Id 'test.one' -Set ([pscustomobject]@{ path = $Key; name = 'One'; kind = 'DWord'; value = 1 })
     $script:Two = New-TestTweak -Id 'test.two' -RebootRequired $true -Set ([pscustomobject]@{ path = $Key; name = 'Two'; kind = 'String'; value = 'x' })
@@ -222,6 +223,77 @@ Describe 'Invoke-TuneupPlan with a refusal that comes after a change' {
         $results = @(Invoke-TuneupUndo -Run $Run)
         ($results | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored,test.one=restored'
         (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).One | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Invoke-TuneupPlan when Set fails' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'notes a tweak whose Set failed without changing anything as needing no undo, and the undo finishes' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired { throw 'Attempted to perform an unauthorized operation.' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'failed'
+        $results[1].status | Should -Be 'applied'
+        @(Get-TuneupUndoneTweakId -Run $Run) -join ',' | Should -Be 'test.one'
+        Mock -ModuleName Tuneup Restore-RegistryTweakState { throw 'Attempted to perform an unauthorized operation.' } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        ($undo | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored'
+        Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 0 -Exactly -ParameterFilter { $Tweak.id -eq 'test.one' }
+        Test-Path -LiteralPath (Join-Path $Run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'keeps a tweak whose Set failed after a change undoable' {
+        Mock -ModuleName Tuneup Set-RegistryTweakDesired {
+            New-Item -Path $Tweak.set.path -Force | Out-Null
+            New-ItemProperty -LiteralPath $Tweak.set.path -Name $Tweak.set.name -PropertyType DWord -Value 7 -Force | Out-Null
+            throw 'boom'
+        } -ParameterFilter { $Tweak.id -eq 'test.one' }
+        $results = @(Invoke-TuneupPlan -Plan @(New-TestPlan) -RunDir $Run.Dir)
+        $results[0].status | Should -Be 'failed'
+        @(Get-TuneupUndoneTweakId -Run $Run) | Should -BeNullOrEmpty
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        ($undo | ForEach-Object { "$($_.id)=$($_.status)" }) -join ',' | Should -Be 'test.two=restored,test.one=restored'
+        (Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue).One | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Invoke-TuneupUndo of a tweak that is already as it was' {
+    BeforeEach {
+        $script:Run = New-TuneupRun -StateRoot (Join-Path $TestDrive ([guid]::NewGuid().ToString()))
+    }
+
+    AfterEach {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    # A run of an earlier version journaled the tweak before a Set that failed and did not note it: its
+    # restore would fail again on every undo, although there is nothing to give back.
+    It 'reports it as restored without calling its restore, and the run finishes' {
+        Add-TuneupJournalEntry -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Tweak $One -State (Get-TuneupState -Tweak $One)
+        Mock -ModuleName Tuneup Restore-RegistryTweakState { throw 'Attempted to perform an unauthorized operation.' }
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        $undo.Count | Should -Be 1
+        $undo[0].status | Should -Be 'restored'
+        $undo[0].reason | Should -Be 'unchanged'
+        @($undo[0].manual).Count | Should -Be 0
+        Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 0 -Exactly
+        Test-Path -LiteralPath (Join-Path $Run.Dir 'undone.json') | Should -BeTrue
+    }
+
+    It 'still restores a tweak whose state cannot be read now' {
+        Add-TuneupJournalEntry -Path (Join-Path $Run.Dir 'snapshot.jsonl') -Tweak $One -State (Get-TuneupState -Tweak $One)
+        Mock -ModuleName Tuneup Get-RegistryTweakState { throw 'cannot read' }
+        Mock -ModuleName Tuneup Restore-RegistryTweakState { }
+        $undo = @(Invoke-TuneupUndo -Run $Run)
+        $undo[0].status | Should -Be 'restored'
+        $undo[0].reason | Should -BeNullOrEmpty
+        Should -Invoke Restore-RegistryTweakState -ModuleName Tuneup -Times 1 -Exactly
     }
 }
 

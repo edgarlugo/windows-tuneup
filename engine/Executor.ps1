@@ -131,6 +131,11 @@ function Invoke-TuneupPlanItem {
         }
         New-TuneupResult -Item $Item -Status $status -Reason $outcome.reason -Detail $outcome.detail -RebootRequired:$outcome.rebootRequired
     } catch {
-        New-TuneupResult -Item $Item -Status 'failed' -ErrorText $_.Exception.Message
+        $message = $_.Exception.Message
+        # A Set that failed before changing anything leaves nothing to undo: like a refusal, the tweak is
+        # noted as needing no undo (only when its state is read again and matches the journaled one), so
+        # -Undo neither fails on it nor puts back a stale value over a later change.
+        if (Test-TuneupStateUnchanged -Tweak $tweak -Before $state) { Add-TuneupRefusedMark -RunDir $RunDir -Tweak $tweak }
+        New-TuneupResult -Item $Item -Status 'failed' -ErrorText $message
     }
 }

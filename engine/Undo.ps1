@@ -47,6 +47,12 @@ function Invoke-TuneupUndo {
     [array]::Reverse($entries)
     [array]::Reverse($foreign)
     $results = @(foreach ($entry in $entries) {
+        # A tweak that is already as the journal saved it (its Set failed before changing anything, in a
+        # run that did not note it) has nothing to give back: its restore is not called, so it cannot fail.
+        if (Test-TuneupStateUnchanged -Tweak $entry.tweak -Before $entry.state) {
+            & $newResult $entry 'restored' 'unchanged' $null $null
+            continue
+        }
         try {
             # A restore can add a note (for example, reinstalled from the Store) and ask for a restart.
             $outcome = Get-TuneupOutcome -Output @(Restore-TuneupState -Tweak $entry.tweak -State $entry.state)

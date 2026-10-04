@@ -85,7 +85,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 ## `undo`
 
-- `summary`: `restored`, `failed`, `skipped`; `results[]` with `status`, `reason` (`already-undone`, `other-user`, `reinstalled`...), `error`, `detail`.
+- `summary`: `restored`, `failed`, `skipped`; `results[]` with `status`, `reason` (`already-undone`, `other-user`, `unchanged` (it was already as before), `reinstalled`...), `error`, `detail`.
 - `results[].manual`: PowerShell lines that restore a failed tweak by hand. Show them as they are, in a code block, for the user to run in a PowerShell opened as administrator; do not run them yourself.
 - `rebootRequired` and `signOutRequired`: as in `apply`.
 
