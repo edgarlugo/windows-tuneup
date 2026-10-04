@@ -2,15 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Que `tuneup.ps1 -Startup` muestre, sin administrador, lo que arranca con Windows o queda en segundo plano (Run y RunOnce, carpetas Inicio, tareas de inicio de las apps de la Store, tareas programadas y servicios automáticos de terceros) con su editor, si corre y cuánta memoria usa, marque lo protegido y lo recomendado, y que `-Startup -Disable '<ids>'` apague de forma reversible solo lo que el usuario eligió, como una corrida más de la herramienta (diario, `-Status`, `-Undo`), sin desinstalar ni borrar nada; la skill de Claude ofrece el paso "¿Revisamos lo que arranca con Windows?".
+**Goal:** Que `tuneup.ps1 -Startup` muestre, sin administrador, lo que arranca con Windows o queda en segundo plano (Run y RunOnce, carpetas Inicio, tareas de inicio de las apps de la Store, tareas programadas y servicios automáticos de terceros) con su editor, si corre y cuánta memoria usa, marque lo protegido y lo recomendado, y que `-Startup -Disable '<ids>'` apague de forma reversible solo lo que el usuario eligió, como una corrida más de la herramienta (diario, `-Status`, `-Undo`), sin desinstalar ni borrar nada; el menú suma la opción "Lo que arranca con Windows", y la skill de Claude ofrece el paso "¿Revisamos lo que arranca con Windows?".
 
-**Architecture:** La lectura vive en `engine/Startup.ps1` (un detector simulable por fuente, la lista de entradas y el documento `startup`) y las reglas de protección y recomendación en datos revisables (`catalog/startup/rules.json`, cargado y aplicado por `engine/StartupRules.ps1`). Apagar convierte cada entrada elegida en un **ajuste sintético** de un tipo que ya existe (`registry` para `StartupApproved` y para el `State` de las tareas de la Store, `task`, `service`), en `engine/StartupTweak.ps1`, y lo pasa al mismo camino que aplicar perfiles (`New-TuneupPlan` + `Invoke-TuneupPlannedApply`, `source` = `startup`): el diario guarda el ajuste completo, así `-Undo` y `-Status` funcionan sin cambios. `engine/Commands.ps1` suma `Invoke-TuneupStartupCommand`; `tuneup.ps1` y `engine/Arguments.ps1`, los parámetros.
+**Architecture:** La lectura vive en `engine/Startup.ps1` (un detector simulable por fuente, la lista de entradas y el documento `startup`) y las reglas de protección y recomendación en datos revisables (`catalog/startup/rules.json`, cargado y aplicado por `engine/StartupRules.ps1`). Apagar convierte cada entrada elegida en un **ajuste sintético** de un tipo que ya existe (`registry` para `StartupApproved` y para el `State` de las tareas de la Store, `task`, `service`), en `engine/StartupTweak.ps1`, y lo pasa al mismo camino que aplicar perfiles (`New-TuneupPlan` + `Invoke-TuneupPlannedApply`, `source` = `startup`): el diario guarda el ajuste completo, así `-Undo` y `-Status` funcionan sin cambios. La deriva de una entrada de `StartupApproved` mira solo si está encendida o apagada (un campo `compare` del bloque `set` que respeta `Test-RegistryTweakState`), así el Administrador de tareas no produce falsos "revertidos". `engine/Commands.ps1` suma `Invoke-TuneupStartupCommand`; `tuneup.ps1` y `engine/Arguments.ps1`, los parámetros; `engine/Menu.ps1`, la opción 6.
 
 **Tech Stack:** Windows PowerShell 5.1, Pester 5.9.1, PSScriptAnalyzer 1.25, registro (`Run`, `RunOnce`, `StartupApproved`, `AppModel\SystemAppData`), módulo ScheduledTasks, CIM (`Win32_Service`, `Win32_SystemDriver`, `root/SecurityCenter2`), módulo Appx, `Get-AuthenticodeSignature`, COM `WScript.Shell` (solo para leer accesos directos), plugins de Claude Code.
 
 **Especificación:** `docs/superpowers/specs/2026-09-30-windows-tuneup-design.md`, sección 15 (escrita en el mismo commit que este plan). Donde este plan precisa algo, lo dice la tabla "Decisiones".
 
 **Planes anteriores:** `docs/superpowers/plans/2026-09-30-plan-1-motor-nucleo.md` a `2026-10-02-plan-5-skill-plugin.md`. **Los archivos del repositorio son la fuente de verdad.** Este plan se escribió leyendo `feat/startup` en `65bebc4` (`main` con el Plan 5 y los hallazgos de la VM mergeados).
+
+**Revisión:** la versión 2 (mismo día) resuelve las seis preguntas abiertas de la primera: actualizadores de navegadores protegidos (decisión 7), deriva por el primer byte (16), reglas `device` acotadas y `companion-app` (6, 25), equipo de trabajo (23), opción del menú (24) y tareas de la Store sin clave (3).
 
 **Evidencia:** este plan **no se ejecutó**. Cada función, parámetro, clave de i18n y archivo que usa existe en `65bebc4` (se revisó uno por uno) o lo define una tarea de este plan. Lo que se comprobó en este equipo está en "Qué se verificó al escribir el plan", al final.
 
@@ -41,26 +43,30 @@ Se heredan las de los Planes 1 a 5:
 |---|---|---|
 | 1 | **Ajustes sintéticos con los manejadores que ya existen**, no un tipo nuevo. El diario guarda el ajuste entero y su estado anterior; `-Undo` (`Invoke-TuneupUndo`) y `-Status` (`Get-TuneupStatus`) leen el diario, no el catálogo. Así la reversa, la comparación de estado antes de restaurar (14.2), las líneas de deshacer a mano (12.7, ya cubren `Binary`), la regla de la carpeta de usuario (`Test-TuneupUserScopedTweak`: `registry` de `HKCU:` con `scope: user`) y el dueño de cada entrada siguen iguales. Un tipo nuevo habría pedido cinco funciones de manejador, una entrada en `Dispatch.ps1`, otra regla para la carpeta de usuario y otra clase de líneas de deshacer a mano | Tasks 7, 8 |
 | 2 | **Formato de `StartupApproved`**: 12 bytes, primer byte par = encendida (`02`, `06` en algunas de Windows), impar = apagada (`03`), bytes 4 a 11 = FILETIME UTC de cuándo se apagó; sin valor = encendida. Sin documentación de Microsoft: comportamiento conocido del Administrador de tareas (Eleven Forum, "Enable or Disable Startup Apps in Windows 11", https://www.elevenforum.com/t/enable-or-disable-startup-apps-in-windows-11.699/) **y comprobado en este equipo** (ver el final). Apagar escribe `03 00 00 00` + FILETIME de ahora, como el Administrador de tareas | Tasks 1, 7 |
-| 3 | **Tareas de inicio de la Store**: valor `State` (DWORD) en `HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\<familia>\<TaskId>`, con los valores del enum documentado `Windows.ApplicationModel.StartupTaskState` (https://learn.microsoft.com/uwp/api/windows.applicationmodel.startuptaskstate: 0 `Disabled`, 1 `DisabledByUser`, 2 `Enabled`, 3 `DisabledByPolicy`, 4 `EnabledByPolicy`). Apagar escribe 1 (`DisabledByUser`, lo que escribe Configuración: la app no puede volver a encenderse sola). Solo cuenta como tarea de inicio una clave cuyo `TaskId` declara el manifiesto del paquete (`windows.startupTask`), para no tomar otro `State` de `SystemAppData`. El Administrador de tareas también escribe `LastDisabledTime`: no se escribe (un valor por ajuste; no hace falta para apagarla) | Tasks 4, 5, 7 |
+| 3 | **Tareas de inicio de la Store**: valor `State` (DWORD) en `HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\<familia>\<TaskId>`, con los valores del enum documentado `Windows.ApplicationModel.StartupTaskState` (https://learn.microsoft.com/uwp/api/windows.applicationmodel.startuptaskstate: 0 `Disabled`, 1 `DisabledByUser`, 2 `Enabled`, 3 `DisabledByPolicy`, 4 `EnabledByPolicy`). Apagar escribe 1 (`DisabledByUser`, lo que escribe Configuración: la app no puede volver a encenderse sola). Solo cuenta como tarea de inicio una clave cuyo `TaskId` declara el manifiesto del paquete (`windows.startupTask`), para no tomar otro `State` de `SystemAppData`. El Administrador de tareas también escribe `LastDisabledTime`: no se escribe (un valor por ajuste; no hace falta para apagarla). **Una tarea sin clave no se lista y no se leen todos los manifiestos**: la documentación de `StartupTask` (https://learn.microsoft.com/uwp/api/windows.applicationmodel.startuptask, Remarks) dice que declarar la extensión "will not, by itself, automatically cause the app start" y que, para que arranque, "the user must either launch the app at least once, or they must enable startup functionality for the app on the Startup page in Settings"; Windows guarda entonces el estado en esa clave (en este equipo, las cuatro tareas que alguna vez se usaron la tienen). Sin clave, la tarea nunca se encendió y no arranca | Tasks 4, 5, 7 |
 | 4 | **Ids** `startup.<source>.<slug>-<hash8>`, con `hash8` del SHA256 de `<source>|<clave en minúsculas>`: deterministas, sin distinguir mayúsculas (el registro y las tareas no las distinguen), con caracteres seguros, y dentro del patrón del catálogo (`^[a-z]+(\.[a-z0-9-]+)+$`), así la skill, `-Undo -Tweak` y el guardia de la plantilla elevada los aceptan sin cambios | Task 1 |
 | 5 | **Reglas en datos** (`catalog/startup/rules.json`), en una subcarpeta para que `Import-TuneupCatalog` (que lee solo `catalog/*.json`) no las tome como ajustes; `build/package.ps1` las suma al zip. Se leen siempre de la copia de la herramienta (`$script:StartupRulesPath`): `-CatalogPath` no las cambia, para que no se pueda plantar otra lista de protegidos | Task 2 |
-| 6 | **Orden de la protección**: `policy`, `driver`, `windows-component` (firmante válido `Microsoft Windows` o `Microsoft Windows Publisher`, servicio de `windowsServices` = la lista de servicios protegidos de `tests/CatalogQuality.Tests.ps1` más `MDCoreSvc`, o paquete de la Store con `SignatureKind` = `System`), `security` (carpeta de un producto de `root/SecurityCenter2`, o regla), `vpn`, `device`, `updates` (reglas). Primera que se cumple gana. Las reglas se prueban contra nombre, editor, nombre de archivo del programa y clave, sin distinguir mayúsculas | Task 2 |
-| 7 | **`updates` protege los actualizadores de navegadores y de Office** (Edge, Chrome, Firefox, Brave, Click-to-Run): el diseño aprobado pide recomendar "actualizadores", pero apagar estos deja el navegador sin parches; es el mismo principio que Windows Update en la lista negra. Los demás actualizadores (Adobe, Java...) sí se recomiendan (`updater`) | Task 2 |
+| 6 | **Orden de la protección**: `policy`, `driver`, `windows-component` (firmante válido `Microsoft Windows` o `Microsoft Windows Publisher`, servicio de `windowsServices` = la lista de servicios protegidos de `tests/CatalogQuality.Tests.ps1` más `MDCoreSvc`, o paquete de la Store con `SignatureKind` = `System`), `security` (carpeta de un producto de `root/SecurityCenter2`, o regla), `vpn`, `device`, `updates` (reglas). Primera que se cumple gana. Las reglas se prueban contra nombre, editor, nombre de archivo del programa y clave, sin distinguir mayúsculas. **`device` acotado**: solo los ayudantes de los controladores (consola y servicios de audio, panel táctil, teclas Fn, servicios de pantalla y de lápiz), nombrados por su programa o servicio, nunca por el nombre del fabricante; las apps de acompañamiento (GeForce Experience o NVIDIA app, AMD Software Adrenalin, Armoury Crate, G HUB, Synapse, iCUE...) no se protegen (decisión 25) | Task 2 |
+| 7 | **`updates` protege los actualizadores de navegadores y de Office** (Edge, Chrome, Firefox, Brave, Click-to-Run): el diseño aprobado pedía recomendar "actualizadores", pero apagar estos deja el navegador sin parches; es el mismo principio que Windows Update en la lista negra (confirmado por el coordinador al revisar la versión 1). La sección nueva de `blacklist.md` y la skill (`SKILL.md`, `reading-json.md`) dicen que se protegen aunque sean actualizadores. Los demás actualizadores (Adobe, Java...) sí se recomiendan (`updater`) | Tasks 2, 14, 15 |
 | 8 | **Servicios, controladores y tareas de Windows no se listan** (no son de terceros: firmados por Windows o bajo `\Microsoft\`); las entradas de Windows de `Run`, carpetas y Store sí, como protegidas (son pocas y el usuario las ve en el Administrador de tareas). Un controlador de terceros se lista protegido (`driver`) | Tasks 4, 5 |
 | 9 | **Programas anfitriones** (`rundll32.exe`, `cmd.exe`, `powershell.exe`... en `hostPrograms`): sin editor ni uso propios, porque su firma es la de Windows y marcaría como componente de Windows lo que un tercero arranca a través de ellos | Tasks 2, 5 |
 | 10 | **Uso**: memoria = suma del conjunto de trabajo de los procesos del programa (MB); CPU = tiempo de CPU acumulado (segundos), no un porcentaje (medirlo exigiría esperar entre dos lecturas). Sin elevar, Windows no da la ruta de algunos procesos: `running` queda `false` o `null` (desconocido) y se documenta como "mejor esfuerzo" | Task 5 |
 | 11 | **No se pueden apagar**: protegidas, `runonce-*` (corren una vez y Windows las borra; apagarlas exigiría borrar el valor), y tareas con `*`, `?`, `[` o `]` en el nombre o la carpeta (`Get-TuneupScheduledTask` busca con comodines y no podría asegurar la tarea exacta). Un id así es `error` y no se hace nada | Tasks 2, 8 |
-| 12 | **Ya apagada**: su ajuste pide el valor que ya tiene (los mismos bytes o el mismo `State`), así el plan la deja en `already-applied` y apagar dos veces no cambia nada. Un servicio que ya pasó a Manual deja de listarse: su id es "desconocido" la segunda vez (`err.startupUnknown` lo explica) | Tasks 7, 8 |
+| 12 | **Ya apagada**: una entrada de `StartupApproved` ya apagada (primer byte impar, con cualquier fecha) se lee `applied` por la comparación de la decisión 16, así el plan la deja en `already-applied`; una tarea de la Store ya apagada (`State` 0, 1 o 3) pide el `State` que ya tiene. Apagar dos veces no cambia nada. Un servicio que ya pasó a Manual deja de listarse: su id es "desconocido" la segunda vez (`err.startupUnknown` lo explica) | Tasks 7, 8 |
 | 13 | **Servicio a `Manual` sin detenerlo** (`stop: false`) y **sin cerrar programas**: rige desde el próximo inicio; el reporte para personas lo dice (`startup.nextStart`) y los ajustes no piden reinicio ni cierre de sesión | Tasks 7, 8 |
-| 14 | **Elevado como otra cuenta** (`IsSessionUser` falso): un id de alcance usuario es `error` con `reason` = `session-user` antes de leer nada (el HKCU visible es el de otra cuenta). La skill apaga lo de usuario sin elevar y lo de máquina con un UAC | Tasks 8, 14 |
+| 14 | **Elevado como otra cuenta** (`IsSessionUser` falso): un id de alcance usuario es `error` con `reason` = `session-user` antes de leer nada (el HKCU visible es el de otra cuenta). La skill apaga lo de usuario sin elevar y lo de máquina con un UAC | Tasks 8, 15 |
 | 15 | **`-Status -Reapply` no vuelve a aplicar entradas de arranque** (no están en el catálogo): las deja fuera con el aviso `reapply.startupEntry`, también nombradas en `-Include` (sin `error`). Volver a apagarlas es `-Startup -Disable` (la entrada se vuelve a leer) | Task 9 |
-| 16 | **Deriva exacta**: `-Status` compara los bytes; volver a apagar desde el Administrador de tareas cambia la fecha y sale `drift` (falso positivo inofensivo, documentado). Se prefirió a un manejador que solo mira el primer byte (decisión 1) | Task 7 |
+| 16 | **Deriva sin falsos "revertidos"**: el bloque `set` del ajuste de una entrada de `StartupApproved` lleva `compare: 'startupApproved'`, que solo mira `Test-RegistryTweakState`: aplicado = valor binario con el primer byte impar, sea cual sea la fecha (el Administrador de tareas escribe una fecha nueva cada vez que apaga). `Get-RegistryTweakState` sigue leyendo los bytes exactos: el diario guarda el valor original, `-Undo` lo devuelve byte por byte, y la comparación de antes de restaurar (14.2) ve los bytes, así una entrada vuelta a apagar con otra fecha también vuelve al valor original. Se eligió un campo y no un tipo nuevo (`startup-approved`) porque un tipo exige cinco funciones, una entrada en `Dispatch.ps1`, cambiar la regla de la carpeta de usuario (`Test-TuneupUserScopedTweak` solo acepta `registry`) y las líneas de deshacer a mano; el campo es una rama de cinco líneas en un solo lugar. El catálogo rechaza `compare` (`Test-RegistryTweakDefinition`): solo lo usan los ajustes sintéticos | Task 7 |
 | 17 | **`-Startup` es un comando** (se excluye con los otros y con las opciones de aplicar); `-Disable` exige `-Startup` y trae `-Yes` y `-WhatIf` (`CliApplyingOptions`, como `-Reapply`). Listar no se niega en un Windows no soportado; `-Disable` sí, salvo `-Force`, como aplicar | Task 10 |
-| 18 | **El perfil `gaming` ofrece la revisión** con un campo opcional de perfil, `offersStartup` (booleano, validado): al planear o aplicar sin `-Json` se agrega una línea (`startup.offer`), y `-List -Json` lo dice en `profiles[].offersStartup` para la skill. El menú no suma una opción de arranque (YAGNI: la línea dice el comando) | Task 11 |
+| 18 | **El perfil `gaming` ofrece la revisión** con un campo opcional de perfil, `offersStartup` (booleano, validado): al planear o aplicar sin `-Json` se agrega una línea (`startup.offer`), y `-List -Json` lo dice en `profiles[].offersStartup` para la skill. El menú, además, tiene su opción (decisión 24) | Task 11 |
 | 19 | **Desinstalar**: solo se muestra `winget uninstall --id <id> --exact` cuando la regla que recomienda trae `wingetId` (validado con `^[A-Za-z0-9][A-Za-z0-9.+_-]*$`); nunca se ejecuta. Sin `wingetId` (Store, OneDrive, Teams) no se muestra nada | Tasks 2, 5 |
 | 20 | **Sin elevar faltan tareas**: el documento lleva `isAdmin` y un aviso (`startup.unelevatedNote`) | Task 8 |
 | 21 | `command` se suma a los textos libres que `out\<id>.json` oculta en la carpeta de máquina (`ResultFreeTextFields`): las rutas de las entradas pueden llevar la carpeta del perfil (`path` ya estaba) | Task 6 |
 | 22 | Los textos `why` de un ajuste sintético se escriben en el idioma de la corrida en los dos campos (`es` y `en`): el diario guarda ese texto y `.ps1` no puede llevar acentos | Task 7 |
+| 23 | **Equipo de trabajo**: `-Startup` lo decide con `IsManaged` del entorno (el comando ya lo lee) o con la unión a Entra ID (`Test-TuneupEntraJoined`, una lectura de registro): la misma regla que la señal `work` de `-Suggest`, sin leer nada más. Ahí las reglas con `workApp: true` (OneDrive, Teams, Outlook) no marcan la entrada como recomendada: sigue apagable, con `notRecommendedReason` = `work-app` para que la skill lo explique; el documento lleva `workPc`. Una unión a Entra ID que no se puede leer es un aviso y cuenta como no unida | Tasks 2, 5, 6, 8 |
+| 24 | **Opción 6 del menú, "Lo que arranca con Windows"**: muestra la tabla y deja elegir por número (`Select-TuneupMenuItem`, nada marcado de antemano, lo recomendado primero) entre las entradas que se pueden apagar; después, el plan y la confirmación de `-Startup -Disable`. Si lo elegido necesita administrador y el menú no lo es, lo dice y vuelve sin cambiar nada | Task 12 |
+| 25 | **`companion-app`**, categoría nueva de recomendación: las apps de acompañamiento del fabricante (GeForce Experience o NVIDIA app, AMD Software Adrenalin, Armoury Crate, Logitech G HUB y Options+, Razer Synapse, Corsair iCUE, SteelSeries GG, Intel Driver & Support Assistant, Intel Graphics Software) no son controladores y suelen cargar overlays, iluminación o actualizadores; sin `wingetId` (no se comprobaron) | Task 2 |
+| 26 | **`why` en cada regla** de `rules.json` (obligatorio y validado): el porqué para quien revisa, en lugar de comentarios, que JSON no tiene | Task 2 |
 
 ## Estructura de archivos del Plan 6
 
@@ -76,12 +82,13 @@ windows-tuneup/
 │   ├── Commands.ps1                    + Invoke-TuneupStartupCommand, Test-TuneupStartupOffered; reapply deja fuera las entradas de arranque; CLI
 │   ├── Catalog.ps1                     + offersStartup en Test-TuneupProfileSet
 │   ├── List.ps1                        + profiles[].offersStartup
-│   ├── Menu.ps1                        + línea startup.offer después de Optimizar
+│   ├── Menu.ps1                        + opción 6 (Invoke-TuneupMenuStartup); línea startup.offer después de Optimizar
 │   ├── Output.ps1                      + source startup en el plan y el reporte
 │   ├── Planner.ps1                     New-TuneupPlan acepta una lista de perfiles vacía
+│   ├── handlers/Registry.ps1           + set.compare = 'startupApproved' en Test (y rechazado en el catálogo)
 │   └── ResultFile.ps1                  + command en ResultFreeTextFields
 ├── profiles/gaming.json                + offersStartup
-├── i18n/es.json, i18n/en.json          + startup.*, err.startup*, reapply.startupEntry, transcript.request.startup
+├── i18n/es.json, i18n/en.json          + startup.*, err.startup*, menu.main.startup, menu.startup.*, reapply.startupEntry, transcript.request.startup
 ├── build/package.ps1                   + catalog/startup/*.json
 ├── docs/
 │   ├── json-contract.md                + startup, source startup, offersStartup, session-user
@@ -94,7 +101,7 @@ windows-tuneup/
 │   └── reference/commands.md, reading-json.md
 ├── tests/
 │   ├── Startup.Tests.ps1, StartupRules.Tests.ps1, StartupTweak.Tests.ps1, StartupCommand.Tests.ps1   (nuevos)
-│   └── Arguments, Cli, Docs, JsonContract, List, Package, Planner, Plugin, ResultFile, Catalog .Tests.ps1 (se amplían)
+│   └── Arguments, Cli, Docs, JsonContract, List, Menu, Package, Planner, Plugin, Catalog .Tests.ps1 (se amplían)
 └── README.md                           + -Startup, -Disable, documento startup
 ```
 
@@ -436,6 +443,7 @@ function New-TuneupStartupEntry {
         needsAdmin        = ($info.Scope -eq 'machine')
         recommended       = $false
         recommendedReason = $null
+        notRecommendedReason = $null
         uninstall         = $null
         target            = [pscustomobject]$Target
     }
@@ -524,6 +532,9 @@ Describe 'Test-TuneupStartupRuleSet' {
         @{ Case = 'a wingetId on a protection'; Change = { param($r) $r.protect[0] | Add-Member -NotePropertyName wingetId -NotePropertyValue 'A.B' }; Expected = '*cannot have a wingetId*' }
         @{ Case = 'a wingetId that is not one'; Change = { param($r) $r.recommend[0].wingetId = 'x; calc' }; Expected = '*invalid wingetId*' }
         @{ Case = 'a list without rules'; Change = { param($r) $r.recommend = @() }; Expected = '*recommend has no rules*' }
+        @{ Case = 'a rule without why'; Change = { param($r) $r.protect[0].PSObject.Properties.Remove('why') }; Expected = '*has no why*' }
+        @{ Case = 'workApp on a protection'; Change = { param($r) $r.protect[0] | Add-Member -NotePropertyName workApp -NotePropertyValue $true }; Expected = '*cannot have workApp*' }
+        @{ Case = 'a workApp that is not true or false'; Change = { param($r) $r.recommend[0] | Add-Member -NotePropertyName workApp -NotePropertyValue 'yes' }; Expected = '*workApp must be true or false*' }
     ) {
         param($Change, $Expected)
         $copy = Copy-TestRules
@@ -550,13 +561,30 @@ Describe 'Get-TuneupStartupProtection' {
         @{ Case = 'an antivirus by name'; Entry = { New-TestStartupEntry -Key 'mbamtray' -Publisher 'Malwarebytes Inc.' }; Expected = 'security' }
         @{ Case = 'Defender by its program'; Entry = { New-TestStartupEntry -Source 'service' -Key 'WdBoot2' -Path 'C:\ProgramData\Microsoft\Windows Defender\Platform\4.18\MsMpEng.exe' }; Expected = 'security' }
         @{ Case = 'a VPN client'; Entry = { New-TestStartupEntry -Key 'GlobalProtect' -Path 'C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPA.exe' }; Expected = 'vpn' }
-        @{ Case = 'audio software'; Entry = { New-TestStartupEntry -Source 'task' -Key '\RtkAudUService64_BG' -Name 'RtkAudUService64_BG' -Publisher 'Realtek Semiconductor Corp.' }; Expected = 'device' }
+        @{ Case = 'the service of the audio driver'; Entry = { New-TestStartupEntry -Source 'task' -Key '\RtkAudUService64_BG' -Name 'RtkAudUService64_BG' -Publisher 'Realtek Semiconductor Corp.' }; Expected = 'device' }
+        @{ Case = 'the touchpad helper'; Entry = { New-TestStartupEntry -Key 'SynTPEnh' -Path 'C:\Program Files\Synaptics\SynTP\SynTPEnh.exe' -Publisher 'Synaptics Incorporated' }; Expected = 'device' }
+        @{ Case = 'the Fn keys of a laptop'; Entry = { New-TestStartupEntry -Key 'ATKOSD2' -Path 'C:\Program Files (x86)\ASUS\ATK Package\ATK Hotkey\ATKOSD2.exe' -Publisher 'ASUSTeK COMPUTER INC.' }; Expected = 'device' }
+        @{ Case = 'the display container of the NVIDIA driver'; Entry = { New-TestStartupEntry -Source 'service' -Key 'NVDisplay.ContainerLocalSystem' -Name 'NVIDIA Display Container LS' -Publisher 'NVIDIA Corporation' }; Expected = 'device' }
         @{ Case = 'the updater of Edge'; Entry = { New-TestStartupEntry -Source 'task' -Key '\MicrosoftEdgeUpdateTaskMachineCore{1}' -Name 'MicrosoftEdgeUpdateTaskMachineCore{1}' }; Expected = 'updates' }
         @{ Case = 'the update service of Brave'; Entry = { New-TestStartupEntry -Source 'service' -Key 'brave' -Name 'Brave Update Service (brave)' }; Expected = 'updates' }
         @{ Case = 'Office Click-to-Run'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ClickToRunSvc' -Name 'Microsoft Office Click-to-Run Service' }; Expected = 'updates' }
     ) {
         param($Entry, $Expected)
         Get-TuneupStartupProtection -Entry (& $Entry) -Rules $Rules | Should -Be $Expected
+    }
+
+    It 'does not protect the companion apps of a vendor, which it recommends instead: <Name>' -TestCases @(
+        @{ Name = 'NVIDIA app'; Entry = { New-TestStartupEntry -Key 'NvBackend' -Name 'NVIDIA app' -Path 'C:\Program Files\NVIDIA Corporation\NVIDIA app\CEF\NVIDIA app.exe' -Publisher 'NVIDIA Corporation' } }
+        @{ Name = 'GeForce Experience'; Entry = { New-TestStartupEntry -Source 'service' -Key 'NvContainerLocalSystem' -Name 'NVIDIA GeForce Experience' -Publisher 'NVIDIA Corporation' } }
+        @{ Name = 'AMD Software'; Entry = { New-TestStartupEntry -Key 'AMDNoiseSuppression' -Name 'AMD Software' -Path 'C:\Program Files\AMD\CNext\CNext\RadeonSoftware.exe' -Publisher 'Advanced Micro Devices, Inc.' } }
+        @{ Name = 'Armoury Crate'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ArmouryCrateService' -Name 'ARMOURY CRATE Service' -Publisher 'ASUSTeK COMPUTER INC.' } }
+        @{ Name = 'Logitech G HUB'; Entry = { New-TestStartupEntry -Key 'LGHUB' -Path 'C:\Program Files\LGHUB\lghub.exe' -Publisher 'Logitech Inc' } }
+        @{ Name = 'Intel Graphics Software'; Entry = { New-TestStartupEntry -Source 'store-app' -Key 'AppUp.IntelArcSoftware_8j3eq9eme6ctt\IntelGraphicsSoftwareStartup' -Name 'Intel Graphics Software' -Publisher 'Intel Corporation' } }
+    ) {
+        param($Entry)
+        $companion = & $Entry
+        Get-TuneupStartupProtection -Entry $companion -Rules $Rules | Should -BeNullOrEmpty
+        (Get-TuneupStartupRecommendation -Entry $companion -Rules $Rules).category | Should -Be 'companion-app'
     }
 
     It 'protects what lives in the folder of a product of Windows Security' {
@@ -594,11 +622,22 @@ Describe 'Get-TuneupStartupRecommendation' {
         @{ Name = 'Dropbox'; Entry = { New-TestStartupEntry -Key 'Dropbox' }; Category = 'sync-client'; Winget = 'winget uninstall --id Dropbox.Dropbox --exact' }
         @{ Name = 'OneDrive'; Entry = { New-TestStartupEntry -Key 'OneDrive' -Path 'C:\Users\me\AppData\Local\Microsoft\OneDrive\OneDrive.exe' }; Category = 'sync-client'; Winget = $null }
         @{ Name = 'the Adobe updater'; Entry = { New-TestStartupEntry -Source 'task' -Key '\Adobe Acrobat Update Task' -Name 'Adobe Acrobat Update Task' }; Category = 'updater'; Winget = $null }
+        @{ Name = 'the new Outlook'; Entry = { New-TestStartupEntry -Source 'store-app' -Key 'Microsoft.OutlookForWindows_8wekyb3d8bbwe\OutlookStartup' -Name 'Outlook (new)' }; Category = 'chat-helper'; Winget = $null }
     ) {
         param($Entry, $Category, $Winget)
         $rule = Get-TuneupStartupRecommendation -Entry (& $Entry) -Rules $Rules
         $rule.category | Should -Be $Category
         Get-TuneupStartupUninstallCommand -Rule $rule | Should -Be $Winget
+    }
+
+    It 'marks OneDrive, Teams and Outlook as apps of work, and only them' {
+        $workApps = @($Rules.recommend | Where-Object { $null -ne $_.PSObject.Properties['workApp'] -and $_.workApp })
+        $workApps.Count | Should -Be 3
+        foreach ($name in 'OneDrive', 'MSTeams', 'Outlook') {
+            $rule = Get-TuneupStartupRecommendation -Entry (New-TestStartupEntry -Key $name) -Rules $Rules
+            $rule.workApp | Should -BeTrue -Because $name
+        }
+        (Get-TuneupStartupRecommendation -Entry (New-TestStartupEntry -Key 'Dropbox') -Rules $Rules).PSObject.Properties['workApp'] | Should -BeNullOrEmpty
     }
 
     It 'recommends nothing for a program no rule names' {
@@ -635,7 +674,7 @@ Crear `catalog/startup/rules.json` (UTF-8 sin BOM):
 ```json
 {
   "schemaVersion": 1,
-  "about": "Rules of tuneup.ps1 -Startup (design, sections 15.4 and 15.5). Each pattern is a .NET regular expression, tried without case on the name of an entry, its publisher, the file name of its program and its key. protect: shown, never turned off. recommend: marked recommended, never turned off on its own; wingetId only gives the uninstall command that is shown, never run. The first rule that matches wins, so the specific ones go first.",
+  "about": "Rules of tuneup.ps1 -Startup (design, sections 15.4 and 15.5). Each pattern is a .NET regular expression, tried without case on the name of an entry, its publisher, the file name of its program and its key. protect: shown, never turned off. recommend: marked recommended, never turned off on its own; wingetId only gives the uninstall command that is shown, never run; workApp: not recommended on a work PC (managed or joined to Entra ID). Every rule says why. The first rule that matches wins, so the specific ones go first.",
   "windowsSigners": ["Microsoft Windows", "Microsoft Windows Publisher"],
   "hostPrograms": ["rundll32.exe", "regsvr32.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "mshta.exe", "conhost.exe", "explorer.exe", "msiexec.exe", "dllhost.exe"],
   "windowsServices": [
@@ -646,44 +685,74 @@ Crear `catalog/startup/rules.json` (UTF-8 sin BOM):
     "swprv", "AppIDSvc", "Spooler", "MDCoreSvc"
   ],
   "protect": [
-    { "category": "security", "pattern": "\\b(Microsoft Defender|Windows Defender|Windows Security|SecurityHealth\\w*|MsMpEng|MpDefenderCoreService|NisSrv|MsSense)\\b" },
-    { "category": "security", "pattern": "\\b(Malwarebytes|ESET|Kaspersky|Bitdefender|Avast|AVG|Norton|NortonLifeLock|Gen Digital|McAfee|Sophos|Trend Micro|CrowdStrike|SentinelOne|Webroot|F-Secure|WithSecure|Panda Security|G DATA|Avira|Cylance|Carbon Black|Cisco Secure Endpoint|Emsisoft|Comodo|ZoneAlarm)\\b" },
-    { "category": "vpn", "pattern": "\\b(Cisco AnyConnect|Cisco Secure Client|GlobalProtect|PanGPA|PanGPS|Palo Alto Networks|FortiClient|Fortinet|OpenVPN|WireGuard|NordVPN|ExpressVPN|Proton ?VPN|Surfshark|Check Point|Zscaler|Pulse Secure|Ivanti|SonicWall|Tailscale|Cloudflare WARP)\\b" },
-    { "category": "device", "pattern": "\\b(Realtek|RtkAud\\w*|Synaptics|ELAN Microelectronics|ETDCtrl|Alps|Conexant|Dolby|Waves|MaxxAudio|Cirrus Logic|Intel|NVIDIA|Advanced Micro Devices|AMD|Logitech|Logi Options\\+?|LogiOptions\\w*|Razer|Corsair|SteelSeries|Wacom|Qualcomm|Broadcom|Thunderbolt)\\b" },
-    { "category": "updates", "pattern": "\\b(GoogleUpdate\\w*|Google Update\\w*|GoogleChromeElevationService|MicrosoftEdgeUpdate\\w*|Microsoft Edge Update\\w*|MicrosoftEdgeElevationService|MozillaMaintenance|Mozilla Maintenance Service|Firefox Background Update|BraveUpdate\\w*|Brave Update\\w*|BraveSoftware Update|BraveElevationService|ClickToRunSvc|OfficeClickToRun|Office Automatic Updates( 2\\.0)?|Microsoft Office Click-to-Run Service)\\b" },
-    { "category": "updates", "pattern": "^(gupdatem?|edgeupdatem?|bravem?)$" }
+    { "category": "security", "pattern": "\\b(Microsoft Defender|Windows Defender|Windows Security|SecurityHealth\\w*|MsMpEng|MpDefenderCoreService|NisSrv|MsSense)\\b",
+      "why": "Microsoft Defender and Windows Security: the protection of Windows itself (some of its programs live outside the folder of Windows)." },
+    { "category": "security", "pattern": "\\b(Malwarebytes|ESET|Kaspersky|Bitdefender|Avast|AVG|Norton|NortonLifeLock|Gen Digital|McAfee|Sophos|Trend Micro|CrowdStrike|SentinelOne|Webroot|F-Secure|WithSecure|Panda Security|G DATA|Avira|Cylance|Carbon Black|Cisco Secure Endpoint|Emsisoft|Comodo|ZoneAlarm)\\b",
+      "why": "Antivirus and endpoint protection of other publishers: turned off at startup, the PC starts unprotected." },
+    { "category": "vpn", "pattern": "\\b(Cisco AnyConnect|Cisco Secure Client|GlobalProtect|PanGPA|PanGPS|Palo Alto Networks|FortiClient|Fortinet|OpenVPN|WireGuard|NordVPN|ExpressVPN|Proton ?VPN|Surfshark|Check Point|Zscaler|Pulse Secure|Ivanti|SonicWall|Tailscale|Cloudflare WARP)\\b",
+      "why": "VPN clients: without them the PC cannot reach the network of the organization, or sends traffic outside the tunnel." },
+    { "category": "device", "pattern": "\\b(RtkAudUService\\w*|RtkAudioService\\w*|Realtek Audio (Console|Universal Service|Service)|RAVCpl64|RAVBg64|WavesSvc\\w*|WavesSysSvc\\w*|MaxxAudio\\w*|Dolby DAX\\w*|DAX3API|CxAudioSvc|CxUtilSvc|Conexant SmartAudio)\\b",
+      "why": "Control and enhancement services of the audio driver: without them jack detection, the microphone or the speaker tuning can stop working." },
+    { "category": "device", "pattern": "\\b(SynTPEnh\\w*|SynTPHelper|Synaptics TouchPad Enhancements|ETDCtrl\\w*|ETDService|ETDTouch|ELAN Smart-Pad|ElanTouchpad\\w*|ApMsgFwd|Alps Pointing-device\\w*|HidMonitorSvc)\\b",
+      "why": "Touchpad helpers of the driver: gestures, scrolling and palm rejection." },
+    { "category": "device", "pattern": "\\b(HotKey\\w*|Hotkey Utility|HPHotkey\\w*|LenovoHotkeys\\w*|ATKOSD2|AsusOSD|HControlUser|Dell QuickSet\\w*|FnHotkey\\w*|Fn Key\\w*)\\b",
+      "why": "Fn keys of laptops: brightness, volume, airplane mode, keyboard light and their on-screen indicators." },
+    { "category": "device", "pattern": "\\b(NVDisplay\\.Container\\w*|NVIDIA Display Container LS|igfxCUIService\\w*|igfxEM|Intel\\(R\\) HD Graphics Control Panel Service|AMD External Events Utility|AUEPLauncher|WTabletServicePro|WTabletServiceCon|Wacom Professional Service|Wacom Consumer Service)\\b",
+      "why": "Services of the display and pen drivers: display modes, color, hotplug and pen input. The companion apps of the same vendors are not here: they are recommend rules (companion-app)." },
+    { "category": "updates", "pattern": "\\b(GoogleUpdate\\w*|Google Update\\w*|GoogleChromeElevationService|MicrosoftEdgeUpdate\\w*|Microsoft Edge Update\\w*|MicrosoftEdgeElevationService|MozillaMaintenance|Mozilla Maintenance Service|Firefox Background Update|BraveUpdate\\w*|Brave Update\\w*|BraveSoftware Update|BraveElevationService|ClickToRunSvc|OfficeClickToRun|Office Automatic Updates( 2\\.0)?|Microsoft Office Click-to-Run Service)\\b",
+      "why": "Updaters of browsers and of Office: protected even though they are updaters, because without them the browser and Office get no security patches (the same principle as Windows Update in the blacklist)." },
+    { "category": "updates", "pattern": "^(gupdatem?|edgeupdatem?|bravem?)$",
+      "why": "The same updaters by their service name; anchored, so the browser itself (brave.exe) is not taken for its updater." }
   ],
   "recommend": [
-    { "category": "game-launcher", "pattern": "^steam(\\.exe)?$|^Valve\\b", "wingetId": "Valve.Steam" },
-    { "category": "game-launcher", "pattern": "\\bEpicGamesLauncher\\b|\\bEpic Games\\b", "wingetId": "EpicGames.EpicGamesLauncher" },
-    { "category": "game-launcher", "pattern": "\\bEADesktop\\b|^EA app$|\\bElectronic Arts\\b", "wingetId": "ElectronicArts.EADesktop" },
-    { "category": "game-launcher", "pattern": "\\bBattle\\.net\\b|\\bBlizzard\\b", "wingetId": "Blizzard.BattleNet" },
-    { "category": "game-launcher", "pattern": "\\bUbisoft\\b|^upc(\\.exe)?$", "wingetId": "Ubisoft.Connect" },
-    { "category": "game-launcher", "pattern": "\\bGOG Galaxy\\b|\\bGalaxyClient\\b", "wingetId": "GOG.Galaxy" },
-    { "category": "game-launcher", "pattern": "\\bRiot Client\\b|\\bRiotClient\\w*" },
-    { "category": "sync-client", "pattern": "^OneDrive(\\.exe)?$" },
-    { "category": "sync-client", "pattern": "\\bDropbox\\b", "wingetId": "Dropbox.Dropbox" },
-    { "category": "sync-client", "pattern": "\\bGoogleDriveFS\\b|^Google Drive$", "wingetId": "Google.GoogleDrive" },
-    { "category": "sync-client", "pattern": "\\bMEGAsync\\b", "wingetId": "Mega.MEGASync" },
-    { "category": "sync-client", "pattern": "\\biCloud\\w*" },
-    { "category": "sync-client", "pattern": "\\bNextcloud\\b", "wingetId": "Nextcloud.NextcloudDesktop" },
-    { "category": "chat-helper", "pattern": "\\bDiscord\\b", "wingetId": "Discord.Discord" },
-    { "category": "chat-helper", "pattern": "^MSTeams_|\\bMSTeams\\b|\\bTeams\\b" },
-    { "category": "chat-helper", "pattern": "\\bSkype\\b" },
-    { "category": "chat-helper", "pattern": "\\bSlack\\b", "wingetId": "SlackTechnologies.Slack" },
-    { "category": "chat-helper", "pattern": "\\bZoom\\b", "wingetId": "Zoom.Zoom" },
-    { "category": "chat-helper", "pattern": "\\bTelegram\\b", "wingetId": "Telegram.TelegramDesktop" },
-    { "category": "chat-helper", "pattern": "\\bWhatsApp\\b" },
-    { "category": "updater", "pattern": "updat(e|er|es)\\b|\\bjusched\\b|\\bAdobeARM\\b|\\bAGCInvokerUtility\\b" }
+    { "category": "game-launcher", "pattern": "^steam(\\.exe)?$|^Valve\\b", "wingetId": "Valve.Steam",
+      "why": "Steam opens at sign-in only to be ready; games start it when they need it. Anchored: steamwebhelper and other names with steam are not it." },
+    { "category": "game-launcher", "pattern": "\\bEpicGamesLauncher\\b|\\bEpic Games\\b", "wingetId": "EpicGames.EpicGamesLauncher", "why": "Epic Games Launcher: a game launcher that waits in the background." },
+    { "category": "game-launcher", "pattern": "\\bEADesktop\\b|^EA app$|\\bElectronic Arts\\b", "wingetId": "ElectronicArts.EADesktop", "why": "EA app: a game launcher that waits in the background." },
+    { "category": "game-launcher", "pattern": "\\bBattle\\.net\\b|\\bBlizzard\\b", "wingetId": "Blizzard.BattleNet", "why": "Battle.net: a game launcher that waits in the background." },
+    { "category": "game-launcher", "pattern": "\\bUbisoft\\b|^upc(\\.exe)?$", "wingetId": "Ubisoft.Connect", "why": "Ubisoft Connect: a game launcher that waits in the background." },
+    { "category": "game-launcher", "pattern": "\\bGOG Galaxy\\b|\\bGalaxyClient\\b", "wingetId": "GOG.Galaxy", "why": "GOG Galaxy: a game launcher that waits in the background." },
+    { "category": "game-launcher", "pattern": "\\bRiot Client\\b|\\bRiotClient\\w*", "why": "Riot Client: a game launcher that waits in the background (Vanguard, the anti-cheat driver, is a driver and stays)." },
+    { "category": "sync-client", "pattern": "^OneDrive(\\.exe)?$", "workApp": true,
+      "why": "OneDrive syncs files in the background; on a PC of an organization it usually keeps the work files, so it is not recommended there." },
+    { "category": "sync-client", "pattern": "\\bDropbox\\b", "wingetId": "Dropbox.Dropbox", "why": "Dropbox syncs in the background; it can be opened when it is needed." },
+    { "category": "sync-client", "pattern": "\\bGoogleDriveFS\\b|^Google Drive$", "wingetId": "Google.GoogleDrive", "why": "Google Drive syncs in the background; it can be opened when it is needed." },
+    { "category": "sync-client", "pattern": "\\bMEGAsync\\b", "wingetId": "Mega.MEGASync", "why": "MEGAsync syncs in the background; it can be opened when it is needed." },
+    { "category": "sync-client", "pattern": "\\biCloud\\w*", "why": "iCloud syncs in the background; it can be opened when it is needed." },
+    { "category": "sync-client", "pattern": "\\bNextcloud\\b", "wingetId": "Nextcloud.NextcloudDesktop", "why": "Nextcloud syncs in the background; it can be opened when it is needed." },
+    { "category": "chat-helper", "pattern": "\\bDiscord\\b", "wingetId": "Discord.Discord",
+      "why": "Discord opens at sign-in through its Update.exe; this rule goes before updater so it is not taken for an updater." },
+    { "category": "chat-helper", "pattern": "^MSTeams_|\\bMSTeams\\b|\\bTeams\\b", "workApp": true,
+      "why": "Teams opens at sign-in; on a PC of an organization it is how people are reached for meetings, so it is not recommended there." },
+    { "category": "chat-helper", "pattern": "^Microsoft\\.OutlookForWindows_|^olk(\\.exe)?$|\\bOutlook\\b", "workApp": true,
+      "why": "The new Outlook can open at sign-in to check mail; on a PC of an organization it is the work mail, so it is not recommended there." },
+    { "category": "chat-helper", "pattern": "\\bSkype\\b", "why": "Skype opens at sign-in to be reachable." },
+    { "category": "chat-helper", "pattern": "\\bSlack\\b", "wingetId": "SlackTechnologies.Slack", "why": "Slack opens at sign-in to be reachable." },
+    { "category": "chat-helper", "pattern": "\\bZoom\\b", "wingetId": "Zoom.Zoom", "why": "Zoom opens at sign-in; meetings start it when they need it." },
+    { "category": "chat-helper", "pattern": "\\bTelegram\\b", "wingetId": "Telegram.TelegramDesktop", "why": "Telegram opens at sign-in to be reachable." },
+    { "category": "chat-helper", "pattern": "\\bWhatsApp\\b", "why": "WhatsApp opens at sign-in to be reachable." },
+    { "category": "companion-app", "pattern": "\\b(NVIDIA GeForce Experience|GeForce Experience|NVIDIA app|NVIDIA Share|nvsphelper64|NvBackend)\\b",
+      "why": "NVIDIA companion apps: overlay, recording and driver downloads; the display driver works without them." },
+    { "category": "companion-app", "pattern": "\\b(RadeonSoftware|Radeon Software|AMD Software|AMDRSServ|AMDRSSrcExt)\\b",
+      "why": "AMD Software Adrenalin: overlay, recording and driver downloads; the display driver works without it." },
+    { "category": "companion-app", "pattern": "\\b(Armoury ?Crate\\w*|ArmourySocketServer|AsusUpdateCheck|ROG Live Service|LightingService)\\b",
+      "why": "ASUS Armoury Crate: lighting, profiles and its own updater; the Fn keys are ATKOSD2 and HControlUser, which stay." },
+    { "category": "companion-app", "pattern": "\\b(LGHUB\\w*|Logitech G HUB|LogiOptionsPlus\\w*|Logi Options\\+?)\\b",
+      "why": "Logitech G HUB and Options+: profiles, lighting and custom buttons; mice and keyboards work with their default buttons without them." },
+    { "category": "companion-app", "pattern": "\\b(Razer Synapse\\w*|RazerCentral\\w*|Razer Central|Corsair iCUE\\w*|iCUE|SteelSeries ?GG|SteelSeriesGG\\w*)\\b",
+      "why": "Razer Synapse, Corsair iCUE and SteelSeries GG: lighting, macros and their own updaters." },
+    { "category": "companion-app", "pattern": "\\b(Intel Driver & Support Assistant|DSAService\\w*|DSATray|Intel Graphics Software|IntelGraphicsSoftware\\w*)\\b",
+      "why": "Intel helpers: driver download checks and the graphics control panel; the drivers work without them." },
+    { "category": "updater", "pattern": "updat(e|er|es)\\b|\\bjusched\\b|\\bAdobeARM\\b|\\bAGCInvokerUtility\\b",
+      "why": "Updaters of other programs (Adobe, Java...): the program checks for updates when it opens. The last rule: anything more specific wins." }
   ]
 }
 ```
 
-Notas de las reglas (para quien las revisa):
-- `^(gupdatem?|edgeupdatem?|bravem?)$` va anclada: sin anclas, `brave` tomaría el acceso al navegador (`brave.exe`) como actualizador. La entrada `BraveSoftware Update` (el actualizador de Brave en `Run`) sí es `updates`, por la regla anterior.
-- `^Valve\b` y `^steam(\.exe)?$` anclados: `steam` suelto tomaría `steamwebhelper` y programas con "steam" en el nombre.
-- `updater` va al final: Discord arranca con `Update.exe --processStart Discord.exe` y tiene que quedar como `chat-helper`.
-- Los `wingetId` no se comprobaron contra winget al escribir el plan: la lista de la VM (Task 15) lo hace con `winget show --id <id> --exact`.
+Notas de las reglas (el porqué de cada una está en su `why`):
+- `device` nombra programas y servicios de los controladores, nunca al fabricante: "NVIDIA" o "Realtek" sueltos protegerían también sus apps de acompañamiento, que van como `companion-app`.
+- `updater` va al final: Discord arranca con `Update.exe --processStart Discord.exe` y tiene que quedar como `chat-helper`, y `AsusUpdateCheck`, como `companion-app`.
+- Los `wingetId` no se comprobaron contra winget al escribir el plan: la lista de la VM (Task 16) lo hace con `winget show --id <id> --exact`.
 
 - [ ] **Step 4: Implementar el cargador y las reglas**
 
@@ -698,7 +767,7 @@ Crear `engine/StartupRules.ps1`:
 $script:StartupRulesPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'catalog\startup\rules.json'
 $script:StartupRuleCategories = [ordered]@{
     protect   = @('security', 'vpn', 'device', 'updates')
-    recommend = @('updater', 'game-launcher', 'sync-client', 'chat-helper')
+    recommend = @('updater', 'game-launcher', 'sync-client', 'chat-helper', 'companion-app')
 }
 # Every value of protected, in the order the checks give them.
 $script:StartupProtections = @('policy', 'driver', 'windows-component') + $script:StartupRuleCategories.protect
@@ -729,6 +798,13 @@ function Test-TuneupStartupRuleSet {
                 [void][regex]::new($pattern)
             } catch {
                 "$list rule '$pattern' is not a valid pattern: $($_.Exception.Message)"
+            }
+            # Why the rule is there, for whoever reviews the list (JSON has no comments).
+            if ([string]::IsNullOrWhiteSpace([string]$rule.why)) { "$list rule '$pattern' has no why" }
+            $workApp = $rule.PSObject.Properties['workApp']
+            if ($null -ne $workApp) {
+                if ($list -ne 'recommend') { "$list rule '$pattern' cannot have workApp" }
+                elseif ($workApp.Value -isnot [bool]) { "$list rule '$pattern' workApp must be true or false" }
             }
             $winget = $rule.PSObject.Properties['wingetId']
             if ($null -eq $winget) { continue }
@@ -881,7 +957,7 @@ Describe 'Startup texts' {
             @('run-once', 'unsupported-name' | ForEach-Object { "startup.fixed.$_" }) +
             @(& $module { $script:StartupRuleCategories.recommend } | ForEach-Object { "startup.recommend.$_" }) +
             @('registry', 'store', 'task', 'service' | ForEach-Object { "startup.why.$_" }) +
-            @('transcript.request.startup', 'reapply.startupEntry')
+            @('startup.notRecommended.work-app', 'transcript.request.startup', 'reapply.startupEntry')
         $keys.Count | Should -BeGreaterThan 30
         foreach ($lang in 'es', 'en') {
             $json = Get-Content -LiteralPath (Join-Path $I18nRoot "$lang.json") -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -955,7 +1031,10 @@ por:
   "startup.recommend.updater": "actualizador en segundo plano",
   "startup.recommend.game-launcher": "lanzador de juegos",
   "startup.recommend.sync-client": "cliente de sincronización de archivos",
-  "startup.recommend.chat-helper": "chat que se abre al iniciar",
+  "startup.recommend.chat-helper": "chat o correo que se abre al iniciar",
+  "startup.recommend.companion-app": "app de acompañamiento del fabricante (overlay, iluminación, descargas de controladores); el controlador funciona sin ella",
+  "startup.notRecommended": "      No se recomienda apagarlo: {0}.",
+  "startup.notRecommended.work-app": "en un equipo de trabajo se usa para trabajar (archivos, reuniones o correo); igual puedes apagarlo",
   "startup.why.registry": "Arranca con Windows: {0}. Se apaga como lo hace el Administrador de tareas, sin borrar la entrada.",
   "startup.why.store": "Arranca con Windows: {0}. Se apaga como en Configuración > Aplicaciones > Inicio.",
   "startup.why.task": "Corre al iniciar: {0}. La tarea se deshabilita; no se borra.",
@@ -964,7 +1043,12 @@ por:
   "err.startupFixed": "Esto no se apaga, así que no se hizo nada:",
   "err.startupSessionUser": "{0}: es de la cuenta que inició sesión en este escritorio, y este proceso corre como otra cuenta de administrador. Apágalo sin elevar desde esa cuenta. No se hizo nada.",
   "reapply.startupEntry": "{0} arranca otra vez con Windows: no se vuelve a aplicar solo. Míralo con -Startup y apágalo con -Startup -Disable.",
-  "transcript.request.startup": "Pedido: apagar lo que arranca con Windows ({1})"
+  "transcript.request.startup": "Pedido: apagar lo que arranca con Windows ({1})",
+  "menu.main.startup": " 6. Lo que arranca con Windows: verlo y apagar lo que elijas",
+  "menu.startup.header": "Elige lo que quieres apagar (no hay nada marcado de antemano; lo recomendado va primero):",
+  "menu.startup.recommended": " [recomendado: {0}]",
+  "menu.startup.needsAdmin": "Algo de lo elegido arranca para todos los usuarios: abre PowerShell como administrador para apagarlo. No se cambió nada.",
+  "menu.startup.none": "No hay nada que arranque con Windows que se pueda apagar desde aquí."
 }
 ```
 
@@ -1025,7 +1109,10 @@ por:
   "startup.recommend.updater": "updater in the background",
   "startup.recommend.game-launcher": "game launcher",
   "startup.recommend.sync-client": "file sync client",
-  "startup.recommend.chat-helper": "chat that opens at start",
+  "startup.recommend.chat-helper": "chat or mail that opens at start",
+  "startup.recommend.companion-app": "companion app of the vendor (overlay, lighting, driver downloads); the driver works without it",
+  "startup.notRecommended": "      Turning it off is not recommended: {0}.",
+  "startup.notRecommended.work-app": "on a work PC it is used for work (files, meetings or mail); you can still turn it off",
   "startup.why.registry": "Starts with Windows: {0}. Turned off the way Task Manager does, without deleting the entry.",
   "startup.why.store": "Starts with Windows: {0}. Turned off as in Settings > Apps > Startup.",
   "startup.why.task": "Runs at start: {0}. The task is disabled; it is not deleted.",
@@ -1034,7 +1121,12 @@ por:
   "err.startupFixed": "These are never turned off, so nothing was done:",
   "err.startupSessionUser": "{0}: it belongs to the account signed in at this desktop, and this process runs as another administrator account. Turn it off without elevation from that account. Nothing was done.",
   "reapply.startupEntry": "{0} starts with Windows again: it is not applied again on its own. See it with -Startup and turn it off with -Startup -Disable.",
-  "transcript.request.startup": "Asked for: turn off what starts with Windows ({1})"
+  "transcript.request.startup": "Asked for: turn off what starts with Windows ({1})",
+  "menu.main.startup": " 6. What starts with Windows: see it and turn off what you choose",
+  "menu.startup.header": "Pick what to turn off (nothing is picked for you; the recommended ones come first):",
+  "menu.startup.recommended": " [recommended: {0}]",
+  "menu.startup.needsAdmin": "Something you picked starts for every user: open PowerShell as administrator to turn it off. Nothing was changed.",
+  "menu.startup.none": "Nothing that starts with Windows can be turned off from here."
 }
 ```
 
@@ -1671,6 +1763,23 @@ Describe 'Get-TuneupStartupEntry' {
         Should -Invoke -ModuleName Tuneup Get-TuneupFileSigner -Times 0 -ParameterFilter { $Path -like '*rundll32.exe' }
     }
 
+    It 'does not recommend the apps of work on a work PC, but leaves them to choose' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'OneDrive'; Command = '"C:\Users\me\AppData\Local\Microsoft\OneDrive\OneDrive.exe" /background' }
+            [pscustomobject]@{ Name = 'Steam'; Command = 'C:\Games\Steam\steam.exe' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        $atWork = @(Get-TuneupStartupEntry -Rules $Rules -WorkPc $true 3>$null)
+        $oneDrive = Find-TestEntry $atWork 'OneDrive'
+        $oneDrive.canDisable | Should -BeTrue
+        $oneDrive.recommended | Should -BeFalse
+        $oneDrive.recommendedReason | Should -BeNullOrEmpty
+        $oneDrive.notRecommendedReason | Should -Be 'work-app'
+        (Find-TestEntry $atWork 'Steam').recommended | Should -BeTrue
+        $personal = Find-TestEntry (Get-TestEntry) 'OneDrive'
+        $personal.recommendedReason | Should -Be 'sync-client'
+        $personal.notRecommendedReason | Should -BeNullOrEmpty
+    }
+
     It 'keeps listing when a source fails, with a warning, and leaves the use unknown without the processes' {
         Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Steam'; Command = 'C:\Games\Steam\steam.exe' } } -ParameterFilter { $Path -eq $UserRun }
         Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask { throw 'Access denied' }
@@ -1684,12 +1793,24 @@ Describe 'Get-TuneupStartupEntry' {
         @($warned | Where-Object { $_ -like 'Could not check the running programs*' }).Count | Should -Be 1
     }
 }
+
+Describe 'Test-TuneupStartupWorkPc' {
+    It 'is a work PC when managed or joined to Entra ID, and not otherwise' {
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment -IsManaged $true) | Should -BeTrue
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) | Should -BeFalse
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $true }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) | Should -BeTrue
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { throw 'Access denied' }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) 3>$null | Should -BeFalse
+    }
+}
 ```
 
 - [ ] **Step 2: Correr las pruebas y ver que fallan**
 
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Startup.Tests.ps1`
-Expected: FAIL en `Get-TuneupStartupEntry` (no existe).
+Expected: FAIL en `Get-TuneupStartupEntry` y `Test-TuneupStartupWorkPc` (no existen).
 
 - [ ] **Step 3: Implementar**
 
@@ -1862,7 +1983,9 @@ function Complete-TuneupStartupEntry {
         [Parameter(Mandatory)]$Entry,
         [Parameter(Mandatory)]$Rules,
         [AllowEmptyCollection()][string[]]$SecurityFolder = @(),
-        [AllowNull()][AllowEmptyCollection()][object[]]$Process
+        [AllowNull()][AllowEmptyCollection()][object[]]$Process,
+        # A work PC (managed, or joined to Entra ID): the apps of work (workApp) are not recommended there.
+        [bool]$WorkPc = $false
     )
     $program = [string]$Entry.path
     $hosted = $program -and @($Rules.hostPrograms) -contains [System.IO.Path]::GetFileName($program)
@@ -1873,7 +1996,11 @@ function Complete-TuneupStartupEntry {
     $Entry.canDisable = [bool]$Entry.enabled -and -not (Get-TuneupStartupFixedReason -Entry $Entry)
     if ($Entry.canDisable) {
         $rule = Get-TuneupStartupRecommendation -Entry $Entry -Rules $Rules
-        if ($null -ne $rule) {
+        $workApp = $(if ($null -ne $rule) { $rule.PSObject.Properties['workApp'] } else { $null })
+        if ($null -ne $rule -and $WorkPc -and $null -ne $workApp -and $workApp.Value -eq $true) {
+            # It can still be turned off; the reason lets people (and the skill) say why it is not recommended.
+            $Entry.notRecommendedReason = 'work-app'
+        } elseif ($null -ne $rule) {
             $Entry.recommended = $true
             $Entry.recommendedReason = [string]$rule.category
             $Entry.uninstall = Get-TuneupStartupUninstallCommand -Rule $rule
@@ -1883,10 +2010,10 @@ function Complete-TuneupStartupEntry {
 }
 
 # Everything that starts with Windows or runs in the background, in the order of the sources. A source
-# that cannot be read is a warning and the rest is still listed.
+# that cannot be read is a warning and the rest is still listed. -WorkPc: see Test-TuneupStartupWorkPc.
 function Get-TuneupStartupEntry {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Rules)
+    param([Parameter(Mandatory)]$Rules, [bool]$WorkPc = $false)
     Clear-TuneupFileSignerCache
     $entries = @(Get-TuneupStartupRunEntry) + @(Get-TuneupStartupFolderEntry) + @(Get-TuneupStartupStoreEntry) +
         @(Get-TuneupStartupTaskEntry) + @(Get-TuneupStartupServiceEntry -Rules $Rules)
@@ -1898,9 +2025,20 @@ function Get-TuneupStartupEntry {
         })
     $securityFolders = @($securityFolders | Where-Object { $_ })
     foreach ($entry in @($entries | Where-Object { $null -ne $_ })) {
-        Complete-TuneupStartupEntry -Entry $entry -Rules $Rules -SecurityFolder $securityFolders -Process $running
+        Complete-TuneupStartupEntry -Entry $entry -Rules $Rules -SecurityFolder $securityFolders -Process $running -WorkPc $WorkPc
         $entry
     }
+}
+
+# A work PC, where OneDrive, Teams and Outlook are not recommended: managed (domain or MDM, which the
+# environment of the command already holds) or joined to Entra ID (one registry read), the same rule as the
+# work signal of -Suggest. A join that cannot be read is a warning and counts as no join.
+function Test-TuneupStartupWorkPc {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Environment)
+    if ($Environment.IsManaged) { return $true }
+    $entra = Invoke-TuneupDetector -What 'the Entra ID join' -Detector { Test-TuneupEntraJoined }
+    [bool]($entra.Ok -and $entra.Value -eq $true)
 }
 ```
 
@@ -1960,9 +2098,10 @@ Describe 'Startup document and report' {
         $document.schemaVersion | Should -Be 1
         $document.command | Should -Be 'startup'
         $document.isAdmin | Should -BeFalse
+        $document.workPc | Should -BeFalse
         @($document.entries).Count | Should -Be 4
         @($document.entries[0].PSObject.Properties.Name) -join ',' |
-            Should -Be 'id,name,source,scope,key,publisher,command,path,enabled,running,memoryMB,cpuSeconds,protected,canDisable,needsAdmin,recommended,recommendedReason,uninstall'
+            Should -Be 'id,name,source,scope,key,publisher,command,path,enabled,running,memoryMB,cpuSeconds,protected,canDisable,needsAdmin,recommended,recommendedReason,notRecommendedReason,uninstall'
         $document.summary.total | Should -Be 4
         $document.summary.enabled | Should -Be 3
         $document.summary.canDisable | Should -Be 1
@@ -1996,6 +2135,17 @@ Describe 'Startup document and report' {
         $text | Should -Match '\[apagado\] OldTool'
         $text | Should -Match '\[no se apaga: corre una sola vez y Windows lo borra\] Cleanup'
         $text | Should -Match ([regex]::Escape("-Startup -Disable '<id>,<id>'"))
+    }
+
+    It 'tells people why an app of work is not recommended on a work PC' {
+        $teams = New-TuneupStartupEntry -Source 'store-app' -Key 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask' -Name 'MSTeams'
+        $teams.canDisable = $true
+        $teams.notRecommendedReason = 'work-app'
+        $document = Get-TuneupStartupDocument -Entry @($teams) -IsAdmin $false -WorkPc $true
+        $document.workPc | Should -BeTrue
+        $text = (Write-TuneupStartupReport -Document $document 6>&1 | Out-String)
+        $text | Should -Match 'Turning it off is not recommended: on a work PC it is used for work'
+        $text | Should -Not -Match 'Turning it off is recommended'
     }
 
     It 'says when nothing starts with Windows' {
@@ -2049,17 +2199,19 @@ function ConvertTo-TuneupStartupView {
         needsAdmin        = [bool]$Entry.needsAdmin
         recommended       = [bool]$Entry.recommended
         recommendedReason = $Entry.recommendedReason
+        notRecommendedReason = $Entry.notRecommendedReason
         uninstall         = $Entry.uninstall
     }
 }
 
 function Get-TuneupStartupDocument {
-    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entry, [bool]$IsAdmin)
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entry, [bool]$IsAdmin, [bool]$WorkPc)
     $views = @($Entry | Where-Object { $null -ne $_ } | ForEach-Object { ConvertTo-TuneupStartupView -Entry $_ })
     [pscustomobject]@{
         schemaVersion = 1
         command       = 'startup'
         isAdmin       = $IsAdmin
+        workPc        = $WorkPc
         entries       = $views
         summary       = [pscustomobject]@{
             total       = $views.Count
@@ -2129,6 +2281,9 @@ function Write-TuneupStartupReport {
         if ($entry.recommended) {
             Write-Host (Get-TuneupText -Key 'startup.recommended' -Format (Get-TuneupText -Key "startup.recommend.$($entry.recommendedReason)")) -ForegroundColor Cyan
         }
+        if ($entry.notRecommendedReason) {
+            Write-Host (Get-TuneupText -Key 'startup.notRecommended' -Format (Get-TuneupText -Key "startup.notRecommended.$($entry.notRecommendedReason)")) -ForegroundColor DarkGray
+        }
         if ($entry.uninstall) { Write-Host (Get-TuneupText -Key 'startup.uninstall' -Format $entry.uninstall) }
     }
     Write-Host ''
@@ -2185,6 +2340,7 @@ git log -1 --format=%s
 
 **Files:**
 - Create: `engine/StartupTweak.ps1`
+- Modify: `engine/handlers/Registry.ps1` (`Test-RegistryTweakDefinition`, `Test-RegistryTweakState`)
 - Modify: `engine/Planner.ps1` (`New-TuneupPlan`, parámetro `Profiles`)
 - Test: `tests/StartupTweak.Tests.ps1` (nuevo), `tests/Planner.Tests.ps1`
 
@@ -2229,6 +2385,7 @@ Describe 'ConvertTo-TuneupStartupTweak' {
         $tweak.set.name | Should -Be 'Steam'
         $tweak.set.kind | Should -Be 'Binary'
         @($tweak.set.value) -join ',' | Should -Be ($Expected -join ',')
+        $tweak.set.compare | Should -Be 'startupApproved'
         $tweak.title.es | Should -Be 'Name Steam'
         $tweak.title.en | Should -Be 'Name Steam'
         $tweak.why.en | Should -Be 'Starts with Windows: at sign-in (Run of the user). Turned off the way Task Manager does, without deleting the entry.'
@@ -2251,10 +2408,11 @@ Describe 'ConvertTo-TuneupStartupTweak' {
         $folder.set.value[0] | Should -Be 3
     }
 
-    It 'asks an entry that is already off for the value it has, so nothing changes' {
+    It 'gives an entry that is already off the same new value (the check reads any odd first byte as off), and a Store task the State it has' {
         $bytes = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8)
-        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Old' @{ ApprovedPath = 'HKCU:\Software\X'; ApprovedName = 'Old'; ApprovedValue = $bytes } -Enabled $false)
-        @($tweak.set.value) -join ',' | Should -Be '3,0,0,0,1,2,3,4,5,6,7,8'
+        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Old' @{ ApprovedPath = 'HKCU:\Software\X'; ApprovedName = 'Old'; ApprovedValue = $bytes } -Enabled $false) -DisabledAt $DisabledAt
+        @($tweak.set.value) -join ',' | Should -Be ($Expected -join ',')
+        $tweak.set.compare | Should -Be 'startupApproved'
         $store = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'store-app' 'P\T' @{ StoreKeyPath = 'HKCU:\Software\X\P\T'; StoreState = 0 } -Enabled $false)
         $store.set.value | Should -Be 0
     }
@@ -2329,6 +2487,31 @@ Describe 'A startup tweak through the registry handler' {
         @((Get-Item -LiteralPath "$Key\StartupApproved\Run").GetValue('Steam')) -join ',' | Should -Be '2,0,0,0,0,0,0,0,0,0,0,0'
     }
 
+    It 'reads an entry turned off again by Task Manager, with another date, as applied, and one turned on as not applied' {
+        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Steam' }) -DisabledAt $DisabledAt
+        Set-TuneupDesired -Tweak $tweak | Out-Null
+        New-ItemProperty -LiteralPath "$Key\StartupApproved\Run" -Name 'Steam' -Value ([byte[]](3, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9)) -PropertyType Binary -Force | Out-Null
+        Test-TuneupState -Tweak $tweak | Should -Be 'applied'
+        New-ItemProperty -LiteralPath "$Key\StartupApproved\Run" -Name 'Steam' -Value ([byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) -PropertyType Binary -Force | Out-Null
+        Test-TuneupState -Tweak $tweak | Should -Be 'not-applied'
+        New-ItemProperty -LiteralPath "$Key\StartupApproved\Run" -Name 'Steam' -Value 'x' -PropertyType String -Force | Out-Null
+        Test-TuneupState -Tweak $tweak | Should -Be 'not-applied'
+    }
+
+    It 'gives back the exact bytes it found, also after Task Manager wrote another date' {
+        New-Item -Path "$Key\StartupApproved\Run" -Force | Out-Null
+        $original = [byte[]](6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        New-ItemProperty -LiteralPath "$Key\StartupApproved\Run" -Name 'Steam' -Value $original -PropertyType Binary | Out-Null
+        $tweak = ConvertTo-TuneupStartupTweak -Entry (New-TestEntry 'run-user' 'Steam' @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Steam'; ApprovedValue = $original })
+        $journaled = ConvertTo-Json -InputObject ([pscustomobject]@{ tweak = $tweak; state = (Get-TuneupState -Tweak $tweak) }) -Depth 10 -Compress | ConvertFrom-Json
+        Set-TuneupDesired -Tweak $tweak | Out-Null
+        New-ItemProperty -LiteralPath "$Key\StartupApproved\Run" -Name 'Steam' -Value ([byte[]](3, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9)) -PropertyType Binary -Force | Out-Null
+        # -Undo compares the exact bytes before it restores: another date is a change to give back.
+        Test-TuneupStateUnchanged -Tweak $journaled.tweak -Before $journaled.state | Should -BeFalse
+        Restore-TuneupState -Tweak $journaled.tweak -State $journaled.state | Out-Null
+        @((Get-Item -LiteralPath "$Key\StartupApproved\Run").GetValue('Steam')) -join ',' | Should -Be '6,0,0,0,0,0,0,0,0,0,0,0'
+    }
+
     It 'writes and gives back the State of a Store task' {
         $path = "$Key\SystemAppData\Vendor.App_abc\StartAtLogon"
         New-Item -Path $path -Force | Out-Null
@@ -2339,6 +2522,18 @@ Describe 'A startup tweak through the registry handler' {
         (Get-ItemProperty -LiteralPath $path).State | Should -Be 1
         Restore-TuneupState -Tweak $tweak -State $before | Out-Null
         (Get-ItemProperty -LiteralPath $path).State | Should -Be 2
+    }
+}
+```
+
+Agregar también al final de `tests/StartupTweak.Tests.ps1`:
+
+```powershell
+Describe 'The compare field of a registry tweak' {
+    It 'is refused in the catalog: only the tweaks of startup entries use it' {
+        $tweak = New-TestTweak -Id 'test.compare' -Set ([pscustomobject]@{ path = 'HKCU:\Software\windows-tuneup-test'; name = 'X'; kind = 'DWord'; value = 1; compare = 'startupApproved' })
+        @(Test-RegistryTweakDefinition -Tweak $tweak) -join ',' | Should -Match 'set\.compare is only for startup entries'
+        @(Test-TuneupTweak -Tweak $tweak) -join ',' | Should -Match 'test\.compare set\.compare'
     }
 }
 ```
@@ -2413,9 +2608,12 @@ function New-TuneupStartupApprovedValue {
     , $bytes
 }
 
-# The tweak that turns one entry off. An entry that is already off asks for the value it has, so the plan
-# leaves it out as already applied. The texts are the name of the entry and why, in the language of the run
-# (both fields: the journal keeps them, and the code of the tool cannot hold accents).
+# The tweak that turns one entry off. A StartupApproved value always gets a new date, as Task Manager
+# writes, and compare = startupApproved: the check reads any odd first byte as off (an entry already off is
+# left out as already applied, and one turned off again by Task Manager is not reverted), while the state
+# keeps the exact bytes for -Undo. A Store task that is already off asks for the State it has. The texts
+# are the name of the entry and why, in the language of the run (both fields: the journal keeps them, and
+# the code of the tool cannot hold accents).
 function ConvertTo-TuneupStartupTweak {
     param([Parameter(Mandatory)]$Entry, [datetime]$DisabledAt = [datetime]::UtcNow)
     $kind = Get-TuneupStartupKind -Source ([string]$Entry.source)
@@ -2424,8 +2622,14 @@ function ConvertTo-TuneupStartupTweak {
     switch ($kind) {
         'registry' {
             $type = 'registry'
-            $value = $(if ($Entry.enabled) { New-TuneupStartupApprovedValue -DisabledAt $DisabledAt } else { $target.ApprovedValue })
-            $set = [pscustomobject]@{ path = [string]$target.ApprovedPath; name = [string]$target.ApprovedName; kind = 'Binary'; value = [int[]]@($value) }
+            $value = New-TuneupStartupApprovedValue -DisabledAt $DisabledAt
+            $set = [pscustomobject]@{
+                path    = [string]$target.ApprovedPath
+                name    = [string]$target.ApprovedName
+                kind    = 'Binary'
+                value   = [int[]]@($value)
+                compare = 'startupApproved'
+            }
         }
         'store' {
             $type = 'registry'
@@ -2459,6 +2663,40 @@ function ConvertTo-TuneupStartupTweak {
 }
 ```
 
+En `engine/handlers/Registry.ps1`, función `Test-RegistryTweakDefinition`, reemplazar:
+
+```powershell
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+```
+
+por:
+
+```powershell
+    if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    # Only the tweaks that -Startup -Disable builds compare that way (StartupTweak.ps1).
+    if ($null -ne $set.PSObject.Properties['compare']) { 'set.compare is only for startup entries (-Startup), never for the catalog' }
+```
+
+Y en la función `Test-RegistryTweakState`, reemplazar:
+
+```powershell
+    if (-not $current.exists -or $current.kind -ne $desired.kind) { return 'not-applied' }
+```
+
+por:
+
+```powershell
+    if (-not $current.exists -or $current.kind -ne $desired.kind) { return 'not-applied' }
+    # A startup entry turned off by -Startup -Disable: off is an odd first byte, whatever date follows it,
+    # because Task Manager writes a new date each time it turns an entry off. Get still reads the exact bytes,
+    # so the journal keeps them and -Undo gives them back as they were.
+    $compare = $desired.PSObject.Properties['compare']
+    if ($null -ne $compare -and [string]$compare.Value -ceq 'startupApproved') {
+        if (Test-TuneupStartupApprovedEnabled -Value @($current.value)) { return 'not-applied' }
+        return 'applied'
+    }
+```
+
 En `engine/Planner.ps1`, reemplazar:
 
 ```powershell
@@ -2484,10 +2722,16 @@ Expected: PASS.
 Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Planner.Tests.ps1`
 Expected: PASS (`still needs the profiles it is asked for`: `Resolve-TuneupProfileId` lanza `err.unknownProfile` con el nombre).
 
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Registry.Tests.ps1`
+Expected: PASS (ningún ajuste de catálogo ni de prueba trae `compare`: la rama nueva no cambia nada más).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/CatalogQuality.Tests.ps1`
+Expected: PASS.
+
 - [ ] **Step 5: Commit**
 
 ```bash
-git add engine/StartupTweak.ps1 engine/Planner.ps1 tests/StartupTweak.Tests.ps1 tests/Planner.Tests.ps1
+git add engine/StartupTweak.ps1 engine/handlers/Registry.ps1 engine/Planner.ps1 tests/StartupTweak.Tests.ps1 tests/Planner.Tests.ps1
 git commit -m "feat(arranque): cada entrada elegida se apaga con un ajuste de registro, tarea o servicio"
 git log -1 --format=%s
 ```
@@ -2546,6 +2790,7 @@ Describe 'Invoke-TuneupStartupCommand' {
         $script:Entries = @(New-TestSteam)
         Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
         Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
     }
     AfterAll { Remove-TestKey }
 
@@ -2555,9 +2800,20 @@ Describe 'Invoke-TuneupStartupCommand' {
         $context.ExitCode | Should -Be 0
         $document.command | Should -Be 'startup'
         $document.isAdmin | Should -BeFalse
+        $document.workPc | Should -BeFalse
         $document.entries[0].id | Should -BeExactly $SteamId
         $document.warnings | Should -Contain (Get-TuneupText -Key 'startup.unelevatedNote')
         Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 1 -Exactly
+    }
+
+    It 'tells whether this is a work PC and gives it to the list' {
+        $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $false -IsManaged $true)
+        (Invoke-TestStartup $context).workPc | Should -BeTrue
+        Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 1 -Exactly -ParameterFilter { $WorkPc }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $true }
+        (Invoke-TestStartup (New-TestContext -Json)).workPc | Should -BeTrue
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        (Invoke-TestStartup (New-TestContext -Json)).workPc | Should -BeFalse
     }
 
     It 'plans turning an entry off as a plan of the startup source, changing nothing' {
@@ -2599,6 +2855,10 @@ Describe 'Invoke-TuneupStartupCommand' {
         $status = Invoke-TuneupStatusCommand -Context (New-TestContext -Json -StateRoot $context.StateRoot) | ConvertFrom-Json
         $status.items[0].id | Should -BeExactly $SteamId
         $status.items[0].title | Should -Be 'Steam'
+        $status.items[0].status | Should -Be 'ok'
+        # Turned off again from Task Manager, with another date: still off, so not reverted.
+        New-ItemProperty -LiteralPath $Approved -Name 'Steam' -Value ([byte[]](3, 0, 0, 0, 9, 9, 9, 9, 9, 9, 9, 9)) -PropertyType Binary -Force | Out-Null
+        $status = Invoke-TuneupStatusCommand -Context (New-TestContext -Json -StateRoot $context.StateRoot) | ConvertFrom-Json
         $status.items[0].status | Should -Be 'ok'
         # Turned on again by the person (Task Manager writes 02): Windows "reverted" it.
         New-ItemProperty -LiteralPath $Approved -Name 'Steam' -Value $On -PropertyType Binary -Force | Out-Null
@@ -2749,13 +3009,16 @@ function Invoke-TuneupStartupCommand {
             }
         }
     }
-    $entryArguments = @{ Rules = Import-TuneupStartupRuleSet }
+    # On a work PC (managed, or joined to Entra ID) the apps of work are not recommended.
+    $workArguments = @{ Environment = $environment }
+    $workPc = [bool](@(Invoke-TuneupContextStep -Context $Context -Step { Test-TuneupStartupWorkPc @workArguments }) | Select-Object -Last 1)
+    $entryArguments = @{ Rules = Import-TuneupStartupRuleSet; WorkPc = $workPc }
     $entries = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupStartupEntry @entryArguments })
     if (-not $ids.Count) {
         if (-not $environment.IsAdmin) {
             Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'startup.unelevatedNote') }
         }
-        $document = Get-TuneupStartupDocument -Entry $entries -IsAdmin ([bool]$environment.IsAdmin)
+        $document = Get-TuneupStartupDocument -Entry $entries -IsAdmin ([bool]$environment.IsAdmin) -WorkPc $workPc
         $Context.Result = $document
         Write-TuneupStartupReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
         $Context.ExitCode = 0
@@ -2836,6 +3099,7 @@ Describe 'Re-applying a startup entry that came back' {
         $script:Entries = @(New-TestSteam)
         Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
         Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
     }
     AfterAll { Remove-TestKey }
 
@@ -3509,7 +3773,180 @@ git log -1 --format=%s
 
 ---
 
-### Task 12: Contrato JSON del documento `startup`
+### Task 12: Opción del menú "Lo que arranca con Windows"
+
+**Files:**
+- Modify: `engine/Menu.ps1` (`Write-TuneupMenuHeader`, `Invoke-TuneupMenu`, nueva `Invoke-TuneupMenuStartup`)
+- Test: `tests/Menu.Tests.ps1`
+
+Las claves `menu.main.startup` y `menu.startup.*` vienen de la Task 3.
+
+- [ ] **Step 1: Escribir las pruebas que fallan**
+
+Agregar al final de `tests/Menu.Tests.ps1`:
+
+```powershell
+Describe 'Invoke-TuneupMenu: what starts with Windows' {
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        New-Item -Path $Key -Force | Out-Null
+        $steam = New-TuneupStartupEntry -Source 'run-user' -Key 'Steam' -Name 'Steam' -Target @{ ApprovedPath = "$Key\StartupApproved\Run"; ApprovedName = 'Steam' }
+        $steam.canDisable = $true
+        $steam.recommended = $true
+        $steam.recommendedReason = 'game-launcher'
+        $tray = New-TuneupStartupEntry -Source 'run-machine' -Key 'Tray' -Name 'Tray' -Target @{ ApprovedPath = 'HKLM:\Software\windows-tuneup-test\StartupApproved\Run'; ApprovedName = 'Tray' }
+        $tray.canDisable = $true
+        $vpn = New-TuneupStartupEntry -Source 'run-user' -Key 'GlobalProtect' -Name 'GlobalProtect'
+        $vpn.protected = 'vpn'
+        $script:StartupEntries = @($steam, $tray, $vpn)
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:StartupEntries }
+        Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'offers it in the main menu' {
+        $context = New-MenuContext @('0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match ' 6\. What starts with Windows: see it and turn off what you choose'
+    }
+
+    It 'turns off only what was picked, the recommended first and nothing picked beforehand, after the plan and a yes' {
+        $context = New-MenuContext @('6', '1', '', 'y', '', '0')
+        Invoke-Menu $context
+        $context.ExitCode | Should -Be 0
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.header')))
+        $text | Should -Match '\[ \]  1\. Steam \[recommended: game launcher\]'
+        $text | Should -Match '\[ \]  2\. Tray \(administrator\)'
+        # A protected entry is in the table, never among what can be picked.
+        $text | Should -Not -Match '\d\. GlobalProtect'
+        ([byte[]](Get-Item -LiteralPath "$Key\StartupApproved\Run").GetValue('Steam'))[0] | Should -Be 3
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'startup.nextStart')))
+    }
+
+    It 'goes back without changing anything when nothing is picked' {
+        $context = New-MenuContext @('6', '', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Test-Path -LiteralPath "$Key\StartupApproved" | Should -BeFalse
+    }
+
+    It 'says that an entry of the machine needs administrator, and changes nothing' {
+        $context = New-MenuContext @('6', '2', '', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.needsAdmin')))
+        Test-Path -LiteralPath 'HKLM:\Software\windows-tuneup-test\StartupApproved' | Should -BeFalse
+    }
+
+    It 'says when nothing can be turned off' {
+        $script:StartupEntries = @($script:StartupEntries | Where-Object { $_.protected })
+        $context = New-MenuContext @('6', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.none')))
+    }
+}
+```
+
+- [ ] **Step 2: Correr las pruebas y ver que fallan**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
+Expected: FAIL en `Invoke-TuneupMenu: what starts with Windows` (la opción 6 no existe: "That is not one of the options").
+
+- [ ] **Step 3: Implementar**
+
+En `engine/Menu.ps1`, función `Write-TuneupMenuHeader`, reemplazar:
+
+```powershell
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.exit') {
+```
+
+por:
+
+```powershell
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.startup', 'menu.main.exit') {
+```
+
+En la función `Invoke-TuneupMenu`, reemplazar:
+
+```powershell
+                '5' { 'Measure' }
+```
+
+por:
+
+```powershell
+                '5' { 'Measure' }
+                '6' { 'Startup' }
+```
+
+Y agregar, antes del comentario `# The status, and when Windows reverted something, the offer to apply it again.`:
+
+```powershell
+# What starts with Windows: the table of -Startup, then the entries to turn off, picked by number among
+# the ones that can be turned off (recommended first, none picked beforehand), and the plan and the
+# confirmation of -Startup -Disable. What needs administrator is not turned off from a menu that is not
+# elevated: it says so and goes back, changing nothing.
+function Invoke-TuneupMenuStartup {
+    param([Parameter(Mandatory)]$Context)
+    $Context.Pause = $true
+    Invoke-TuneupStartupCommand -Context $Context
+    $document = $Context.Result
+    if ($Context.ExitCode -ne 0 -or $null -eq $document) { return }
+    $entries = @($document.entries)
+    $choices = @($entries | Where-Object { $_.canDisable -and $_.recommended }) + @($entries | Where-Object { $_.canDisable -and -not $_.recommended })
+    if (-not $choices.Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.none')
+        return
+    }
+    $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
+    $lines = @(foreach ($entry in $choices) {
+            $recommended = $(if ($entry.recommended) { Get-TuneupText -Key 'menu.startup.recommended' -Format (Get-TuneupText -Key "startup.recommend.$($entry.recommendedReason)") } else { '' })
+            '{0}{1}{2}' -f $entry.name, $recommended, $(if ($entry.needsAdmin) { $adminMark } else { '' })
+        })
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.header')
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen -or -not @($chosen).Count) { return }
+    $picked = @($chosen | ForEach-Object { $choices[$_] })
+    if (-not (Get-TuneupContextEnvironment -Context $Context).IsAdmin -and @($picked | Where-Object { $_.needsAdmin }).Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.needsAdmin')
+        return
+    }
+    Invoke-TuneupStartupCommand -Context $Context -Disable @($picked | ForEach-Object { [string]$_.id })
+}
+
+```
+
+- [ ] **Step 4: Correr las pruebas y ver que pasan**
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/Menu.Tests.ps1`
+Expected: PASS (las pruebas anteriores no cambian: `9` sigue siendo una opción que no existe).
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/test.ps1 -Path tests/I18nCoverage.Tests.ps1`
+Expected: PASS.
+
+Run: `powershell -NoProfile -ExecutionPolicy Bypass -File build/lint.ps1`
+Expected: `PSScriptAnalyzer: no findings`.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add engine/Menu.ps1 tests/Menu.Tests.ps1
+git commit -m "feat(menú): opción para ver lo que arranca con Windows y apagar lo que se elija"
+git log -1 --format=%s
+```
+
+---
+
+### Task 13: Contrato JSON del documento `startup`
 
 **Files:**
 - Modify: `docs/json-contract.md`
@@ -3552,6 +3989,8 @@ por:
         $paths.suggest | Should -Contain 'questions[].text'
         $paths.startup | Should -Contain 'entries[].recommendedReason'
         $paths.startup | Should -Contain 'summary.protected'
+        $paths.startup | Should -Contain 'workPc'
+        $paths.startup | Should -Contain 'entries[].notRecommendedReason'
         (Get-ContractSection 'error').Contains('`session-user`') | Should -BeTrue
 ```
 
@@ -3664,11 +4103,12 @@ por:
 
 What starts with Windows or runs in the background, from `-Startup -Json`. Read only, no elevation needed, nothing is sent anywhere. Exit code `0` (`1` with an `error` only for parameters it does not take). A source that cannot be read (a detector that fails) leaves out its entries and adds a warning; the document is still written. Without elevation Windows hides some scheduled tasks: a warning says so. The services, drivers and scheduled tasks of Windows are not listed (signed by Windows, or under `\Microsoft\`); the entries of Windows in the other sources are, as protected.
 
-To turn entries off: `-Startup -Disable '<ids>'` with `-WhatIf` or `-Yes`, which give the `plan` and `apply` documents with `source` = `startup`. Each entry becomes a tweak of type `registry` (its `StartupApproved` value, or the `State` of a Store task), `task` (disabled) or `service` (Manual, never Disabled, and not stopped), with the `id` of the entry, so `-Status` and `-Undo` show and restore it like any tweak. Nothing is uninstalled or deleted, and the change takes effect the next time Windows or the session starts. An id that is not in the list now, or that names an entry with `canDisable` false, ends in an `error` (exit `1`; `details` says why for each entry that stays on) and nothing is done. Elevated with another administrator's password, an id of an entry of the user is an `error` with `reason` = `session-user`.
+To turn entries off: `-Startup -Disable '<ids>'` with `-WhatIf` or `-Yes`, which give the `plan` and `apply` documents with `source` = `startup`. Each entry becomes a tweak of type `registry` (its `StartupApproved` value, or the `State` of a Store task), `task` (disabled) or `service` (Manual, never Disabled, and not stopped), with the `id` of the entry, so `-Status` and `-Undo` show and restore it like any tweak. `-Status` reads a `StartupApproved` entry only as on or off (its first byte), never by the date Task Manager writes, so turning it off again from Task Manager is not a drift; `-Undo` gives back the exact bytes it found. Nothing is uninstalled or deleted, and the change takes effect the next time Windows or the session starts. An id that is not in the list now, or that names an entry with `canDisable` false, ends in an `error` (exit `1`; `details` says why for each entry that stays on) and nothing is done. Elevated with another administrator's password, an id of an entry of the user is an `error` with `reason` = `session-user`.
 
 | Field | Type | Meaning |
 |---|---|---|
 | `isAdmin` | boolean | The list was read elevated (without it, Windows hides some scheduled tasks). |
+| `workPc` | boolean | A work PC: managed (domain or MDM) or joined to Entra ID, the same rule as the `work` signal of `suggest`. There OneDrive, Teams and Outlook are not recommended (`entries[].notRecommendedReason`). |
 | `entries` | object[] | Every entry, in the order of the sources. |
 | `entries[].id` | string | `startup.<source>.<slug>-<hash>`, the same in every run, elevated or not: what `-Disable` takes (`^startup\.[a-z0-9-]+\.[a-z0-9-]+$`). |
 | `entries[].name` | string | What Windows shows: the name of the `Run` value, the file of the Startup folder without its extension, the name of the Store app, the task, or the display name of the service. Not translated. |
@@ -3682,11 +4122,12 @@ To turn entries off: `-Startup -Disable '<ids>'` with `-WhatIf` or `-Yes`, which
 | `entries[].running` | boolean or null | Its program runs now; null when that cannot be known (the processes could not be read, or a host program). Best effort: without elevation Windows does not give the path of some processes. |
 | `entries[].memoryMB` | number or null | Working set of its processes, in MB. |
 | `entries[].cpuSeconds` | number or null | CPU time its processes used since they started, in seconds (not a percentage). |
-| `entries[].protected` | string or null | Why it stays on: `policy`, `driver`, `windows-component`, `security` (antivirus or firewall), `vpn`, `device` (audio, keyboard, touchpad, graphics), `updates` (security updates of a browser or of Office). The rules are `catalog/startup/rules.json` of the installed copy. |
+| `entries[].protected` | string or null | Why it stays on: `policy`, `driver`, `windows-component`, `security` (antivirus or firewall), `vpn`, `device` (helpers of the audio, touchpad, Fn-key, display and pen drivers; never the companion apps of the vendor), `updates` (the updaters of browsers and of Office: protected even though they are updaters, because they bring security patches). The rules, each with its `why`, are `catalog/startup/rules.json` of the installed copy. |
 | `entries[].canDisable` | boolean | It is on and `-Disable` can turn it off: not protected, not run once (`runonce-*`: Windows deletes it after it runs) and, for a task, without `*`, `?`, `[` or `]` in its folder or name. |
 | `entries[].needsAdmin` | boolean | Turning it off needs elevation (`scope` = `machine`). |
 | `entries[].recommended` | boolean | Turning it off is recommended. Only a mark: nothing is turned off unless it is named in `-Disable`. |
-| `entries[].recommendedReason` | string or null | `updater`, `game-launcher`, `sync-client`, `chat-helper`. |
+| `entries[].recommendedReason` | string or null | `updater`, `game-launcher`, `sync-client`, `chat-helper` (chat or mail), `companion-app` (companion app of a hardware vendor: overlay, lighting, driver downloads). |
+| `entries[].notRecommendedReason` | string or null | Why an entry that a rule would recommend is not recommended: `work-app` (OneDrive, Teams or Outlook on a work PC). It can still be turned off. |
 | `entries[].uninstall` | string or null | `winget uninstall --id <id> --exact` for a recommended program whose winget id is known: to show, never run by the tool. |
 | `summary` | object | Counts. |
 | `summary.total` | number | Entries. |
@@ -3724,7 +4165,7 @@ git log -1 --format=%s
 
 ---
 
-### Task 13: README, perfiles y lista negra
+### Task 14: README, perfiles y lista negra
 
 **Files:**
 - Modify: `README.md`
@@ -3747,7 +4188,7 @@ Describe 'Blacklist' {
     It 'says what -Startup never turns off, in both languages' {
         foreach ($lang in 'es', 'en') {
             $text = Get-DocText $lang 'blacklist.md'
-            foreach ($term in '-Startup', 'catalog/startup/rules.json', 'StartupApproved', 'winget uninstall') {
+            foreach ($term in '-Startup', 'catalog/startup/rules.json', 'StartupApproved', 'winget uninstall', 'Click-to-Run') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }
@@ -3775,8 +4216,8 @@ Agregar al final de `docs/es/blacklist.md`:
 | Componentes de Windows (firmados por Windows) y los servicios de esta lista | Windows los necesita; los servicios de seguridad y de actualización siguen la regla de arriba |
 | Antivirus, firewall y lo que registra el Centro de seguridad de Windows | Dejan el equipo expuesto |
 | Clientes VPN | Cortan el acceso a la red de la organización |
-| Software de dispositivos (audio, teclado, panel táctil, gráficos) y controladores | Se pierden teclas, sonido o gestos |
-| Actualizadores de navegadores y de Office | Sin parches de seguridad del navegador, igual que Windows Update |
+| Ayudantes de los controladores (consola y servicios de audio, panel táctil, teclas Fn, servicios de pantalla y de lápiz) y los controladores | Se pierden teclas, sonido, gestos o modos de pantalla. Las apps de acompañamiento del fabricante (GeForce Experience o NVIDIA app, AMD Software, Armoury Crate, G HUB...) no se protegen: se pueden apagar y salen recomendadas |
+| Actualizadores de navegadores y de Office (Edge, Chrome, Firefox, Brave, Click-to-Run) | Se protegen aunque sean actualizadores: sin ellos el navegador y Office no reciben parches de seguridad, igual que con Windows Update. Los actualizadores de otros programas sí se pueden apagar |
 | Lo que fija una directiva de la organización | La organización lo decide |
 | Lo que corre una sola vez (`RunOnce`) | Apagarlo sería borrarlo |
 
@@ -3796,8 +4237,8 @@ Agregar al final de `docs/en/blacklist.md`:
 | Parts of Windows (signed by Windows) and the services of this list | Windows needs them; the security and update services follow the rule above |
 | Antivirus, firewall and what Windows Security Center lists | They leave the machine exposed |
 | VPN clients | They cut the access to the network of the organization |
-| Software of devices (audio, keyboard, touchpad, graphics) and drivers | Keys, sound or gestures stop working |
-| Updaters of browsers and of Office | No security patches for the browser, as with Windows Update |
+| Helpers of the drivers (audio console and services, touchpad, Fn keys, display and pen services) and the drivers | Keys, sound, gestures or display modes stop working. The companion apps of the vendor (GeForce Experience or NVIDIA app, AMD Software, Armoury Crate, G HUB...) are not protected: they can be turned off and are recommended |
+| Updaters of browsers and of Office (Edge, Chrome, Firefox, Brave, Click-to-Run) | Protected even though they are updaters: without them the browser and Office get no security patches, as with Windows Update. The updaters of other programs can be turned off |
 | What a policy of the organization sets | The organization decides it |
 | What runs only once (`RunOnce`) | Turning it off would mean deleting it |
 
@@ -3884,8 +4325,8 @@ por:
 por:
 
 ```markdown
-- `-Startup` lista lo que arranca con Windows o queda en segundo plano (claves Run y RunOnce, carpetas Inicio, apps de la Store, tareas programadas y servicios de terceros) con su editor, si corre y cuánta memoria usa; marca lo protegido (Windows, seguridad, VPN, dispositivos, actualizadores de navegadores, directivas) y lo recomendado (actualizadores, lanzadores de juegos, sincronización, chats), con el comando de winget para desinstalar cuando se conoce, que nunca corre. `-Startup -Disable '<ids>'` apaga solo lo que elijas, como el Administrador de tareas, sin borrar nada: es una corrida más, que `-Status` revisa y `-Undo` revierte.
-  `-Startup` lists what starts with Windows or runs in the background (Run and RunOnce keys, Startup folders, Store apps, scheduled tasks and services of other publishers) with its publisher, whether it runs and how much memory it uses; it marks what is protected (Windows, security, VPN, devices, browser updaters, policies) and what is recommended (updaters, game launchers, sync, chats), with the winget command to uninstall when it is known, which it never runs. `-Startup -Disable '<ids>'` turns off only what you choose, as Task Manager does, deleting nothing: it is one more run, which `-Status` checks and `-Undo` reverts.
+- `-Startup` lista lo que arranca con Windows o queda en segundo plano (claves Run y RunOnce, carpetas Inicio, apps de la Store, tareas programadas y servicios de terceros) con su editor, si corre y cuánta memoria usa; marca lo protegido (Windows, seguridad, VPN, ayudantes de controladores, actualizadores de navegadores y de Office, directivas) y lo recomendado (actualizadores, lanzadores de juegos, sincronización, chats, apps de acompañamiento del fabricante; en un equipo de trabajo, OneDrive, Teams y Outlook no se recomiendan), con el comando de winget para desinstalar cuando se conoce, que nunca corre. `-Startup -Disable '<ids>'` apaga solo lo que elijas, como el Administrador de tareas, sin borrar nada: es una corrida más, que `-Status` revisa y `-Undo` revierte.
+  `-Startup` lists what starts with Windows or runs in the background (Run and RunOnce keys, Startup folders, Store apps, scheduled tasks and services of other publishers) with its publisher, whether it runs and how much memory it uses; it marks what is protected (Windows, security, VPN, driver helpers, updaters of browsers and of Office, policies) and what is recommended (updaters, game launchers, sync, chats, companion apps of vendors; on a work PC, OneDrive, Teams and Outlook are not recommended), with the winget command to uninstall when it is known, which it never runs. `-Startup -Disable '<ids>'` turns off only what you choose, as Task Manager does, deleting nothing: it is one more run, which `-Status` checks and `-Undo` reverts.
 - Si `-Undo` no puede restaurar un ajuste, muestra cómo hacerlo a mano
 ```
 
@@ -3898,8 +4339,8 @@ por:
 por:
 
 ```markdown
-- `-Startup` sin administrador no ve algunas tareas programadas, y la memoria de los programas de otras cuentas o elevados puede faltar. Un servicio que `-Startup -Disable` pasó a Manual deja de listarse. Volver a apagar desde el Administrador de tareas una entrada que la herramienta apagó cambia su fecha y `-Status` la muestra como revertida.
-  Without administrator `-Startup` does not see some scheduled tasks, and the memory of programs of other accounts or elevated ones may be missing. A service that `-Startup -Disable` set to Manual is no longer listed. Turning off again from Task Manager an entry that the tool turned off changes its date, and `-Status` shows it as reverted.
+- `-Startup` sin administrador no ve algunas tareas programadas, y la memoria de los programas de otras cuentas o elevados puede faltar. Un servicio que `-Startup -Disable` pasó a Manual deja de listarse. Una app de la Store cuya tarea de inicio nunca se encendió no se lista (no arranca).
+  Without administrator `-Startup` does not see some scheduled tasks, and the memory of programs of other accounts or elevated ones may be missing. A service that `-Startup -Disable` set to Manual is no longer listed. A Store app whose startup task was never turned on is not listed (it does not start).
 - Todo queda local: no se envía nada a ningún servidor.
 ```
 
@@ -3952,7 +4393,31 @@ por:
 `result-missing`, `result-incomplete`, `result-untrusted` (`-ReadResult`), `session-user` (`-Startup -Disable` elevado con otra cuenta / elevated as another account); los demás errores no lo traen / absent in other errors |
 ```
 
-6. En "Skill de Claude / Claude skill", reemplazar:
+6. En "Menú / Menu", reemplazar:
+
+```markdown
+Salud (y reparar si hace falta) y Medir.
+```
+
+por:
+
+```markdown
+Salud (y reparar si hace falta), Medir y Lo que arranca con Windows (la lista de `-Startup` y apagar lo que elijas).
+```
+
+y reemplazar:
+
+```markdown
+Health (and repair when needed) and Measure.
+```
+
+por:
+
+```markdown
+Health (and repair when needed), Measure and What starts with Windows (the list of `-Startup`, and turning off what you choose).
+```
+
+7. En "Skill de Claude / Claude skill", reemplazar:
 
 ```markdown
 y en un equipo administrado avisa antes que nada. El zip de la release no lleva el plugin.
@@ -3994,7 +4459,7 @@ git log -1 --format=%s
 
 ---
 
-### Task 14: La skill ofrece revisar lo que arranca con Windows
+### Task 15: La skill ofrece revisar lo que arranca con Windows
 
 **Files:**
 - Modify: `plugins/windows-tuneup/skills/windows-tuneup/SKILL.md`
@@ -4052,7 +4517,7 @@ Y agregar, antes de `It 'links only to files that exist' {`:
     It 'turns off startup entries only when the user chose each one, and never runs the uninstall command' {
         foreach ($term in 'a `recommended` mark is never a choice', 'never run the `uninstall` command', 'whose `canDisable` is false',
             'Do we review what starts with Windows?', '`offersStartup`', "-Startup -Disable '<ids>' -WhatIf -Json", 'Never elevate the ones of the user',
-            '`-Startup -Json`') {
+            '`-Startup -Json`', 'protected even though they are updaters', '`notRecommendedReason` = `work-app`') {
             $Skill.Contains($term) | Should -BeTrue -Because $term
         }
         foreach ($term in '`-Startup -Json`', "-Startup -Disable '<ids>' -Yes -Json", '^startup\.[a-z0-9-]+\.[a-z0-9-]+$', '`entries` in `-Startup -Json`') {
@@ -4148,7 +4613,7 @@ por:
 ## 5. What starts with Windows
 
 1. Without elevation: `-Startup -Json` (a `startup` document; see [reading-json.md](reference/reading-json.md#startup)).
-2. Show a table in the user's language with the entries whose `enabled` is true: `name`, `publisher`, whether it runs now and its `memoryMB`, and a mark: recommended (with `recommendedReason` in plain words), protected (with `protected` in plain words: these stay on), or needs administrator (`needsAdmin`). Recommended ones first. Mention entries that are already off only if the user asks.
+2. Show a table in the user's language with the entries whose `enabled` is true: `name`, `publisher`, whether it runs now and its `memoryMB`, and a mark: recommended (with `recommendedReason` in plain words), protected (with `protected` in plain words: these stay on), or needs administrator (`needsAdmin`). Recommended ones first. Mention entries that are already off only if the user asks. Say `updates` as the security updates of the browser or of Office: they are protected even though they are updaters. An entry with `notRecommendedReason` = `work-app` (OneDrive, Teams or Outlook when `workPc` is true) is not recommended because it is used for work; the user can still choose it.
 3. Ask which ones to turn off. The user chooses each entry, by naming it or with a yes to that one entry (guardrail 13): never add one because it is recommended, and never one whose `canDisable` is false. Each id comes from `entries` of that document and matches `^startup\.[a-z0-9-]+\.[a-z0-9-]+$`.
 4. Plan without elevation: `-Startup -Disable '<ids>' -WhatIf -Json`. Say what changes (a `plan` with `source` = `startup`), that nothing is uninstalled or deleted, that `-Undo` turns them on again, and that the change takes effect the next time Windows or the session starts. Wait for the yes.
 5. Apply the entries whose `needsAdmin` is false without elevation: `-Startup -Disable '<those ids>' -Yes -Json`. Apply the ones whose `needsAdmin` is true with one UAC prompt (guardrail 5), elevated, with `-Startup -Disable '<those ids>' -Yes -Json -ResultId <guid>` ([commands.md, "Run elevated"](reference/commands.md#run-elevated)). Never elevate the ones of the user: elevated with another administrator's password they are refused with `reason` = `session-user`.
@@ -4273,9 +4738,10 @@ por:
 ```markdown
 ## `startup`
 
-- `entries[]`: `id`, `name`, `source`, `scope`, `key`, `publisher`, `command`, `path`, `enabled`, `running`, `memoryMB`, `cpuSeconds`, `protected`, `canDisable`, `needsAdmin`, `recommended`, `recommendedReason`, `uninstall`.
-- `protected` says why an entry stays on: `policy`, `driver`, `windows-component`, `security`, `vpn`, `device` (audio, keyboard, touchpad, graphics), `updates` (security updates of a browser or of Office). Say it in plain words and never offer to turn it off.
-- `recommended`, with `recommendedReason` (`updater`, `game-launcher`, `sync-client`, `chat-helper`): a mark to show, never a choice of the user.
+- `entries[]`: `id`, `name`, `source`, `scope`, `key`, `publisher`, `command`, `path`, `enabled`, `running`, `memoryMB`, `cpuSeconds`, `protected`, `canDisable`, `needsAdmin`, `recommended`, `recommendedReason`, `notRecommendedReason`, `uninstall`.
+- `protected` says why an entry stays on: `policy`, `driver`, `windows-component`, `security`, `vpn`, `device` (helpers of the audio, touchpad, Fn-key, display and pen drivers), `updates` (the updaters of browsers and of Office: protected even though they are updaters, because they bring security patches). Say it in plain words and never offer to turn it off.
+- `recommended`, with `recommendedReason` (`updater`, `game-launcher`, `sync-client`, `chat-helper`, `companion-app`: a companion app of a hardware vendor, such as the NVIDIA app or Armoury Crate): a mark to show, never a choice of the user.
+- `workPc` true and `notRecommendedReason` = `work-app`: OneDrive, Teams or Outlook on a work PC; not recommended because it is used for work, but it can still be chosen.
 - `canDisable` false: it cannot go in `-Disable` (protected, already off, run once, or a task with wildcard characters in its name).
 - `running`, `memoryMB` and `cpuSeconds` (CPU time since it started, not a percentage) can be null: unknown, not zero.
 - `uninstall`: a winget command to show as text; the tool never runs it, and neither do you.
@@ -4314,7 +4780,7 @@ git log -1 --format=%s
 
 ---
 
-### Task 15: Listas manuales de la VM y de la skill
+### Task 16: Listas manuales de la VM y de la skill
 
 **Files:**
 - Modify: `docs/es/vm-checklist.md`, `docs/en/vm-checklist.md`
@@ -4333,7 +4799,7 @@ por:
 
 ```powershell
             foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md',
-                '-Startup -Disable', 'StartupApproved', 'winget show --id') {
+                '-Startup -Disable', 'StartupApproved', 'winget show --id', 'work-app') {
 ```
 
 y reemplazar:
@@ -4366,7 +4832,9 @@ por:
 ```markdown
 - [ ] Arranque, sin elevar: `tuneup.ps1 -Startup` lista lo que muestran el Administrador de tareas > Aplicaciones de arranque y Configuración > Aplicaciones > Inicio, más las tareas y los servicios de terceros. Instalar antes Steam (o Discord) y Dropbox y agregar un acceso directo a la carpeta Inicio: salen recomendados; Defender, la VPN (si hay) y el audio salen protegidos. Para cada `wingetId` de `catalog/startup/rules.json`, `winget show --id <id> --exact` encuentra el programa.
 - [ ] Como administrador, `tuneup.ps1 -Startup -Disable '<ids>' -Yes` con una entrada de cada fuente que tenga la VM (Run del usuario, Run de máquina, carpeta Inicio, una app de la Store con tarea de inicio como Teams, una tarea programada y un servicio automático de terceros): el Administrador de tareas y Configuración las muestran deshabilitadas, los valores de `StartupApproved` empiezan con `03` y el `State` de la tarea de la Store vale 1 (`reg query "HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData" /s /v State`), la tarea queda deshabilitada y el servicio en Manual sin detenerse. Reiniciar: no arrancan, y lo protegido sí.
-- [ ] `tuneup.ps1 -Status` las muestra `ok`; encender una desde el Administrador de tareas la deja en `drift`, y `tuneup.ps1 -Status -Reapply -WhatIf` la deja fuera con el aviso de apagarla con `-Startup -Disable`. Apagarla otra vez con `-Startup -Disable` la deja apagada (y otra vez más no cambia nada).
+- [ ] `tuneup.ps1 -Status` las muestra `ok`; volver a apagar una desde el Administrador de tareas la deja `ok` (la fecha nueva no cuenta) y encenderla la deja en `drift`, y `tuneup.ps1 -Status -Reapply -WhatIf` la deja fuera con el aviso de apagarla con `-Startup -Disable`. Apagarla otra vez con `-Startup -Disable` la deja apagada (y otra vez más no cambia nada).
+- [ ] Menú > 6 (Lo que arranca con Windows): lista lo mismo que `-Startup`, nada viene marcado; elegir una entrada de usuario la apaga después del plan y la confirmación; elegir una de máquina sin elevar dice que necesita administrador y no cambia nada.
+- [ ] Con NVIDIA app, AMD Software o Armoury Crate instalados (si se puede): salen recomendados como app de acompañamiento, no protegidos; el servicio de audio de Realtek y el panel táctil siguen protegidos. Con la inscripción MDM simulada de [skill-checklist.md](skill-checklist.md), OneDrive y Teams salen sin recomendar (`work-app`) y el documento dice `workPc`.
 - [ ] `tuneup.ps1 -Undo last`: todo vuelve como estaba (los valores de `StartupApproved` que no existían desaparecen y el servicio vuelve a Automático); reiniciar y comprobar que arrancan.
 - [ ] Liviano frente a LTSC: el método de [measuring.md](measuring.md), con su reporte.
 ```
@@ -4382,7 +4850,9 @@ por:
 ```markdown
 - [ ] Startup, without elevation: `tuneup.ps1 -Startup` lists what Task Manager > Startup apps and Settings > Apps > Startup show, plus the scheduled tasks and services of other publishers. Install Steam (or Discord) and Dropbox first and add a shortcut to the Startup folder: they are recommended; Defender, the VPN (if any) and audio are protected. For every `wingetId` of `catalog/startup/rules.json`, `winget show --id <id> --exact` finds the program.
 - [ ] As administrator, `tuneup.ps1 -Startup -Disable '<ids>' -Yes` with one entry of each source the VM has (Run of the user, Run of the machine, Startup folder, a Store app with a startup task such as Teams, a scheduled task and an automatic service of another publisher): Task Manager and Settings show them disabled, the `StartupApproved` values start with `03` and the `State` of the Store task is 1 (`reg query "HKCU\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData" /s /v State`), the task is disabled and the service is Manual without being stopped. Restart: they do not start, and what is protected does.
-- [ ] `tuneup.ps1 -Status` shows them `ok`; turning one on from Task Manager leaves it in `drift`, and `tuneup.ps1 -Status -Reapply -WhatIf` leaves it out with the warning to turn it off with `-Startup -Disable`. Turning it off again with `-Startup -Disable` leaves it off (and once more changes nothing).
+- [ ] `tuneup.ps1 -Status` shows them `ok`; turning one off again from Task Manager leaves it `ok` (the new date does not count) and turning it on leaves it in `drift`, and `tuneup.ps1 -Status -Reapply -WhatIf` leaves it out with the warning to turn it off with `-Startup -Disable`. Turning it off again with `-Startup -Disable` leaves it off (and once more changes nothing).
+- [ ] Menu > 6 (What starts with Windows): it lists the same as `-Startup`, nothing comes picked; picking an entry of the user turns it off after the plan and the confirmation; picking one of the machine without elevation says that it needs administrator and changes nothing.
+- [ ] With the NVIDIA app, AMD Software or Armoury Crate installed (if possible): they are recommended as companion apps, not protected; the Realtek audio service and the touchpad stay protected. With the MDM enrollment simulated in [skill-checklist.md](skill-checklist.md), OneDrive and Teams are not recommended (`work-app`) and the document says `workPc`.
 - [ ] `tuneup.ps1 -Undo last`: everything is back as it was (the `StartupApproved` values that did not exist are gone and the service is Automatic again); restart and check that they start.
 - [ ] Lite versus LTSC: the method of [measuring.md](measuring.md), with its report.
 ```
@@ -4405,6 +4875,7 @@ por:
 3. Elige una entrada de usuario y una de máquina. Esperado: plan con `-Startup -Disable '<ids>' -WhatIf -Json`; con el sí, la de usuario se aplica sin UAC y la de máquina con un UAC (`-ResultId`, leído con `-ReadResult <id> -Json`); dice que rige desde el próximo inicio y da el `runId` de cada corrida.
 4. Una entrada con `uninstall`: la skill muestra el comando de winget como texto y no lo corre.
 5. "deshaz eso". Esperado: `-Undo <runId>` con el `runId` de `-Status -Json` (elevado solo la corrida de máquina); las entradas vuelven a encenderse.
+6. Con la inscripción MDM simulada de la sección siguiente, repite el paso 1. Esperado: OneDrive, Teams y Outlook salen sin la marca de recomendado y la skill explica que se usan para trabajar; igual se pueden elegir.
 
 ## Equipo administrado
 ```
@@ -4425,6 +4896,7 @@ por:
 3. Choose one entry of the user and one of the machine. Expected: a plan with `-Startup -Disable '<ids>' -WhatIf -Json`; with the yes, the one of the user is applied without UAC and the one of the machine with one UAC prompt (`-ResultId`, read with `-ReadResult <id> -Json`); it says that it takes effect at the next start and gives the `runId` of each run.
 4. An entry with `uninstall`: the skill shows the winget command as text and does not run it.
 5. "undo that". Expected: `-Undo <runId>` with the `runId` of `-Status -Json` (elevated only for the run of the machine); the entries are on again.
+6. With the MDM enrollment simulated in the next section, repeat step 1. Expected: OneDrive, Teams and Outlook come without the recommended mark and the skill explains that they are used for work; they can still be chosen.
 
 ## Managed PC
 ```
@@ -4444,7 +4916,7 @@ git log -1 --format=%s
 
 ---
 
-### Task 16: Verificación final
+### Task 17: Verificación final
 
 **Files:** ninguno nuevo (solo correcciones si algo falla).
 
@@ -4480,7 +4952,7 @@ Expected: los conteos; `total` igual a la cantidad de `entries`.
 
 Solo si un paso anterior pidió un cambio: `git add` de cada archivo por su nombre, `git commit -m "fix(arranque): <qué se corrigió>"` y `git log -1 --format=%s`.
 
-La lista manual de la VM (Task 15) se corre antes de la próxima release, con el reporte adjunto.
+La lista manual de la VM (Task 16) se corre antes de la próxima release, con el reporte adjunto.
 
 ---
 
@@ -4495,15 +4967,18 @@ En este equipo (Windows 11 Pro 26H2, build 26300, sin elevar, solo lectura):
 - **Centro de seguridad**: `root/SecurityCenter2` `AntiVirusProduct` se lee sin elevar; Defender trae `pathToSignedProductExe` = `windowsdefender://` y `pathToSignedReportingExe` = `%ProgramFiles%\Windows Defender\MsMpeng.exe` (por eso se descartan las que no son rutas).
 - **Firma**: `SecurityHealthSystray.exe` está firmado por `CN=Microsoft Windows, O=Microsoft Corporation, …` (regla `windowsSigners`).
 - **Ids y FILETIME** de las pruebas calculados con la función de la Task 1: `startup.run-user.steam-eb4bc901`, `startup.run-machine.steam-bb5ab8ea`, `startup.task.vendor-updater-task-logon-a94b661c`, `startup.service.averylongservicenamethatgoesonan-57d0735c`, `startup.store-app.msteams-8wekyb3d8bbwe-teamstfwst-119df735`, `startup.folder-user.lnk-70476f0a`; 2026-10-04 12:00 UTC = FILETIME `134355888000000000` = bytes `00 e0 b8 e1 f7 53 dd 01`.
+- **Tareas de la Store sin clave** (revisión): la documentación de `StartupTask` (Remarks) dice que la extensión "will not, by itself, automatically cause the app start", que las apps UWP piden el permiso con `RequestEnableAsync` y que, en los dos casos, "the user must either launch the app at least once, or they must enable startup functionality for the app on the Startup page in Settings". En este equipo, las cuatro tareas que alguna vez se usaron tienen `State`: sin clave no hay nada que arranque.
 - **Formato de `StartupApproved`**: no hay documentación de Microsoft; la fuente es el comportamiento conocido del Administrador de tareas (Eleven Forum, "Enable or Disable Startup Apps in Windows 11") y lo observado arriba.
 
-**No se verificó** (queda para la VM, Task 15): que escribir `State` = 1 por el registro apague la app de la Store en el siguiente inicio de sesión (el lugar no está documentado), que los `wingetId` existan (`winget show`), el tiempo de `Get-AuthenticodeSignature` sobre todos los servicios de un equipo con muchos programas, la lista elevada y el comportamiento en Windows Server (sin Centro de seguridad: aviso).
+**No se verificó** (queda para la VM, Task 16): que escribir `State` = 1 por el registro apague la app de la Store en el siguiente inicio de sesión (el lugar no está documentado), que los `wingetId` existan (`winget show`), el tiempo de `Get-AuthenticodeSignature` sobre todos los servicios de un equipo con muchos programas, la lista elevada y el comportamiento en Windows Server (sin Centro de seguridad: aviso).
 
-## Preguntas abiertas
+## Preguntas resueltas (revisión del 2026-10-04)
 
-1. **Actualizadores de navegadores y Office protegidos** (decisión 7): el diseño aprobado pedía recomendar "actualizadores"; aquí los de navegadores y Office quedan protegidos. ¿O solo "no recomendados" y apagables?
-2. **Deriva al volver a apagar desde el Administrador de tareas** (decisión 16): sale `drift` aunque está apagada. ¿Se acepta, o se quiere un manejador que mire solo el primer byte (sería un tipo nuevo)?
-3. **Reglas `device` amplias** (`Intel`, `NVIDIA`, `AMD`...): protegen también GeForce Experience o el asistente de Intel, que mucha gente quiere apagar. ¿Se acotan por nombre de programa?
-4. **OneDrive y Teams recomendados** en un equipo de trabajo: el perfil `work` los conserva. ¿La skill debería callarse esa recomendación cuando `-Suggest` detecta `work`?
-5. **Menú**: no hay opción de arranque; la línea del perfil dice el comando. ¿Se quiere una opción 6 en el menú?
-6. **Tareas de la Store sin clave** (nunca inicializadas) no se listan. ¿Basta, o se leen todos los manifiestos (unos 2 s más)?
+1. **Actualizadores de navegadores y Office**: siguen protegidos (`updates`, decisión 7); la lista negra y la skill lo dicen.
+2. **Deriva al volver a apagar desde el Administrador de tareas**: `set.compare = 'startupApproved'` en el manejador `registry` (decisión 16): solo cuenta el primer byte; `-Undo` devuelve los bytes exactos.
+3. **Reglas `device`**: acotadas a los ayudantes de los controladores, con `why` en cada regla; las apps de acompañamiento son `companion-app` (decisiones 6, 25, 26).
+4. **OneDrive, Teams y Outlook en un equipo de trabajo**: no se recomiendan, con `notRecommendedReason` = `work-app` y `workPc` en el documento (decisión 23).
+5. **Menú**: opción 6, "Lo que arranca con Windows" (decisión 24, Task 12), además de la línea del perfil `gaming`.
+6. **Tareas de la Store sin clave**: no se listan ni se leen todos los manifiestos; nunca se encendieron (decisión 3, con la cita de la documentación de `StartupTask`).
+
+Queda solo lo que no se puede comprobar sin la VM ("No se verificó", arriba).
