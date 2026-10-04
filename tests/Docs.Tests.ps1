@@ -19,6 +19,22 @@ Describe 'README' {
 }
 
 Describe 'Blacklist' {
+    It 'says what -Startup never turns off, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'blacklist.md'
+            foreach ($term in '-Startup', 'catalog/startup/rules.json', 'StartupApproved', 'winget uninstall', 'Click-to-Run', 'unverified', 'Manual') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+
+    It 'says in both languages that gaming offers the review of what starts with Windows' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'profiles.md'
+            foreach ($term in 'offersStartup', '-Startup -Disable') { $text.Contains($term) | Should -BeTrue -Because "$lang $term" }
+        }
+    }
+
     It 'explains the cases of the design and of the research in both languages' {
         $terms = @('Defender', 'SmartScreen', 'Windows Update', 'WinRE', '/ResetBase', 'Spectre', 'PagingFiles', 'hosts',
             'SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'HPET', 'SharedAccess', 'OneDrive', 'CBS', 'WerSvc', 'Spooler')

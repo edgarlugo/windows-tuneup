@@ -48,6 +48,8 @@ Rules that apply to all of them:
 
 **High risk, only with `-Include`:** `gaming.memory-integrity-off` (memory integrity): it can give 1 to 15% more FPS in some games in exchange for less protection against malicious drivers.
 
+**Offers to review what starts with Windows** (`offersStartup`): planning or applying `gaming` ends with a line that suggests `.\tuneup.ps1 -Startup`, where game launchers, sync clients and chats that start on their own are recommended. It turns nothing off: each entry is chosen with `-Startup -Disable '<id>'`.
+
 **Administrator:** yes. GPU scheduling asks for a restart.
 
 ## Privacy (`privacy`, alias `privacidad`)

@@ -74,3 +74,21 @@ What was evaluated and left out for other reasons (apps that cannot be reinstall
 | Change | Why not |
 |---|---|
 | Removing Microsoft Edge or WebView2 | It breaks Widgets, help and many apps that show web content, and leaves the machine without a supported browser. |
+
+## What `-Startup` never turns off
+
+`-Startup -Disable` turns off what starts with Windows without uninstalling or deleting anything: it writes the `StartupApproved` value that Task Manager uses (or the state of the startup task of a Store app, as Settings does), disables the task or sets the service to Manual, and `-Undo` gives it back. It never does so with what it shows as protected (rules in `catalog/startup/rules.json`, open to review) or with what it cannot turn off safely:
+
+| What | Why not |
+|---|---|
+| Parts of Windows (with a checked signature of Windows) and the services of this list | Windows needs them; the security and update services follow the rule above |
+| Services and drivers that run from the Windows folder without a checked signature (`unverified`) | It is not known whose they are: they are shown, but not turned off |
+| Antivirus, firewall, what Windows Security Center lists, protected processes and agents of the organization (EDR, Sysmon, Intune, Configuration Manager) | They leave the machine exposed or out of the management of the organization |
+| VPN clients | They cut the access to the network of the organization |
+| Helpers of the drivers (audio console and services, touchpad, Fn keys, display and pen services), the services of driver packages and the drivers | Keys, sound, gestures or display modes stop working. The companion apps of the vendor (GeForce Experience or NVIDIA app, AMD Software, Armoury Crate, G HUB...) are not protected: they can be turned off and are recommended |
+| Updaters of browsers and of Office (Edge, Chrome, Firefox, Brave, Opera, Vivaldi, Yandex, Click-to-Run) | Protected even though they are updaters: without them the browser and Office get no security patches, as with Windows Update. The updaters of other programs can be turned off |
+| What a policy of the organization sets | The organization decides it |
+| What runs only once (`RunOnce`) | Turning it off would mean deleting it |
+| What could not be read completely, what shares its id with another entry, and tasks with wildcard characters in their name | The id could name something other than what you see |
+
+A service is never set to Disabled, only to Manual, and it is not stopped. What is recommended is only a mark: nothing is turned off unless you choose it. To uninstall a program the tool only shows the command (`winget uninstall --id <id> --exact`); it never runs it.
