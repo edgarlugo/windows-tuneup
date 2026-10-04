@@ -299,19 +299,71 @@ Describe 'Startup detectors' {
         @(Get-TuneupSecurityProductFolder -ClassName 'AntiVirusProduct') -join ',' | Should -Be "$([Environment]::GetFolderPath('ProgramFiles'))\Vendor AV"
     }
 
-    It 'reads who signed a file, only from a valid signature, and remembers it' {
+    It 'never takes a folder of Windows, a Program Files folder or a drive for the folder of a product' {
+        Mock -ModuleName Tuneup Get-CimInstance {
+            [pscustomobject]@{ pathToSignedProductExe = '%ProgramFiles%\report.exe'; pathToSignedReportingExe = '%windir%\system32\SecurityHealthService.exe' }
+            [pscustomobject]@{ pathToSignedProductExe = '%ProgramFiles(x86)%\a.exe'; pathToSignedReportingExe = '%ProgramData%\b.exe' }
+            [pscustomobject]@{ pathToSignedProductExe = '%windir%\c.exe'; pathToSignedReportingExe = '%SystemDrive%\d.exe' }
+            [pscustomobject]@{ pathToSignedProductExe = '%windir%\SysWOW64\e.exe'; pathToSignedReportingExe = '%ProgramFiles%\Vendor AV\f.exe' }
+        } -ParameterFilter { $Namespace -eq 'root/SecurityCenter2' -and $ClassName -eq 'FirewallProduct' }
+        @(Get-TuneupSecurityProductFolder -ClassName 'FirewallProduct') -join ',' | Should -Be "$([Environment]::GetFolderPath('ProgramFiles'))\Vendor AV"
+    }
+
+    It 'reads who signed a file and whether Windows or a Microsoft root vouches for it, only from a valid signature' {
         $file = Join-Path $TestDrive 'signed.exe'
         [System.IO.File]::WriteAllText($file, 'x')
         Clear-TuneupFileSignerCache
-        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc., O=Vendor' } } }
-        Get-TuneupFileSigner -Path $file | Should -Be 'Vendor Inc.'
-        Get-TuneupFileSigner -Path $file | Should -Be 'Vendor Inc.'
+        Mock -ModuleName Tuneup Test-TuneupMicrosoftRootChain { $false }
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; IsOSBinary = $false; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc., O=Vendor' } } }
+        $signature = Get-TuneupFileSignature -Path $file
+        $signature.Signer | Should -Be 'Vendor Inc.'
+        $signature.IsOSBinary | Should -BeFalse
+        $signature.MicrosoftRoot | Should -BeFalse
+        (Get-TuneupFileSignature -Path $file).Signer | Should -Be 'Vendor Inc.'
         Should -Invoke -ModuleName Tuneup Get-AuthenticodeSignature -Times 1 -Exactly
         Clear-TuneupFileSignerCache
-        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc.' } } }
-        Get-TuneupFileSigner -Path $file | Should -BeNullOrEmpty
-        Get-TuneupFileSigner -Path (Join-Path $TestDrive 'missing.exe') | Should -BeNullOrEmpty
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; IsOSBinary = $true; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Windows, O=Microsoft Corporation' } } }
+        (Get-TuneupFileSignature -Path $file).IsOSBinary | Should -BeTrue
         Clear-TuneupFileSignerCache
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc.' } } }
+        Get-TuneupFileSignature -Path $file | Should -BeNullOrEmpty
+        Get-TuneupFileSignature -Path (Join-Path $TestDrive 'missing.exe') | Should -BeNullOrEmpty
+        Clear-TuneupFileSignerCache
+    }
+
+    It 'reads a signature that cannot be read only once: the next time it is unknown, without failing again' {
+        $file = Join-Path $TestDrive 'locked.exe'
+        [System.IO.File]::WriteAllText($file, 'x')
+        Clear-TuneupFileSignerCache
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { throw 'The file is in use' }
+        { Get-TuneupFileSignature -Path $file } | Should -Throw '*in use*'
+        Get-TuneupFileSignature -Path $file | Should -BeNullOrEmpty
+        Should -Invoke -ModuleName Tuneup Get-AuthenticodeSignature -Times 1 -Exactly
+        Clear-TuneupFileSignerCache
+    }
+
+    It 'tells a certificate of a Microsoft root from any other' {
+        $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+        try {
+            $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=Microsoft Windows, O=Not Microsoft', $rsa,
+                [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
+            $selfSigned = $request.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays(1))
+        } finally {
+            $rsa.Dispose()
+        }
+        Test-TuneupMicrosoftRootChain -Certificate $selfSigned | Should -BeFalse
+        # A file of Windows itself, which every Windows has.
+        $windows = Get-AuthenticodeSignature -LiteralPath (Join-Path ([Environment]::SystemDirectory) 'ntdll.dll')
+        Test-TuneupMicrosoftRootChain -Certificate $windows.SignerCertificate | Should -BeTrue
+    }
+
+    It 'reads whether a service starts as a protected process' {
+        New-Item -Path "$Key\Services\VendorAv" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$Key\Services\VendorAv" -Name 'LaunchProtected' -Value 3 -PropertyType DWord | Out-Null
+        New-Item -Path "$Key\Services\Plain" -Force | Out-Null
+        Get-TuneupServiceLaunchProtected -Name 'VendorAv' -Root "$Key\Services" | Should -Be 3
+        Get-TuneupServiceLaunchProtected -Name 'Plain' -Root "$Key\Services" | Should -BeNullOrEmpty
+        Get-TuneupServiceLaunchProtected -Name 'Missing' -Root "$Key\Services" | Should -BeNullOrEmpty
     }
 
     It 'reads the running processes, leaving unknown what Windows does not tell' {
@@ -353,7 +405,8 @@ Describe 'Get-TuneupStartupEntry' {
         Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask { }
         Mock -ModuleName Tuneup Get-TuneupStartupServiceItem { }
         Mock -ModuleName Tuneup Get-TuneupSecurityProductFolder { }
-        Mock -ModuleName Tuneup Get-TuneupFileSigner { $null }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { $null }
+        Mock -ModuleName Tuneup Get-TuneupServiceLaunchProtected { $null }
         Mock -ModuleName Tuneup Get-TuneupStartupProcess { }
     }
 
@@ -364,8 +417,8 @@ Describe 'Get-TuneupStartupEntry' {
             [pscustomobject]@{ Name = 'OldTool'; Command = 'C:\Tools\old.exe' }
         } -ParameterFilter { $Path -eq $MachineRun }
         Mock -ModuleName Tuneup Get-TuneupStartupApprovedValue { @{ OldTool = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8) } } -ParameterFilter { $Path -like 'HKLM:*\StartupApproved\Run' }
-        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Valve Corp.' } -ParameterFilter { $Path -eq 'C:\Games\Steam\steam.exe' }
-        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Microsoft Windows' } -ParameterFilter { $Path -like '*\SecurityHealthSystray.exe' }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Valve Corp.'; IsOSBinary = $false; MicrosoftRoot = $false } } -ParameterFilter { $Path -eq 'C:\Games\Steam\steam.exe' }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Microsoft Windows'; IsOSBinary = $true; MicrosoftRoot = $true } } -ParameterFilter { $Path -like '*\SecurityHealthSystray.exe' }
         Mock -ModuleName Tuneup Get-TuneupStartupProcess {
             [pscustomobject]@{ Id = 100; Path = 'C:\Games\Steam\steam.exe'; WorkingSet = 200MB; CpuSeconds = 10.04 }
             [pscustomobject]@{ Id = 101; Path = 'C:\GAMES\Steam\steam.exe'; WorkingSet = 20MB; CpuSeconds = $null }
@@ -466,6 +519,9 @@ Describe 'Get-TuneupStartupEntry' {
         $corp.protected | Should -Be 'policy'
         $corp.enabled | Should -BeTrue
         $corp.publisher | Should -Be 'Corp Inc.'
+        # What decides a protection is the signer of the package, never the name it shows.
+        $corp.target.Signer | Should -Be 'EB51A5DA-0E72-4863-82E4-EA21C1F8DFE3'
+        $part.target.Signer | Should -Be 'Microsoft Windows'
         # A manifest is read once per package.
         Should -Invoke -ModuleName Tuneup Get-TuneupAppxManifestStartupTask -Times 1 -Exactly -ParameterFilter { $Path -like '*MSTeams*' }
     }
@@ -483,7 +539,7 @@ Describe 'Get-TuneupStartupEntry' {
             [pscustomobject]@{ Kind = 'service'; Name = 'StoppedSvc'; DisplayName = 'Stopped Service'; PathName = 'C:\Vendor\stopped.exe'; State = 'Stopped'; ProcessId = 0; DelayedAutoStart = $false }
             [pscustomobject]@{ Kind = 'driver'; Name = 'vendordrv'; DisplayName = 'Vendor Driver'; PathName = '\SystemRoot\System32\drivers\vendordrv.sys'; State = 'Running'; ProcessId = 0; DelayedAutoStart = $false }
         }
-        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Microsoft Windows' } -ParameterFilter { $Path -like '*\svchost.exe' }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Microsoft Windows'; IsOSBinary = $true; MicrosoftRoot = $true } } -ParameterFilter { $Path -like '*\svchost.exe' }
         Mock -ModuleName Tuneup Get-TuneupStartupProcess {
             [pscustomobject]@{ Id = 4242; Path = 'C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPS.exe'; WorkingSet = 50MB; CpuSeconds = 3.25 }
             [pscustomobject]@{ Id = 77; Path = $null; WorkingSet = 10MB; CpuSeconds = 1 }
@@ -516,6 +572,52 @@ Describe 'Get-TuneupStartupEntry' {
         (Find-TestEntry $entries 'Vendor Driver').protected | Should -Be 'driver'
     }
 
+    It 'fails closed on the services that run from the folder of Windows' {
+        $windows = [Environment]::GetFolderPath('Windows')
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem {
+            [pscustomobject]@{ Kind = 'service'; Name = 'DcomLaunch'; DisplayName = 'DCOM Server Process Launcher'; PathName = "$windows\system32\svchost.exe -k DcomLaunch -p"; State = 'Running'; ProcessId = 900; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'RpcEptMapper'; DisplayName = 'RPC Endpoint Mapper'; PathName = "$windows\system32\svchost.exe -k RPCSS -p"; State = 'Running'; ProcessId = 901; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'ProfSvc'; DisplayName = 'User Profile Service'; PathName = "$windows\system32\svchost.exe -k netsvcs -p"; State = 'Running'; ProcessId = 902; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'SamSs'; DisplayName = 'Security Accounts Manager'; PathName = "$windows\system32\lsass.exe"; State = 'Running'; ProcessId = 903; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'OddSvc'; DisplayName = 'Odd Service'; PathName = "$($windows.ToUpperInvariant())\System32\..\System32\oddsvc.exe"; State = 'Running'; ProcessId = 904; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'ClaimSvc'; DisplayName = 'Claims Windows'; PathName = "$windows\claim.exe"; State = 'Running'; ProcessId = 905; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'VendorInWin'; DisplayName = 'Vendor In Windows'; PathName = "$windows\System32\vendorsvc.exe"; State = 'Running'; ProcessId = 906; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'ScriptSvc'; DisplayName = 'Script Service'; PathName = 'cmd.exe /c C:\Vendor\run.bat'; State = 'Running'; ProcessId = 907; DelayedAutoStart = $false }
+        }
+        # Nothing can be verified, but the vendor service is signed by its vendor and the claim only names Windows.
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Vendor Inc.'; IsOSBinary = $false; MicrosoftRoot = $false } } -ParameterFilter { $Path -like '*\vendorsvc.exe' }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Microsoft Windows'; IsOSBinary = $false; MicrosoftRoot = $false } } -ParameterFilter { $Path -like '*\claim.exe' }
+        $entries = Get-TestEntry
+        foreach ($name in 'DcomLaunch', 'RpcEptMapper', 'ProfSvc', 'SamSs') {
+            @($entries | Where-Object { $_.key -eq $name -and $_.canDisable }).Count | Should -Be 0 -Because $name
+        }
+        # The service hosts of Windows are not listed at all.
+        @($entries | Where-Object { $_.path -like '*\svchost.exe' -or $_.path -like '*\lsass.exe' }).Count | Should -Be 0
+        foreach ($name in 'Odd Service', 'Claims Windows', 'Script Service') {
+            $entry = Find-TestEntry $entries $name
+            $entry.protected | Should -Be 'windows-component' -Because $name
+            $entry.canDisable | Should -BeFalse -Because $name
+        }
+        (Find-TestEntry $entries 'Script Service').publisher | Should -BeNullOrEmpty
+        $vendor = Find-TestEntry $entries 'Vendor In Windows'
+        $vendor.publisher | Should -Be 'Vendor Inc.'
+        $vendor.protected | Should -BeNullOrEmpty
+        $vendor.canDisable | Should -BeTrue
+    }
+
+    It 'protects a service that Windows starts as a protected process' {
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem {
+            [pscustomobject]@{ Kind = 'service'; Name = 'VendorShield'; DisplayName = 'Vendor Shield'; PathName = '"C:\Program Files\Vendor Shield\shield.exe"'; State = 'Running'; ProcessId = 50; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'VendorPlain'; DisplayName = 'Vendor Plain'; PathName = '"C:\Program Files\Vendor\plain.exe"'; State = 'Running'; ProcessId = 51; DelayedAutoStart = $false }
+        }
+        Mock -ModuleName Tuneup Get-TuneupFileSignature { [pscustomobject]@{ Signer = 'Vendor Inc.'; IsOSBinary = $false; MicrosoftRoot = $false } }
+        Mock -ModuleName Tuneup Get-TuneupServiceLaunchProtected { 3 } -ParameterFilter { $Name -eq 'VendorShield' }
+        Mock -ModuleName Tuneup Get-TuneupServiceLaunchProtected { 0 } -ParameterFilter { $Name -eq 'VendorPlain' }
+        $entries = Get-TestEntry
+        (Find-TestEntry $entries 'Vendor Shield').protected | Should -Be 'security'
+        (Find-TestEntry $entries 'Vendor Plain').protected | Should -BeNullOrEmpty
+    }
+
     It 'protects what lives in the folder of a product of Windows Security' {
         Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'VendorTray'; Command = '"C:\Program Files\Vendor AV\tray.exe"' } } -ParameterFilter { $Path -eq $UserRun }
         Mock -ModuleName Tuneup Get-TuneupSecurityProductFolder { 'C:\Program Files\Vendor AV' } -ParameterFilter { $ClassName -eq 'AntiVirusProduct' }
@@ -530,7 +632,7 @@ Describe 'Get-TuneupStartupEntry' {
         $helper.protected | Should -BeNullOrEmpty
         $helper.running | Should -BeNullOrEmpty
         $helper.canDisable | Should -BeTrue
-        Should -Invoke -ModuleName Tuneup Get-TuneupFileSigner -Times 0 -ParameterFilter { $Path -like '*rundll32.exe' }
+        Should -Invoke -ModuleName Tuneup Get-TuneupFileSignature -Times 0 -ParameterFilter { $Path -like '*rundll32.exe' }
     }
 
     It 'does not recommend the apps of work on a work PC, but leaves them to choose' {

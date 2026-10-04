@@ -123,10 +123,20 @@ function Get-TuneupStartupProtection {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Rules, [AllowEmptyCollection()][string[]]$SecurityFolder = @())
     if ($Entry.policy) { return 'policy' }
     if ($Entry.source -eq 'driver') { return 'driver' }
-    if ($Entry.publisher -and @($Rules.windowsSigners) -contains [string]$Entry.publisher) { return 'windows-component' }
-    if (@('service', 'driver') -contains $Entry.source -and @($Rules.windowsServices) -contains [string]$Entry.key) { return 'windows-component' }
-    $windowsPart = $(if ($null -ne $Entry.target) { $Entry.target.PSObject.Properties['WindowsPart'] } else { $null })
-    if ($null -ne $windowsPart -and $windowsPart.Value) { return 'windows-component' }
+    # Signed by Windows only when Windows vouches for the signature (IsOSBinary or a Microsoft root), never
+    # by the name of the signer alone; a Store app only by the kind of its signature (WindowsPart).
+    if ($Entry.source -ne 'store-app' -and (Get-TuneupStartupTargetValue -Entry $Entry -Name 'WindowsSigned') -eq $true) { return 'windows-component' }
+    if (@('service', 'driver') -contains $Entry.source) {
+        # A per-user service is <name>_<hex suffix>: it is the service of Windows of that name.
+        $key = [string]$Entry.key
+        $base = $key -replace '_[0-9a-fA-F]{4,}$', ''
+        if (@($Rules.windowsServices) -contains $key -or @($Rules.windowsServices) -contains $base) { return 'windows-component' }
+    }
+    # A Store app of Windows, or a service that runs from the folder of Windows and could not be shown to be
+    # of another publisher (fail closed).
+    if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'WindowsPart') -eq $true) { return 'windows-component' }
+    # Windows starts it as a protected process (1 Windows, 2 Windows light, 3 antimalware light).
+    if ($Entry.source -eq 'service' -and @(1, 2, 3) -contains (Get-TuneupStartupTargetValue -Entry $Entry -Name 'LaunchProtected')) { return 'security' }
     if ($Entry.path) {
         $folder = (Split-Path -Path ([string]$Entry.path) -Parent).TrimEnd('\') + '\'
         foreach ($product in @($SecurityFolder | Where-Object { $_ })) {
@@ -141,13 +151,23 @@ function Get-TuneupStartupProtection {
     }
 }
 
-# The first protectSigners rule for the source of an entry whose signer is the publisher of the entry
-# (the valid Authenticode signer of its program), compared whole and without case.
+# A value that the list keeps in the target of an entry, or nothing.
+function Get-TuneupStartupTargetValue {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][string]$Name)
+    if ($null -eq $Entry.target) { return }
+    $property = $Entry.target.PSObject.Properties[$Name]
+    if ($null -ne $property) { $property.Value }
+}
+
+# The first protectSigners rule for the source of an entry whose signer is the signer of the entry (the
+# valid Authenticode signer of its program, kept in its target; never the publisher it shows), compared
+# whole and without case.
 function Find-TuneupStartupSignerRule {
     param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)]$Rules)
-    if (-not $Entry.publisher) { return }
+    $signer = [string](Get-TuneupStartupTargetValue -Entry $Entry -Name 'Signer')
+    if (-not $signer) { return }
     foreach ($rule in @($Rules.protectSigners | Where-Object { $null -ne $_ })) {
-        if (@($rule.sources) -contains [string]$Entry.source -and [string]$rule.signer -ieq [string]$Entry.publisher) { return $rule }
+        if (@($rule.sources) -contains [string]$Entry.source -and [string]$rule.signer -ieq $signer) { return $rule }
     }
 }
 

@@ -4,8 +4,13 @@ BeforeAll {
     $script:RulesPath = Join-Path $Repo 'catalog\startup\rules.json'
     $script:Rules = Import-TuneupStartupRuleSet
     function New-TestStartupEntry {
-        param([string]$Source = 'run-user', [string]$Key = 'Sample', [string]$Name = $Key, [string]$Path, [string]$Publisher, [bool]$Policy = $false, [hashtable]$Target = @{})
-        $entry = New-TuneupStartupEntry -Source $Source -Key $Key -Name $Name -Path $Path -Policy $Policy -Target $Target
+        param([string]$Source = 'run-user', [string]$Key = 'Sample', [string]$Name = $Key, [string]$Path, [string]$Publisher, [bool]$Policy = $false,
+            [string]$Signer, [bool]$WindowsSigned = $false, [hashtable]$Target = @{})
+        $fields = $Target.Clone()
+        # What the list keeps of a verified signature: the signer, and whether Windows vouches for it.
+        if ($Signer) { $fields.Signer = $Signer }
+        if ($WindowsSigned) { $fields.WindowsSigned = $true }
+        $entry = New-TuneupStartupEntry -Source $Source -Key $Key -Name $Name -Path $Path -Policy $Policy -Target $fields
         if ($Publisher) { $entry.publisher = $Publisher }
         $entry
     }
@@ -83,7 +88,7 @@ Describe 'Get-TuneupStartupProtection' {
     It 'gives <Expected> for <Case>' -TestCases @(
         @{ Case = 'a Run entry of a policy'; Entry = { New-TestStartupEntry -Source 'policy-machine' -Key 'Agent' -Policy $true }; Expected = 'policy' }
         @{ Case = 'a driver'; Entry = { New-TestStartupEntry -Source 'driver' -Key 'vendordrv' }; Expected = 'driver' }
-        @{ Case = 'a program signed by Windows'; Entry = { New-TestStartupEntry -Key 'SecurityHealth' -Path 'C:\Windows\System32\SecurityHealthSystray.exe' -Publisher 'Microsoft Windows' }; Expected = 'windows-component' }
+        @{ Case = 'a program signed by Windows'; Entry = { New-TestStartupEntry -Key 'SecurityHealth' -Path 'C:\Windows\System32\SecurityHealthSystray.exe' -Publisher 'Microsoft Windows' -Signer 'Microsoft Windows' -WindowsSigned $true }; Expected = 'windows-component' }
         @{ Case = 'a protected service of the blacklist'; Entry = { New-TestStartupEntry -Source 'service' -Key 'wuauserv' }; Expected = 'windows-component' }
         @{ Case = 'a Store app of Windows'; Entry = { New-TestStartupEntry -Source 'store-app' -Key 'Pkg\Task' -Target @{ WindowsPart = $true } }; Expected = 'windows-component' }
         @{ Case = 'an antivirus by name'; Entry = { New-TestStartupEntry -Key 'mbamtray' -Publisher 'Malwarebytes Inc.' }; Expected = 'security' }
@@ -141,14 +146,37 @@ Describe 'Get-TuneupStartupProtection' {
 
     It 'protects the services of driver packages by their signer, and only services' {
         $whcp = 'Microsoft Windows Hardware Compatibility Publisher'
-        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'esifsvc' -Name 'Intel(R) Dynamic Tuning service' -Publisher $whcp) -Rules $Rules | Should -Be 'device'
-        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'FMAPOService' -Name 'Fortemedia APO Control Service' -Publisher $whcp.ToUpperInvariant()) -Rules $Rules | Should -Be 'device'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'esifsvc' -Name 'Intel(R) Dynamic Tuning service' -Signer $whcp) -Rules $Rules | Should -Be 'device'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'FMAPOService' -Name 'Fortemedia APO Control Service' -Signer $whcp.ToUpperInvariant()) -Rules $Rules | Should -Be 'device'
         foreach ($source in 'run-user', 'run-machine', 'folder-user', 'task', 'store-app') {
-            Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source $source -Key 'VendorTray' -Publisher $whcp) -Rules $Rules | Should -BeNullOrEmpty -Because $source
+            Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source $source -Key 'VendorTray' -Signer $whcp) -Rules $Rules | Should -BeNullOrEmpty -Because $source
         }
         # A rule of a category that comes first in the order of protection still wins.
-        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'PanGPS' -Publisher $whcp) -Rules $Rules | Should -Be 'vpn'
-        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'VendorSvc' -Publisher 'Vendor Inc.') -Rules $Rules | Should -BeNullOrEmpty
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'PanGPS' -Signer $whcp) -Rules $Rules | Should -Be 'vpn'
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'VendorSvc' -Signer 'Vendor Inc.') -Rules $Rules | Should -BeNullOrEmpty
+        # The publisher shown is only a name: the signer decides.
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'service' -Key 'VendorSvc' -Publisher $whcp -Signer 'Vendor Inc.') -Rules $Rules | Should -BeNullOrEmpty
+    }
+
+    It 'never takes the name of a signer for proof that it is part of Windows' {
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Key 'Fake' -Path 'C:\Tools\fake.exe' -Publisher 'Microsoft Windows' -Signer 'Microsoft Windows') -Rules $Rules | Should -BeNullOrEmpty
+        # A Store app is part of Windows only by the kind of its signature (System), never by its publisher.
+        Get-TuneupStartupProtection -Entry (New-TestStartupEntry -Source 'store-app' -Key 'Fake_x\Start' -Publisher 'Microsoft Windows' -Signer 'Microsoft Windows') -Rules $Rules | Should -BeNullOrEmpty
+    }
+
+    It 'protects the services that Windows starts as protected processes, and the services of Windows by name: <Case>' -TestCases @(
+        @{ Case = 'LaunchProtected 1'; Entry = { New-TestStartupEntry -Source 'service' -Key 'VendorShield' -Target @{ LaunchProtected = 1 } }; Expected = 'security' }
+        @{ Case = 'LaunchProtected 3'; Entry = { New-TestStartupEntry -Source 'service' -Key 'VendorShield' -Target @{ LaunchProtected = 3 } }; Expected = 'security' }
+        @{ Case = 'LaunchProtected 0'; Entry = { New-TestStartupEntry -Source 'service' -Key 'VendorShield' -Target @{ LaunchProtected = 0 } }; Expected = $null }
+        @{ Case = 'a per-user service of Windows'; Entry = { New-TestStartupEntry -Source 'service' -Key 'webthreatdefusersvc_4a5b6' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
+        @{ Case = 'DcomLaunch'; Entry = { New-TestStartupEntry -Source 'service' -Key 'DcomLaunch' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
+        @{ Case = 'RpcEptMapper'; Entry = { New-TestStartupEntry -Source 'service' -Key 'RpcEptMapper' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
+        @{ Case = 'SamSs'; Entry = { New-TestStartupEntry -Source 'service' -Key 'SamSs' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
+        @{ Case = 'ProfSvc'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ProfSvc' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
+        @{ Case = 'a service of Windows that could not be verified'; Entry = { New-TestStartupEntry -Source 'service' -Key 'OddSvc' -Target @{ WindowsPart = $true } }; Expected = 'windows-component' }
+    ) {
+        param($Entry, $Expected)
+        Get-TuneupStartupProtection -Entry (& $Entry) -Rules $Rules | Should -Be $Expected
     }
 
     It 'protects what lives in the folder of a product of Windows Security' {

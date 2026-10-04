@@ -194,6 +194,18 @@ function New-TuneupStartupEntry {
 $script:StoreTaskRoot = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData'
 $script:SecurityCenterClasses = @('AntiVirusProduct', 'FirewallProduct')
 $script:StartupSignerCache = @{}
+$script:ServiceRoot = 'HKLM:\SYSTEM\CurrentControlSet\Services'
+# The roots of Microsoft that sign Windows and its updates (Microsoft Root Authority, Microsoft Root
+# Certificate Authority, and the 2010 and 2011 ones), by thumbprint.
+$script:MicrosoftRootThumbprints = @(
+    'A43489159A520F0D93D032CCAF37E7FE20A8B419'
+    'CDD4EEAE6000AC7F40C3802C171E30148030C072'
+    '3B1EFD3A66EA28B16697394703A72CA340A05BD5'
+    '8F43288AD272F3103B6FB1428485EA3014C0BCFE'
+)
+# The service hosts of Windows: a service they run is a service of Windows (one of another publisher would
+# be a ServiceDll in a shared group, which -Startup does not read).
+$script:WindowsServiceHosts = @('svchost.exe', 'lsass.exe')
 
 # The values of a Run key, name and command as they are written (not expanded). A key that does not exist
 # gives nothing; one that exists but cannot be read fails.
@@ -336,13 +348,22 @@ function Get-TuneupStartupServiceItem {
 }
 
 # The folders of the products of one class that Windows Security lists (its paths only: Defender gives a
-# windowsdefender:// link). Windows Server has no Security Center: that fails, and the caller warns.
+# windowsdefender:// link). Windows Server has no Security Center: that fails, and the caller warns. A
+# product whose program sits right in a folder that holds everything (a drive, the folder of Windows,
+# System32, SysWOW64, Program Files, ProgramData) gives no folder: everything there would look protected.
 function Get-TuneupSecurityProductFolder {
     param([Parameter(Mandatory)][string]$ClassName)
+    $windows = [Environment]::GetFolderPath('Windows')
+    $broad = @($windows, [Environment]::SystemDirectory, (Join-Path $windows 'SysWOW64'), [Environment]::GetFolderPath('ProgramFiles'),
+        [Environment]::GetFolderPath('ProgramFilesX86'), [Environment]::GetFolderPath('CommonApplicationData')) |
+        Where-Object { $_ } | ForEach-Object { $_.TrimEnd('\') }
     foreach ($product in @(Get-CimInstance -Namespace 'root/SecurityCenter2' -ClassName $ClassName -ErrorAction Stop)) {
         foreach ($path in @($product.pathToSignedProductExe, $product.pathToSignedReportingExe)) {
             $expanded = Expand-TuneupStartupPath -Text ([string]$path)
-            if ($expanded -match '^[A-Za-z]:\\') { Split-Path -Path $expanded -Parent }
+            if ($expanded -notmatch '^[A-Za-z]:\\') { continue }
+            $folder = ([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($expanded))).TrimEnd('\')
+            if ($folder -match '^[A-Za-z]:$' -or @($broad | Where-Object { $_ -ieq $folder }).Count) { continue }
+            $folder
         }
     }
 }
@@ -351,20 +372,90 @@ function Clear-TuneupFileSignerCache {
     $script:StartupSignerCache = @{}
 }
 
-# Who signed a file (the CN of its Authenticode signer, catalog signatures included), only when the
-# signature is valid; nothing otherwise or when the file is not there. Each file is read once per list.
-function Get-TuneupFileSigner {
+# Whether the chain of a certificate reaches one of the roots of Microsoft, by thumbprint (a name can be
+# copied, a thumbprint cannot). Offline: revocation is not checked, so nothing is downloaded for it.
+function Test-TuneupMicrosoftRootChain {
+    param([Parameter(Mandatory)]$Certificate)
+    if ($Certificate -isnot [System.Security.Cryptography.X509Certificates.X509Certificate2]) { return $false }
+    $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
+    try {
+        $chain.ChainPolicy.RevocationMode = [System.Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+        # The result of Build is not what counts: the elements it found are, and a root is known by its thumbprint.
+        [void]$chain.Build($Certificate)
+        foreach ($element in @($chain.ChainElements)) {
+            if ($script:MicrosoftRootThumbprints -contains $element.Certificate.Thumbprint) { return $true }
+        }
+        $false
+    } finally {
+        $chain.Reset()
+    }
+}
+
+# Who signed a file and whether Windows vouches for it, from a valid Authenticode signature (catalog
+# signatures included): { Signer (the CN), IsOSBinary (Windows says it is a file of Windows), MicrosoftRoot
+# (the chain reaches a root of Microsoft) }. Nothing when the signature is not valid or the file is not
+# there. Each file is read once per list; one that could not be read fails once and is unknown afterwards.
+function Get-TuneupFileSignature {
     param([Parameter(Mandatory)][string]$Path)
     if ($script:StartupSignerCache.ContainsKey($Path)) { return $script:StartupSignerCache[$Path] }
-    $signer = $null
+    $result = $null
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-        $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        try {
+            $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        } catch {
+            $script:StartupSignerCache[$Path] = $null
+            throw
+        }
         if ([string]$signature.Status -eq 'Valid' -and $null -ne $signature.SignerCertificate) {
-            $signer = Get-TuneupCommonName -DistinguishedName ([string]$signature.SignerCertificate.Subject)
+            # IsOSBinary is there in Windows PowerShell 5.1; an older Signature without it is not proof.
+            $isOs = $signature.PSObject.Properties['IsOSBinary']
+            $result = [pscustomobject]@{
+                Signer        = Get-TuneupCommonName -DistinguishedName ([string]$signature.SignerCertificate.Subject)
+                IsOSBinary    = ($null -ne $isOs -and $isOs.Value -eq $true)
+                MicrosoftRoot = [bool](Test-TuneupMicrosoftRootChain -Certificate $signature.SignerCertificate)
+            }
         }
     }
-    $script:StartupSignerCache[$Path] = $signer
-    $signer
+    $script:StartupSignerCache[$Path] = $result
+    $result
+}
+
+# A signature of Windows: a signer of windowsSigners that Windows vouches for (IsOSBinary) or whose chain
+# reaches a root of Microsoft. The name of the signer alone is never enough.
+function Test-TuneupWindowsSignature {
+    param([AllowNull()]$Signature, [Parameter(Mandatory)]$Rules)
+    if ($null -eq $Signature -or -not $Signature.Signer) { return $false }
+    [bool](@($Rules.windowsSigners) -contains [string]$Signature.Signer -and ($Signature.IsOSBinary -or $Signature.MicrosoftRoot))
+}
+
+# Keeps a signature on an entry: the publisher it shows, and in its target the signer and whether Windows
+# vouches for it (what the protections use).
+function Set-TuneupStartupSignature {
+    param([Parameter(Mandatory)]$Entry, [AllowNull()]$Signature, [Parameter(Mandatory)]$Rules)
+    $signer = $(if ($null -ne $Signature -and $Signature.Signer) { [string]$Signature.Signer } else { $null })
+    $Entry.publisher = $signer
+    $Entry.target | Add-Member -NotePropertyName Signer -NotePropertyValue $signer -Force
+    $Entry.target | Add-Member -NotePropertyName WindowsSigned -NotePropertyValue (Test-TuneupWindowsSignature -Signature $Signature -Rules $Rules) -Force
+}
+
+# Whether a full path is inside the folder of Windows (after resolving . and ..), without case. Nothing
+# that is not a full path is.
+function Test-TuneupWindowsFolderPath {
+    param([AllowNull()][AllowEmptyString()][string]$Path)
+    if ($Path -notmatch '^[A-Za-z]:\\') { return $false }
+    $full = [System.IO.Path]::GetFullPath($Path)
+    $windows = ([Environment]::GetFolderPath('Windows')).TrimEnd('\') + '\'
+    $full.StartsWith($windows, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+# Whether a service starts as a protected process (LaunchProtected: 1 Windows, 2 Windows light, 3
+# antimalware light), from its key; nothing when it does not say. A standard user can read the key.
+function Get-TuneupServiceLaunchProtected {
+    param([Parameter(Mandatory)][string]$Name, [string]$Root = $script:ServiceRoot)
+    $path = Join-Path $Root $Name
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $value = (Get-Item -LiteralPath $path -ErrorAction Stop).GetValue('LaunchProtected')
+    if ($null -ne $value) { [int]$value }
 }
 
 # The running processes. Windows keeps the path and the times of some processes (other accounts, protected
@@ -478,11 +569,15 @@ function Get-TuneupStartupStoreEntry {
         $name = $(if ($startupTask.DisplayName -and $startupTask.DisplayName -notlike 'ms-resource:*') { [string]$startupTask.DisplayName } else { [string]$package.Name })
         $entry = New-TuneupStartupEntry -Source 'store-app' -Key "$($task.PackageFamilyName)\$($task.TaskId)" -Name $name `
             -Enabled (@(2, 4) -contains $task.State) -Policy (@(3, 4) -contains $task.State) `
-            -Target @{ StoreKeyPath = [string]$task.KeyPath; StoreState = [int]$task.State; InstallLocation = [string]$package.InstallLocation; WindowsPart = ($package.SignatureKind -eq 'System') }
+            -Target @{
+                StoreKeyPath = [string]$task.KeyPath; StoreState = [int]$task.State; InstallLocation = [string]$package.InstallLocation
+                # Part of Windows only by the kind of its signature; the CN of the package is its signer.
+                WindowsPart = ($package.SignatureKind -eq 'System'); Signer = (Get-TuneupCommonName -DistinguishedName $package.Publisher)
+            }
         # The publisher that Settings shows; the CN of the package (sometimes a GUID) when the manifest
         # gives none or only a resource reference.
         $display = [string]$startupTask.PublisherDisplayName
-        $entry.publisher = $(if ($display.Trim() -and $display -notlike 'ms-resource:*') { $display.Trim() } else { Get-TuneupCommonName -DistinguishedName $package.Publisher })
+        $entry.publisher = $(if ($display.Trim() -and $display -notlike 'ms-resource:*') { $display.Trim() } else { $entry.target.Signer })
         $entry
     }
 }
@@ -503,8 +598,12 @@ function Get-TuneupStartupTaskEntry {
     }
 }
 
-# The services and drivers that start on their own, but not the ones of Windows (signed by Windows): they
-# are not something that a program of another publisher added.
+# The services and drivers that start on their own, but not the ones of Windows: they are not something
+# that a program of another publisher added. A service of Windows is one whose signature Windows vouches
+# for, or one that a service host of Windows (svchost, lsass) runs from the folder of Windows. Fail closed:
+# any other service that runs from the folder of Windows and is not signed by another publisher (no valid
+# signature, a signer that only names Windows, or a host program such as cmd.exe, whose signature is not
+# the one of the service) is listed but protected as part of Windows.
 function Get-TuneupStartupServiceEntry {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Rules)
@@ -512,15 +611,24 @@ function Get-TuneupStartupServiceEntry {
     if (-not $services.Ok) { return }
     foreach ($service in @($services.Value | Where-Object { $null -ne $_ })) {
         $program = Get-TuneupCommandProgram -Command $service.PathName
-        $hosted = $program -and @($Rules.hostPrograms) -contains [System.IO.Path]::GetFileName($program)
-        $signer = $null
-        if ($program -and -not $hosted) { $signer = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSigner -Path $program }).Value }
-        if ($signer -and @($Rules.windowsSigners) -contains $signer) { continue }
+        $file = $(if ($program) { [System.IO.Path]::GetFileName($program) } else { $null })
+        $hosted = $file -and @($Rules.hostPrograms) -contains $file
+        $signature = $null
+        if ($program -and -not $hosted) { $signature = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
+        if (Test-TuneupWindowsSignature -Signature $signature -Rules $Rules) { continue }
+        $inWindows = Test-TuneupWindowsFolderPath -Path $program
+        $otherPublisher = $null -ne $signature -and $signature.Signer -and @($Rules.windowsSigners) -notcontains [string]$signature.Signer
+        $windowsPart = $inWindows -and -not $otherPublisher
+        if ($windowsPart -and $script:WindowsServiceHosts -contains $file) { continue }
         $name = $(if ($service.DisplayName) { [string]$service.DisplayName } else { [string]$service.Name })
         $startType = $(if ($service.DelayedAutoStart) { 'AutomaticDelayed' } else { 'Automatic' })
+        $launchProtected = $null
+        if ($service.Kind -eq 'service') {
+            $launchProtected = (Invoke-TuneupDetector -What "whether $($service.Name) starts as a protected process" -Detector { Get-TuneupServiceLaunchProtected -Name $service.Name }).Value
+        }
         $entry = New-TuneupStartupEntry -Source $service.Kind -Key ([string]$service.Name) -Name $name -Command $service.PathName -Path $program `
-            -Target @{ ServiceName = [string]$service.Name; StartType = $startType; ProcessId = [int]$service.ProcessId }
-        $entry.publisher = $signer
+            -Target @{ ServiceName = [string]$service.Name; StartType = $startType; ProcessId = [int]$service.ProcessId; WindowsPart = [bool]$windowsPart; LaunchProtected = $launchProtected }
+        Set-TuneupStartupSignature -Entry $entry -Signature $signature -Rules $Rules
         $entry.running = ([string]$service.State -eq 'Running')
         $entry
     }
@@ -565,8 +673,11 @@ function Complete-TuneupStartupEntry {
     )
     $program = [string]$Entry.path
     $hosted = $program -and @($Rules.hostPrograms) -contains [System.IO.Path]::GetFileName($program)
-    if ($null -eq $Entry.publisher -and $program -and -not $hosted) {
-        $Entry.publisher = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSigner -Path $program }).Value
+    # Services keep the signature they were listed with, and a Store app the signer of its package.
+    if ($null -eq $Entry.target.PSObject.Properties['Signer']) {
+        $signature = $null
+        if ($program -and -not $hosted) { $signature = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
+        Set-TuneupStartupSignature -Entry $Entry -Signature $signature -Rules $Rules
     }
     $Entry.protected = Get-TuneupStartupProtection -Entry $Entry -Rules $Rules -SecurityFolder $SecurityFolder
     $Entry.canDisable = [bool]$Entry.enabled -and -not (Get-TuneupStartupFixedReason -Entry $Entry)

@@ -8,7 +8,9 @@
     "DoSvc", "InstallService", "AppXSvc", "ClipSVC", "wlidsvc", "TrustedInstaller", "CryptSvc", "SharedAccess", "LanmanServer",
     "LanmanWorkstation", "WerSvc", "DPS", "RmSvc", "WpnService", "webthreatdefsvc", "webthreatdefusersvc", "SysMain", "WSearch",
     "vmcompute", "vmms", "hns", "HvHost", "LxssManager", "WslService", "EventLog", "Schedule", "Winmgmt", "RpcSs", "sppsvc", "VSS",
-    "swprv", "AppIDSvc", "Spooler", "MDCoreSvc", "uhssvc"
+    "swprv", "AppIDSvc", "Spooler", "MDCoreSvc", "uhssvc", "DcomLaunch", "RpcEptMapper", "SamSs", "ProfSvc", "LSM", "Power", "PlugPlay",
+    "BrokerInfrastructure", "SystemEventsBroker", "CoreMessagingRegistrar", "StateRepository", "UserManager", "gpsvc", "KeyIso", "Dhcp",
+    "Dnscache", "nsi", "AudioEndpointBuilder", "Audiosrv", "CDPUserSvc", "OneSyncSvc", "WpnUserService"
   ],
   "protect": [
     { "category": "security", "pattern": "\\b(Microsoft Defender|Windows Defender|Windows Security|SecurityHealth\\w*|MsMpEng|MpDefenderCoreService|NisSrv|MsSense)\\b",
