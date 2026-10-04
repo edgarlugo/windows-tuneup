@@ -313,3 +313,240 @@ Describe 'Startup detectors' {
         $processes[1].CpuSeconds | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Get-TuneupStartupEntry' {
+    BeforeAll {
+        $script:Rules = Import-TuneupStartupRuleSet
+        $script:UserRun = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+        $script:MachineRun = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Run'
+        function Get-TestEntry { @(Get-TuneupStartupEntry -Rules $Rules 3>$null) }
+        function Find-TestEntry($Entries, [string]$Name) { @($Entries | Where-Object { $_.name -eq $Name })[0] }
+    }
+
+    BeforeEach {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { }
+        Mock -ModuleName Tuneup Get-TuneupStartupApprovedValue { @{} }
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderItem { }
+        Mock -ModuleName Tuneup Get-TuneupShortcutTarget { $null }
+        Mock -ModuleName Tuneup Get-TuneupStartupStoreTask { }
+        Mock -ModuleName Tuneup Get-TuneupStartupPackage { }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { }
+        Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask { }
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem { }
+        Mock -ModuleName Tuneup Get-TuneupSecurityProductFolder { }
+        Mock -ModuleName Tuneup Get-TuneupFileSigner { $null }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess { }
+    }
+
+    It 'lists the Run entries with their state, publisher, use and recommendation' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Steam'; Command = '"C:\Games\Steam\steam.exe" -silent' } } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'SecurityHealth'; Command = '%windir%\system32\SecurityHealthSystray.exe' }
+            [pscustomobject]@{ Name = 'OldTool'; Command = 'C:\Tools\old.exe' }
+        } -ParameterFilter { $Path -eq $MachineRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupApprovedValue { @{ OldTool = [byte[]](3, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8) } } -ParameterFilter { $Path -like 'HKLM:*\StartupApproved\Run' }
+        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Valve Corp.' } -ParameterFilter { $Path -eq 'C:\Games\Steam\steam.exe' }
+        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Microsoft Windows' } -ParameterFilter { $Path -like '*\SecurityHealthSystray.exe' }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess {
+            [pscustomobject]@{ Id = 100; Path = 'C:\Games\Steam\steam.exe'; WorkingSet = 200MB; CpuSeconds = 10.04 }
+            [pscustomobject]@{ Id = 101; Path = 'C:\GAMES\Steam\steam.exe'; WorkingSet = 20MB; CpuSeconds = $null }
+        }
+        $entries = Get-TestEntry
+        $steam = Find-TestEntry $entries 'Steam'
+        $steam.id | Should -BeExactly 'startup.run-user.steam-eb4bc901'
+        $steam.source | Should -Be 'run-user'
+        $steam.enabled | Should -BeTrue
+        $steam.publisher | Should -Be 'Valve Corp.'
+        $steam.running | Should -BeTrue
+        $steam.memoryMB | Should -Be 220
+        $steam.cpuSeconds | Should -Be 10
+        $steam.canDisable | Should -BeTrue
+        $steam.needsAdmin | Should -BeFalse
+        $steam.recommended | Should -BeTrue
+        $steam.recommendedReason | Should -Be 'game-launcher'
+        $steam.uninstall | Should -Be 'winget uninstall --id Valve.Steam --exact'
+        $steam.target.ApprovedPath | Should -Be 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+        $steam.target.ApprovedName | Should -Be 'Steam'
+        $security = Find-TestEntry $entries 'SecurityHealth'
+        $security.protected | Should -Be 'windows-component'
+        $security.canDisable | Should -BeFalse
+        $security.recommended | Should -BeFalse
+        $security.needsAdmin | Should -BeTrue
+        $security.running | Should -BeFalse
+        $old = Find-TestEntry $entries 'OldTool'
+        $old.enabled | Should -BeFalse
+        $old.canDisable | Should -BeFalse
+        $old.protected | Should -BeNullOrEmpty
+        $old.target.ApprovedValue[0] | Should -Be 3
+    }
+
+    It 'shows run-once and policy entries as entries that stay on' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Cleanup'; Command = 'C:\Tools\cleanup.exe' } } -ParameterFilter { $Path -like 'HKCU:*\RunOnce' }
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Agent'; Command = 'C:\Corp\agent.exe' } } -ParameterFilter { $Path -like 'HKLM:*\Policies\Explorer\Run' }
+        $entries = Get-TestEntry
+        $cleanup = Find-TestEntry $entries 'Cleanup'
+        $cleanup.source | Should -Be 'runonce-user'
+        $cleanup.canDisable | Should -BeFalse
+        Get-TuneupStartupFixedReason -Entry $cleanup | Should -Be 'run-once'
+        $agent = Find-TestEntry $entries 'Agent'
+        $agent.source | Should -Be 'policy-machine'
+        $agent.protected | Should -Be 'policy'
+        $agent.canDisable | Should -BeFalse
+    }
+
+    It 'lists a shortcut of the startup folder by where it points' {
+        $folder = [Environment]::GetFolderPath('Startup')
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderItem { [pscustomobject]@{ Name = 'Discord.lnk'; FullName = "$folder\Discord.lnk" } } -ParameterFilter { $Path -eq $folder }
+        Mock -ModuleName Tuneup Get-TuneupShortcutTarget { [pscustomobject]@{ Target = 'C:\Users\me\AppData\Local\Discord\Update.exe'; Arguments = '--processStart Discord.exe' } }
+        $discord = Find-TestEntry (Get-TestEntry) 'Discord'
+        $discord.source | Should -Be 'folder-user'
+        $discord.key | Should -Be 'Discord.lnk'
+        $discord.path | Should -Be 'C:\Users\me\AppData\Local\Discord\Update.exe'
+        $discord.command | Should -Be '"C:\Users\me\AppData\Local\Discord\Update.exe" --processStart Discord.exe'
+        $discord.recommendedReason | Should -Be 'chat-helper'
+        $discord.uninstall | Should -Be 'winget uninstall --id Discord.Discord --exact'
+        $discord.target.ApprovedPath | Should -Be 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder'
+        $discord.target.ApprovedName | Should -Be 'Discord.lnk'
+    }
+
+    It 'lists the startup tasks of Store apps that their manifest declares' {
+        $root = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData'
+        Mock -ModuleName Tuneup Get-TuneupStartupStoreTask {
+            [pscustomobject]@{ PackageFamilyName = 'MSTeams_8wekyb3d8bbwe'; TaskId = 'TeamsTfwStartupTask'; State = 2; KeyPath = "$root\MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask" }
+            [pscustomobject]@{ PackageFamilyName = 'MSTeams_8wekyb3d8bbwe'; TaskId = 'NotATask'; State = 2; KeyPath = "$root\MSTeams_8wekyb3d8bbwe\NotATask" }
+            [pscustomobject]@{ PackageFamilyName = 'Windows.Part_cw5n1h2txyewy'; TaskId = 'Start'; State = 2; KeyPath = "$root\Windows.Part_cw5n1h2txyewy\Start" }
+            [pscustomobject]@{ PackageFamilyName = 'Corp.App_x'; TaskId = 'Start'; State = 4; KeyPath = "$root\Corp.App_x\Start" }
+        }
+        Mock -ModuleName Tuneup Get-TuneupStartupPackage {
+            [pscustomobject]@{ PackageFamilyName = 'MSTeams_8wekyb3d8bbwe'; Name = 'MSTeams'; Publisher = 'CN=Microsoft Corporation, O=Microsoft Corporation'; InstallLocation = 'C:\Program Files\WindowsApps\MSTeams_1_x64__8wekyb3d8bbwe'; SignatureKind = 'Store' }
+            [pscustomobject]@{ PackageFamilyName = 'Windows.Part_cw5n1h2txyewy'; Name = 'Windows.Part'; Publisher = 'CN=Microsoft Windows'; InstallLocation = 'C:\Windows\SystemApps\Part'; SignatureKind = 'System' }
+            [pscustomobject]@{ PackageFamilyName = 'Corp.App_x'; Name = 'Corp.App'; Publisher = 'CN=Corp'; InstallLocation = 'C:\Program Files\WindowsApps\Corp'; SignatureKind = 'Developer' }
+        }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'TeamsTfwStartupTask'; DisplayName = 'ms-resource:StartupTaskName' } } -ParameterFilter { $Path -like '*MSTeams*' }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'Start'; DisplayName = 'Start' } } -ParameterFilter { $Path -notlike '*MSTeams*' }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess { [pscustomobject]@{ Id = 300; Path = 'C:\Program Files\WindowsApps\MSTeams_1_x64__8wekyb3d8bbwe\ms-teams.exe'; WorkingSet = 150MB; CpuSeconds = 2 } }
+        $entries = @(Get-TestEntry | Where-Object { $_.source -eq 'store-app' })
+        $entries.Count | Should -Be 3
+        $teams = Find-TestEntry $entries 'MSTeams'
+        $teams.key | Should -Be 'MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask'
+        $teams.publisher | Should -Be 'Microsoft Corporation'
+        $teams.enabled | Should -BeTrue
+        $teams.running | Should -BeTrue
+        $teams.memoryMB | Should -Be 150
+        $teams.recommendedReason | Should -Be 'chat-helper'
+        $teams.uninstall | Should -BeNullOrEmpty
+        $teams.target.StoreKeyPath | Should -Be "$root\MSTeams_8wekyb3d8bbwe\TeamsTfwStartupTask"
+        $teams.target.StoreState | Should -Be 2
+        (@($entries | Where-Object { $_.key -like 'Windows.Part*' })[0]).protected | Should -Be 'windows-component'
+        $corp = @($entries | Where-Object { $_.key -like 'Corp.App*' })[0]
+        $corp.protected | Should -Be 'policy'
+        $corp.enabled | Should -BeTrue
+        # A manifest is read once per package.
+        Should -Invoke -ModuleName Tuneup Get-TuneupAppxManifestStartupTask -Times 1 -Exactly -ParameterFilter { $Path -like '*MSTeams*' }
+    }
+
+    It 'lists tasks and services of other publishers and leaves out the services of Windows' {
+        Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask {
+            [pscustomobject]@{ TaskPath = '\'; TaskName = 'GoogleUpdateTaskMachineCore'; State = 'Ready'; Execute = 'C:\Program Files (x86)\Google\Update\GoogleUpdate.exe'; Arguments = '/c' }
+            [pscustomobject]@{ TaskPath = '\'; TaskName = 'Adobe Acrobat Update Task'; State = 'Running'; Execute = '"C:\Program Files (x86)\Common Files\Adobe\ARM\1.0\AdobeARM.exe"'; Arguments = $null }
+            [pscustomobject]@{ TaskPath = '\Vendor\'; TaskName = 'Bad[1]'; State = 'Ready'; Execute = 'C:\Vendor\bad.exe'; Arguments = $null }
+        }
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem {
+            [pscustomobject]@{ Kind = 'service'; Name = 'Dnscache'; DisplayName = 'DNS Client'; PathName = 'C:\WINDOWS\system32\svchost.exe -k NetworkService'; State = 'Running'; ProcessId = 5; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'PanGPS'; DisplayName = 'PanGPS'; PathName = '"C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPS.exe"'; State = 'Running'; ProcessId = 4242; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'VendorSvc'; DisplayName = 'Vendor Service'; PathName = '"C:\Vendor\svc.exe" -run'; State = 'Running'; ProcessId = 77; DelayedAutoStart = $true }
+            [pscustomobject]@{ Kind = 'service'; Name = 'StoppedSvc'; DisplayName = 'Stopped Service'; PathName = 'C:\Vendor\stopped.exe'; State = 'Stopped'; ProcessId = 0; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'driver'; Name = 'vendordrv'; DisplayName = 'Vendor Driver'; PathName = '\SystemRoot\System32\drivers\vendordrv.sys'; State = 'Running'; ProcessId = 0; DelayedAutoStart = $false }
+        }
+        Mock -ModuleName Tuneup Get-TuneupFileSigner { 'Microsoft Windows' } -ParameterFilter { $Path -like '*\svchost.exe' }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess {
+            [pscustomobject]@{ Id = 4242; Path = 'C:\Program Files\Palo Alto Networks\GlobalProtect\PanGPS.exe'; WorkingSet = 50MB; CpuSeconds = 3.25 }
+            [pscustomobject]@{ Id = 77; Path = $null; WorkingSet = 10MB; CpuSeconds = 1 }
+            [pscustomobject]@{ Id = 9; Path = 'C:\Vendor\stopped.exe'; WorkingSet = 5MB; CpuSeconds = 1 }
+        }
+        $entries = Get-TestEntry
+        @($entries | Where-Object { $_.key -eq 'Dnscache' }).Count | Should -Be 0
+        (Find-TestEntry $entries 'GoogleUpdateTaskMachineCore').protected | Should -Be 'updates'
+        $adobe = Find-TestEntry $entries 'Adobe Acrobat Update Task'
+        $adobe.recommendedReason | Should -Be 'updater'
+        $adobe.running | Should -BeTrue
+        $adobe.target.TaskPath | Should -Be '\'
+        $adobe.target.TaskName | Should -Be 'Adobe Acrobat Update Task'
+        $bad = Find-TestEntry $entries 'Bad[1]'
+        $bad.canDisable | Should -BeFalse
+        $bad.protected | Should -BeNullOrEmpty
+        $vpn = Find-TestEntry $entries 'PanGPS'
+        $vpn.protected | Should -Be 'vpn'
+        $vpn.memoryMB | Should -Be 50
+        $vendor = Find-TestEntry $entries 'Vendor Service'
+        $vendor.canDisable | Should -BeTrue
+        $vendor.running | Should -BeTrue
+        $vendor.memoryMB | Should -Be 10
+        $vendor.target.ServiceName | Should -Be 'VendorSvc'
+        $vendor.target.StartType | Should -Be 'AutomaticDelayed'
+        # A stopped service is matched by its process id only, never by the path of another process.
+        $stopped = Find-TestEntry $entries 'Stopped Service'
+        $stopped.running | Should -BeFalse
+        $stopped.memoryMB | Should -BeNullOrEmpty
+        (Find-TestEntry $entries 'Vendor Driver').protected | Should -Be 'driver'
+    }
+
+    It 'protects what lives in the folder of a product of Windows Security' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'VendorTray'; Command = '"C:\Program Files\Vendor AV\tray.exe"' } } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupSecurityProductFolder { 'C:\Program Files\Vendor AV' } -ParameterFilter { $ClassName -eq 'AntiVirusProduct' }
+        (Find-TestEntry (Get-TestEntry) 'VendorTray').protected | Should -Be 'security'
+    }
+
+    It 'gives a hosted program no publisher and no use of its own' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Helper'; Command = 'rundll32.exe "C:\X\x.dll",Start' } } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess { [pscustomobject]@{ Id = 5; Path = (Join-Path ([Environment]::SystemDirectory) 'rundll32.exe'); WorkingSet = 5MB; CpuSeconds = 1 } }
+        $helper = Find-TestEntry (Get-TestEntry) 'Helper'
+        $helper.publisher | Should -BeNullOrEmpty
+        $helper.protected | Should -BeNullOrEmpty
+        $helper.running | Should -BeNullOrEmpty
+        $helper.canDisable | Should -BeTrue
+        Should -Invoke -ModuleName Tuneup Get-TuneupFileSigner -Times 0 -ParameterFilter { $Path -like '*rundll32.exe' }
+    }
+
+    It 'does not recommend the apps of work on a work PC, but leaves them to choose' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'OneDrive'; Command = '"C:\Users\me\AppData\Local\Microsoft\OneDrive\OneDrive.exe" /background' }
+            [pscustomobject]@{ Name = 'Steam'; Command = 'C:\Games\Steam\steam.exe' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        $atWork = @(Get-TuneupStartupEntry -Rules $Rules -WorkPc $true 3>$null)
+        $oneDrive = Find-TestEntry $atWork 'OneDrive'
+        $oneDrive.canDisable | Should -BeTrue
+        $oneDrive.recommended | Should -BeFalse
+        $oneDrive.recommendedReason | Should -BeNullOrEmpty
+        $oneDrive.notRecommendedReason | Should -Be 'work-app'
+        (Find-TestEntry $atWork 'Steam').recommended | Should -BeTrue
+        $personal = Find-TestEntry (Get-TestEntry) 'OneDrive'
+        $personal.recommendedReason | Should -Be 'sync-client'
+        $personal.notRecommendedReason | Should -BeNullOrEmpty
+    }
+
+    It 'keeps listing when a source fails, with a warning, and leaves the use unknown without the processes' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue { [pscustomobject]@{ Name = 'Steam'; Command = 'C:\Games\Steam\steam.exe' } } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask { throw 'Access denied' }
+        Mock -ModuleName Tuneup Get-TuneupStartupProcess { throw 'Access denied' }
+        $output = @(Get-TuneupStartupEntry -Rules $Rules 3>&1)
+        $warned = @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message })
+        $steam = Find-TestEntry @($output | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] }) 'Steam'
+        $steam.running | Should -BeNullOrEmpty
+        $steam.memoryMB | Should -BeNullOrEmpty
+        @($warned | Where-Object { $_ -like 'Could not check the scheduled tasks*Access denied*' }).Count | Should -Be 1
+        @($warned | Where-Object { $_ -like 'Could not check the running programs*' }).Count | Should -Be 1
+    }
+}
+
+Describe 'Test-TuneupStartupWorkPc' {
+    It 'is a work PC when managed or joined to Entra ID, and not otherwise' {
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment -IsManaged $true) | Should -BeTrue
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) | Should -BeFalse
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $true }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) | Should -BeTrue
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { throw 'Access denied' }
+        Test-TuneupStartupWorkPc -Environment (New-TestEnvironment) 3>$null | Should -BeFalse
+    }
+}

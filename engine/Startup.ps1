@@ -379,3 +379,227 @@ function Get-TuneupStartupProcess {
         [pscustomobject]@{ Id = [int]$process.Id; Path = $(if ($path) { $path } else { $null }); WorkingSet = [int64]$process.WorkingSet64; CpuSeconds = $cpu }
     }
 }
+
+$script:StartupFolders = @(
+    [pscustomobject]@{ Source = 'folder-user'; Folder = 'Startup' }
+    [pscustomobject]@{ Source = 'folder-machine'; Folder = 'CommonStartup' }
+)
+
+# The StartupApproved values of a key, or an empty table when they cannot be read (the detector warns).
+function Read-TuneupStartupApprovedSet {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    $read = Invoke-TuneupDetector -What "the startup choices of Task Manager in $Path" -Detector { Get-TuneupStartupApprovedValue -Path $Path }
+    if ($read.Ok -and $read.Value -is [hashtable]) { return $read.Value }
+    @{}
+}
+
+# The values of the Run, RunOnce and policy Run keys, with whether Task Manager turned them off.
+function Get-TuneupStartupRunEntry {
+    [CmdletBinding()]
+    param()
+    foreach ($run in $script:StartupRunKeys) {
+        $values = Invoke-TuneupDetector -What "the startup key $($run.Path)" -Detector { Get-TuneupStartupRunValue -Path $run.Path }
+        if (-not $values.Ok) { continue }
+        $approvedPath = $script:StartupSources[$run.Source].Approved
+        $approved = $(if ($approvedPath) { Read-TuneupStartupApprovedSet -Path $approvedPath } else { @{} })
+        foreach ($value in @($values.Value | Where-Object { $null -ne $_ })) {
+            $bytes = $null
+            if ($approved.ContainsKey($value.Name)) { $bytes = $approved[$value.Name] }
+            New-TuneupStartupEntry -Source $run.Source -Key $value.Name -Name $value.Name -Command $value.Command `
+                -Path (Get-TuneupCommandProgram -Command $value.Command) -Enabled (Test-TuneupStartupApprovedEnabled -Value $bytes) `
+                -Policy ($run.Source -like 'policy-*') -Target @{ ApprovedPath = $approvedPath; ApprovedName = [string]$value.Name; ApprovedValue = $bytes }
+        }
+    }
+}
+
+# The files of the startup folders (a shortcut by where it points), with whether Task Manager turned them off.
+function Get-TuneupStartupFolderEntry {
+    [CmdletBinding()]
+    param()
+    foreach ($folder in $script:StartupFolders) {
+        $path = [Environment]::GetFolderPath($folder.Folder)
+        if (-not $path) { continue }
+        $items = Invoke-TuneupDetector -What "the startup folder $path" -Detector { Get-TuneupStartupFolderItem -Path $path }
+        if (-not $items.Ok) { continue }
+        $approvedPath = $script:StartupSources[$folder.Source].Approved
+        $approved = Read-TuneupStartupApprovedSet -Path $approvedPath
+        foreach ($item in @($items.Value | Where-Object { $null -ne $_ })) {
+            $program = [string]$item.FullName
+            $command = [string]$item.FullName
+            if ([System.IO.Path]::GetExtension([string]$item.Name) -ieq '.lnk') {
+                $link = Invoke-TuneupDetector -What "the shortcut $($item.Name)" -Detector { Get-TuneupShortcutTarget -Path $item.FullName }
+                if ($link.Ok -and $null -ne $link.Value -and $link.Value.Target) {
+                    $program = Expand-TuneupStartupPath -Text ([string]$link.Value.Target)
+                    $command = ('"{0}" {1}' -f $program, [string]$link.Value.Arguments).Trim()
+                }
+            }
+            $bytes = $null
+            if ($approved.ContainsKey($item.Name)) { $bytes = $approved[$item.Name] }
+            New-TuneupStartupEntry -Source $folder.Source -Key ([string]$item.Name) -Name ([System.IO.Path]::GetFileNameWithoutExtension([string]$item.Name)) `
+                -Command $command -Path $program -Enabled (Test-TuneupStartupApprovedEnabled -Value $bytes) `
+                -Target @{ ApprovedPath = $approvedPath; ApprovedName = [string]$item.Name; ApprovedValue = $bytes }
+        }
+    }
+}
+
+# The startup tasks of the Store apps of the user: only the keys whose task the manifest of the package
+# declares (each manifest is read once). State 2 and 4 are on; 3 and 4 come from a policy.
+function Get-TuneupStartupStoreEntry {
+    [CmdletBinding()]
+    param()
+    $tasks = Invoke-TuneupDetector -What 'the startup tasks of Store apps' -Detector { Get-TuneupStartupStoreTask }
+    if (-not $tasks.Ok -or -not @($tasks.Value | Where-Object { $null -ne $_ }).Count) { return }
+    $packages = Invoke-TuneupDetector -What 'the Store apps of this user' -Detector { Get-TuneupStartupPackage }
+    if (-not $packages.Ok) { return }
+    $byFamily = @{}
+    foreach ($package in @($packages.Value | Where-Object { $null -ne $_ })) { $byFamily[$package.PackageFamilyName] = $package }
+    $declared = @{}
+    foreach ($task in @($tasks.Value | Where-Object { $null -ne $_ })) {
+        $package = $byFamily[$task.PackageFamilyName]
+        if ($null -eq $package -or -not $package.InstallLocation) { continue }
+        if (-not $declared.ContainsKey($task.PackageFamilyName)) {
+            $manifest = Join-Path $package.InstallLocation 'AppxManifest.xml'
+            $read = Invoke-TuneupDetector -What "the manifest of $($package.Name)" -Detector { Get-TuneupAppxManifestStartupTask -Path $manifest }
+            $declared[$task.PackageFamilyName] = @(if ($read.Ok) { $read.Value | Where-Object { $null -ne $_ } })
+        }
+        $startupTask = @($declared[$task.PackageFamilyName] | Where-Object { $_.TaskId -eq $task.TaskId }) | Select-Object -First 1
+        if ($null -eq $startupTask) { continue }
+        $name = $(if ($startupTask.DisplayName -and $startupTask.DisplayName -notlike 'ms-resource:*') { [string]$startupTask.DisplayName } else { [string]$package.Name })
+        $entry = New-TuneupStartupEntry -Source 'store-app' -Key "$($task.PackageFamilyName)\$($task.TaskId)" -Name $name `
+            -Enabled (@(2, 4) -contains $task.State) -Policy (@(3, 4) -contains $task.State) `
+            -Target @{ StoreKeyPath = [string]$task.KeyPath; StoreState = [int]$task.State; InstallLocation = [string]$package.InstallLocation; WindowsPart = ($package.SignatureKind -eq 'System') }
+        $entry.publisher = Get-TuneupCommonName -DistinguishedName $package.Publisher
+        $entry
+    }
+}
+
+# The scheduled tasks that start at sign-in or at boot.
+function Get-TuneupStartupTaskEntry {
+    [CmdletBinding()]
+    param()
+    $tasks = Invoke-TuneupDetector -What 'the scheduled tasks' -Detector { Get-TuneupStartupScheduledTask }
+    if (-not $tasks.Ok) { return }
+    foreach ($task in @($tasks.Value | Where-Object { $null -ne $_ })) {
+        $command = ('{0} {1}' -f [string]$task.Execute, [string]$task.Arguments).Trim()
+        $entry = New-TuneupStartupEntry -Source 'task' -Key "$($task.TaskPath)$($task.TaskName)" -Name ([string]$task.TaskName) -Command $command `
+            -Path (Get-TuneupCommandProgram -Command $task.Execute) -Enabled ($task.State -ne 'Disabled') `
+            -Target @{ TaskPath = [string]$task.TaskPath; TaskName = [string]$task.TaskName }
+        if ($task.State -eq 'Running') { $entry.running = $true }
+        $entry
+    }
+}
+
+# The services and drivers that start on their own, but not the ones of Windows (signed by Windows): they
+# are not something that a program of another publisher added.
+function Get-TuneupStartupServiceEntry {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Rules)
+    $services = Invoke-TuneupDetector -What 'the services and drivers that start on their own' -Detector { Get-TuneupStartupServiceItem }
+    if (-not $services.Ok) { return }
+    foreach ($service in @($services.Value | Where-Object { $null -ne $_ })) {
+        $program = Get-TuneupCommandProgram -Command $service.PathName
+        $hosted = $program -and @($Rules.hostPrograms) -contains [System.IO.Path]::GetFileName($program)
+        $signer = $null
+        if ($program -and -not $hosted) { $signer = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSigner -Path $program }).Value }
+        if ($signer -and @($Rules.windowsSigners) -contains $signer) { continue }
+        $name = $(if ($service.DisplayName) { [string]$service.DisplayName } else { [string]$service.Name })
+        $startType = $(if ($service.DelayedAutoStart) { 'AutomaticDelayed' } else { 'Automatic' })
+        $entry = New-TuneupStartupEntry -Source $service.Kind -Key ([string]$service.Name) -Name $name -Command $service.PathName -Path $program `
+            -Target @{ ServiceName = [string]$service.Name; StartType = $startType; ProcessId = [int]$service.ProcessId }
+        $entry.publisher = $signer
+        $entry.running = ([string]$service.State -eq 'Running')
+        $entry
+    }
+}
+
+# Memory and CPU of what runs: the process of a service by its id (only that one), the processes of a
+# Store app by its folder, any other program by its path. Nothing is matched for a hosted program.
+function Set-TuneupStartupUsage {
+    param([Parameter(Mandatory)]$Entry, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Process)
+    $target = $Entry.target
+    $mine = @()
+    if ($null -ne $target -and $null -ne $target.PSObject.Properties['ProcessId']) {
+        if ($target.ProcessId) { $mine = @($Process | Where-Object { $_.Id -eq $target.ProcessId }) }
+    } elseif ($null -ne $target -and $null -ne $target.PSObject.Properties['InstallLocation'] -and $target.InstallLocation) {
+        $prefix = ([string]$target.InstallLocation).TrimEnd('\') + '\'
+        $mine = @($Process | Where-Object { $_.Path -and ([string]$_.Path).StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) })
+    } elseif ($Entry.path) {
+        $mine = @($Process | Where-Object { $_.Path -and [string]$_.Path -ieq [string]$Entry.path })
+    }
+    if (-not $mine.Count) {
+        if ($null -eq $Entry.running) { $Entry.running = $false }
+        return
+    }
+    $Entry.running = $true
+    $Entry.memoryMB = [int][math]::Round([double](($mine | Measure-Object -Property WorkingSet -Sum).Sum) / 1MB)
+    $cpu = @($mine | Where-Object { $null -ne $_.CpuSeconds })
+    if ($cpu.Count) { $Entry.cpuSeconds = [math]::Round([double](($cpu | Measure-Object -Property CpuSeconds -Sum).Sum), 1) }
+}
+
+# Publisher, protection, whether it can be turned off, recommendation and use of one entry. A hosted
+# program (rundll32, cmd, powershell...) has no publisher or use of its own: they would be the ones of
+# Windows. -Process is null when the processes could not be read: running stays as it is (unknown).
+function Complete-TuneupStartupEntry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Entry,
+        [Parameter(Mandatory)]$Rules,
+        [AllowEmptyCollection()][string[]]$SecurityFolder = @(),
+        [AllowNull()][AllowEmptyCollection()][object[]]$Process,
+        # A work PC (managed, or joined to Entra ID): the apps of work (workApp) are not recommended there.
+        [bool]$WorkPc = $false
+    )
+    $program = [string]$Entry.path
+    $hosted = $program -and @($Rules.hostPrograms) -contains [System.IO.Path]::GetFileName($program)
+    if ($null -eq $Entry.publisher -and $program -and -not $hosted) {
+        $Entry.publisher = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSigner -Path $program }).Value
+    }
+    $Entry.protected = Get-TuneupStartupProtection -Entry $Entry -Rules $Rules -SecurityFolder $SecurityFolder
+    $Entry.canDisable = [bool]$Entry.enabled -and -not (Get-TuneupStartupFixedReason -Entry $Entry)
+    if ($Entry.canDisable) {
+        $rule = Get-TuneupStartupRecommendation -Entry $Entry -Rules $Rules
+        $workApp = $(if ($null -ne $rule) { $rule.PSObject.Properties['workApp'] } else { $null })
+        if ($null -ne $rule -and $WorkPc -and $null -ne $workApp -and $workApp.Value -eq $true) {
+            # It can still be turned off; the reason lets people (and the skill) say why it is not recommended.
+            $Entry.notRecommendedReason = 'work-app'
+        } elseif ($null -ne $rule) {
+            $Entry.recommended = $true
+            $Entry.recommendedReason = [string]$rule.category
+            $Entry.uninstall = Get-TuneupStartupUninstallCommand -Rule $rule
+        }
+    }
+    if ($null -ne $Process -and -not $hosted) { Set-TuneupStartupUsage -Entry $Entry -Process $Process }
+}
+
+# Everything that starts with Windows or runs in the background, in the order of the sources. A source
+# that cannot be read is a warning and the rest is still listed. -WorkPc: see Test-TuneupStartupWorkPc.
+function Get-TuneupStartupEntry {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Rules, [bool]$WorkPc = $false)
+    Clear-TuneupFileSignerCache
+    $entries = @(Get-TuneupStartupRunEntry) + @(Get-TuneupStartupFolderEntry) + @(Get-TuneupStartupStoreEntry) +
+        @(Get-TuneupStartupTaskEntry) + @(Get-TuneupStartupServiceEntry -Rules $Rules)
+    $processes = Invoke-TuneupDetector -What 'the running programs' -Detector { Get-TuneupStartupProcess }
+    $running = $null
+    if ($processes.Ok) { $running = @($processes.Value | Where-Object { $null -ne $_ }) }
+    $securityFolders = @(foreach ($class in $script:SecurityCenterClasses) {
+            (Invoke-TuneupDetector -What "the $class products of Windows Security" -Detector { Get-TuneupSecurityProductFolder -ClassName $class }).Value
+        })
+    $securityFolders = @($securityFolders | Where-Object { $_ })
+    foreach ($entry in @($entries | Where-Object { $null -ne $_ })) {
+        Complete-TuneupStartupEntry -Entry $entry -Rules $Rules -SecurityFolder $securityFolders -Process $running -WorkPc $WorkPc
+        $entry
+    }
+}
+
+# A work PC, where OneDrive, Teams and Outlook are not recommended: managed (domain or MDM, which the
+# environment of the command already holds) or joined to Entra ID (one registry read), the same rule as the
+# work signal of -Suggest. A join that cannot be read is a warning and counts as no join.
+function Test-TuneupStartupWorkPc {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Environment)
+    if ($Environment.IsManaged) { return $true }
+    $entra = Invoke-TuneupDetector -What 'the Entra ID join' -Detector { Test-TuneupEntraJoined }
+    [bool]($entra.Ok -and $entra.Value -eq $true)
+}
