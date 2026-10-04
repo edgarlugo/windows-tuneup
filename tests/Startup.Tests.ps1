@@ -37,6 +37,15 @@ Describe 'Startup ids' {
         Test-TuneupStartupId -Id $null | Should -BeFalse
     }
 
+    It 'keeps the SID of an account out of the readable part of an id, but not out of what tells two ids apart' {
+        $one = Get-TuneupStartupId -Source 'task' -Key '\Vendor Sync-S-1-5-21-1111111111-2222222222-3333333333-1001'
+        $two = Get-TuneupStartupId -Source 'task' -Key '\Vendor Sync-S-1-5-21-1111111111-2222222222-3333333333-1002'
+        $one | Should -Match '^startup\.task\.vendor-sync-[0-9a-f]{8}$'
+        $one | Should -Not -Match '1111'
+        $two | Should -Not -Be $one
+        Test-TuneupStartupId -Id $one | Should -BeTrue
+    }
+
     It 'tells the scope of an id from its source' {
         Get-TuneupStartupIdScope -Id 'startup.run-user.steam-eb4bc901' | Should -Be 'user'
         Get-TuneupStartupIdScope -Id 'startup.store-app.x-00000000' | Should -Be 'user'
@@ -74,6 +83,15 @@ Describe 'Startup path helpers' {
         Get-TuneupCommandProgram -Command '\SystemRoot\System32\drivers\vendordrv.sys' | Should -Be (Join-Path $windows 'System32\drivers\vendordrv.sys')
         Get-TuneupCommandProgram -Command 'System32\drivers\other.sys' | Should -Be (Join-Path $windows 'System32\drivers\other.sys')
         Get-TuneupCommandProgram -Command '%ProgramFiles%\Vendor\app.exe /x' | Should -Be "$([Environment]::GetFolderPath('ProgramFiles'))\Vendor\app.exe"
+    }
+
+    It 'gives nothing for a program with a character that no path can have: <Command>' -TestCases @(
+        @{ Command = 'C:\Tools\a.exe"--x"' }
+        @{ Command = 'C:\x\a.exe|b' }
+        @{ Command = '"C:\x\a<b>.exe" /run' }
+    ) {
+        param($Command)
+        Get-TuneupCommandProgram -Command $Command | Should -BeNullOrEmpty
     }
 
     It 'gives nothing for an empty command or one without a full path' {
@@ -132,7 +150,7 @@ Describe 'Startup texts' {
         $module = Get-Module Tuneup
         $keys = @(& $module { $script:StartupSources.Keys } | ForEach-Object { "startup.source.$_" }) +
             @(& $module { $script:StartupProtections } | ForEach-Object { "startup.protected.$_" }) +
-            @('run-once', 'unsupported-name' | ForEach-Object { "startup.fixed.$_" }) +
+            @('run-once', 'unsupported-name', 'unreadable' | ForEach-Object { "startup.fixed.$_" }) +
             @(& $module { $script:StartupRuleCategories.recommend } | ForEach-Object { "startup.recommend.$_" }) +
             @('registry', 'store', 'task', 'service' | ForEach-Object { "startup.why.$_" }) +
             @('startup.notRecommended.work-app', 'transcript.request.startup', 'reapply.startupEntry')
@@ -213,6 +231,23 @@ Describe 'Startup detectors' {
         @(Get-TuneupStartupStoreTask -Root "$Key\Missing").Count | Should -Be 0
     }
 
+    It 'skips with a warning only the Store task or the package that cannot be read' {
+        $root = "$Key\SystemAppData"
+        New-Item -Path "$root\Vendor.App_abc\Good" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$root\Vendor.App_abc\Good" -Name 'State' -Value 2 -PropertyType DWord | Out-Null
+        New-Item -Path "$root\Vendor.App_abc\Odd" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$root\Vendor.App_abc\Odd" -Name 'State' -Value 'on' -PropertyType String | Out-Null
+        New-Item -Path "$root\Broken.App_xyz\Start" -Force | Out-Null
+        New-ItemProperty -LiteralPath "$root\Broken.App_xyz\Start" -Name 'State' -Value 2 -PropertyType DWord | Out-Null
+        Mock -ModuleName Tuneup Get-TuneupStartupStorePackageTask { throw 'Access denied' } -ParameterFilter { $Path -like '*Broken.App_xyz' }
+        $output = @(Get-TuneupStartupStoreTask -Root $root 3>&1)
+        $warned = @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message })
+        $tasks = @($output | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+        @($tasks | ForEach-Object { "$($_.PackageFamilyName)\$($_.TaskId)" }) -join ',' | Should -Be 'Vendor.App_abc\Good'
+        @($warned | Where-Object { $_ -like '*Vendor.App_abc\Odd*not a number*' }).Count | Should -Be 1
+        @($warned | Where-Object { $_ -like '*Broken.App_xyz*Access denied*' }).Count | Should -Be 1
+    }
+
     It 'reads the startup tasks that a package manifest declares' {
         $manifest = Join-Path $TestDrive 'AppxManifest.xml'
         [System.IO.File]::WriteAllText($manifest, @'
@@ -248,6 +283,12 @@ Describe 'Startup detectors' {
         [System.IO.File]::WriteAllText($bare, ([System.IO.File]::ReadAllText($manifest) -replace '(?s)<Properties>.*</Properties>', ''))
         @(Get-TuneupAppxManifestStartupTask -Path $bare)[0].PublisherDisplayName | Should -BeNullOrEmpty
         @(Get-TuneupAppxManifestStartupTask -Path (Join-Path $TestDrive 'none.xml')).Count | Should -Be 0
+    }
+
+    It 'refuses a manifest with a document type definition' {
+        $manifest = Join-Path $TestDrive 'Dtd.xml'
+        [System.IO.File]::WriteAllText($manifest, '<?xml version="1.0"?><!DOCTYPE Package [<!ENTITY name "x">]><Package><Properties><PublisherDisplayName>&name;</PublisherDisplayName></Properties></Package>')
+        { Get-TuneupAppxManifestStartupTask -Path $manifest } | Should -Throw '*DTD*'
     }
 
     It 'reads the Store packages of the current user' {
@@ -407,6 +448,7 @@ Describe 'Get-TuneupStartupEntry' {
         Mock -ModuleName Tuneup Get-TuneupSecurityProductFolder { }
         Mock -ModuleName Tuneup Get-TuneupFileSignature { $null }
         Mock -ModuleName Tuneup Get-TuneupServiceLaunchProtected { $null }
+        Mock -ModuleName Tuneup Test-TuneupWow64Process { $false }
         Mock -ModuleName Tuneup Get-TuneupStartupProcess { }
     }
 
@@ -661,8 +703,51 @@ Describe 'Get-TuneupStartupEntry' {
         $steam = Find-TestEntry @($output | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] }) 'Steam'
         $steam.running | Should -BeNullOrEmpty
         $steam.memoryMB | Should -BeNullOrEmpty
-        @($warned | Where-Object { $_ -like 'Could not check the scheduled tasks*Access denied*' }).Count | Should -Be 1
-        @($warned | Where-Object { $_ -like 'Could not check the running programs*' }).Count | Should -Be 1
+        @($warned | Where-Object { $_ -like 'Could not read the scheduled tasks, so the list of what starts with Windows may be incomplete*Access denied*' }).Count | Should -Be 1
+        @($warned | Where-Object { $_ -like 'Could not read the running programs*' }).Count | Should -Be 1
+        # The wording of -Suggest (signals) is not the one of this list.
+        @($warned | Where-Object { $_ -like '*signals*' }).Count | Should -Be 0
+    }
+
+    It 'lists an entry whose command has characters that no path can have, without a program' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'Quoted'; Command = 'C:\Tools\a.exe"--x"' }
+            [pscustomobject]@{ Name = 'Piped'; Command = 'C:\x\a.exe|b' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        $output = @(Get-TuneupStartupEntry -Rules $Rules 3>&1)
+        @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count | Should -Be 0
+        foreach ($name in 'Quoted', 'Piped') {
+            $entry = Find-TestEntry $output $name
+            $entry.path | Should -BeNullOrEmpty -Because $name
+            $entry.canDisable | Should -BeTrue -Because $name
+        }
+    }
+
+    It 'turns a failure while completing one entry into a warning, and leaves that entry fixed' {
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'Broken'; Command = 'C:\Tools\broken.exe' }
+            [pscustomobject]@{ Name = 'Steam'; Command = 'C:\Games\Steam\steam.exe' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupProtection { throw 'Unexpected' } -ParameterFilter { $Entry.name -eq 'Broken' }
+        $output = @(Get-TuneupStartupEntry -Rules $Rules 3>&1)
+        $warned = @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message })
+        @($warned | Where-Object { $_ -like 'Could not finish reading the startup entry Broken*Unexpected*' }).Count | Should -Be 1
+        $broken = Find-TestEntry $output 'Broken'
+        $broken.canDisable | Should -BeFalse
+        $broken.recommended | Should -BeFalse
+        (Find-TestEntry $output 'Steam').canDisable | Should -BeTrue
+    }
+
+    It 'refuses to list from a 32-bit PowerShell on a 64-bit Windows' {
+        Mock -ModuleName Tuneup Test-TuneupWow64Process { $true }
+        { Get-TuneupStartupEntry -Rules $Rules } | Should -Throw '*64-bit PowerShell*'
+        Should -Invoke -ModuleName Tuneup Get-TuneupStartupRunValue -Times 0
+    }
+}
+
+Describe 'Test-TuneupWow64Process' {
+    It 'is a 32-bit process on a 64-bit Windows, and nothing else' {
+        Test-TuneupWow64Process | Should -Be ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess)
     }
 }
 

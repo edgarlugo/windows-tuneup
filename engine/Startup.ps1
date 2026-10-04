@@ -47,7 +47,9 @@ $script:StartupRunKeys = @(
 function Get-TuneupStartupId {
     param([Parameter(Mandatory)][string]$Source, [Parameter(Mandatory)][string]$Key)
     $normal = $Key.ToLowerInvariant()
-    $slug = ($normal -replace '[^a-z0-9]+', '-').Trim('-')
+    # The SID of an account (some tasks carry it in their name) stays out of the readable part; the hash,
+    # made from the whole key, still tells the tasks of two accounts apart.
+    $slug = (($normal -replace 's-1-\d+(-\d+)+', '') -replace '[^a-z0-9]+', '-').Trim('-')
     if ($slug.Length -gt $script:StartupSlugLength) { $slug = $slug.Substring(0, $script:StartupSlugLength).TrimEnd('-') }
     if (-not $slug) { $slug = 'entry' }
     $sha = [System.Security.Cryptography.SHA256]::Create()
@@ -131,6 +133,8 @@ function Get-TuneupCommandProgram {
     elseif ($program -match '^system32\\') { $program = Join-Path $windows $program }
     elseif ($program -notmatch '\\') { $program = Join-Path ([Environment]::SystemDirectory) $program }
     if ($program -notmatch '^[A-Za-z]:\\') { return }
+    # A quote, a pipe or another character that no path can have: the command is not one this can read.
+    if ($program.IndexOfAny([System.IO.Path]::GetInvalidPathChars()) -ge 0) { return }
     $program
 }
 
@@ -267,20 +271,41 @@ function Get-TuneupShortcutTarget {
 # The keys of SystemAppData\<package family>\<task> that hold a State: what Windows keeps for the startup
 # tasks of Store apps (StartupTaskState). Whether a key is really a startup task is decided against the
 # manifest of the package (Get-TuneupStartupStoreEntry).
+# A package that cannot be read, or a State that is not a number, is a warning and only that one is left out.
 function Get-TuneupStartupStoreTask {
+    [CmdletBinding()]
     param([string]$Root = $script:StoreTaskRoot)
     if (-not (Test-Path -LiteralPath $Root)) { return }
     foreach ($package in @(Get-ChildItem -LiteralPath $Root -ErrorAction Stop)) {
-        foreach ($task in @(Get-ChildItem -LiteralPath $package.PSPath -ErrorAction Stop)) {
-            $state = $task.GetValue('State')
-            if ($null -eq $state) { continue }
+        $family = [string]$package.PSChildName
+        try {
+            $tasks = @(Get-TuneupStartupStorePackageTask -Path "$Root\$family")
+        } catch {
+            Write-Warning "Could not read the startup tasks of the Store app $family, so it is left out of the list: $($_.Exception.Message)"
+            continue
+        }
+        foreach ($task in $tasks) {
+            if ($task.State -isnot [int]) {
+                Write-Warning "The startup task $family\$($task.TaskId) of a Store app has a State that is not a number, so it is left out of the list."
+                continue
+            }
             [pscustomobject]@{
-                PackageFamilyName = $package.PSChildName
-                TaskId            = $task.PSChildName
-                State             = [int]$state
-                KeyPath           = "$Root\$($package.PSChildName)\$($task.PSChildName)"
+                PackageFamilyName = $family
+                TaskId            = $task.TaskId
+                State             = $task.State
+                KeyPath           = "$Root\$family\$($task.TaskId)"
             }
         }
+    }
+}
+
+# The subkeys of one package of SystemAppData that hold a State, with the State as it is written.
+function Get-TuneupStartupStorePackageTask {
+    param([Parameter(Mandatory)][string]$Path)
+    foreach ($task in @(Get-ChildItem -LiteralPath $Path -ErrorAction Stop)) {
+        $state = $task.GetValue('State')
+        if ($null -eq $state) { continue }
+        [pscustomobject]@{ TaskId = [string]$task.PSChildName; State = $state }
     }
 }
 
@@ -303,9 +328,17 @@ function Get-TuneupStartupPackage {
 function Get-TuneupAppxManifestStartupTask {
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return }
+    $settings = New-Object System.Xml.XmlReaderSettings
+    $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
     $xml = New-Object System.Xml.XmlDocument
     $xml.XmlResolver = $null
-    $xml.Load($Path)
+    $reader = [System.Xml.XmlReader]::Create($Path, $settings)
+    try {
+        $xml.Load($reader)
+    } finally {
+        $reader.Dispose()
+    }
     $publisherNode = $xml.SelectSingleNode("/*[local-name()='Package']/*[local-name()='Properties']/*[local-name()='PublisherDisplayName']")
     $publisher = $(if ($null -ne $publisherNode -and $publisherNode.InnerText.Trim()) { $publisherNode.InnerText.Trim() } else { $null })
     foreach ($node in @($xml.SelectNodes("//*[local-name()='Extension'][@Category='windows.startupTask']/*[local-name()='StartupTask']"))) {
@@ -490,7 +523,7 @@ function Get-TuneupStartupFolderPath {
 function Read-TuneupStartupApprovedSet {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
-    $read = Invoke-TuneupDetector -What "the startup choices of Task Manager in $Path" -Detector { Get-TuneupStartupApprovedValue -Path $Path }
+    $read = Invoke-TuneupStartupDetector -What "the startup choices of Task Manager in $Path" -Detector { Get-TuneupStartupApprovedValue -Path $Path }
     if ($read.Ok -and $read.Value -is [hashtable]) { return $read.Value }
     @{}
 }
@@ -500,7 +533,7 @@ function Get-TuneupStartupRunEntry {
     [CmdletBinding()]
     param()
     foreach ($run in $script:StartupRunKeys) {
-        $values = Invoke-TuneupDetector -What "the startup key $($run.Path)" -Detector { Get-TuneupStartupRunValue -Path $run.Path }
+        $values = Invoke-TuneupStartupDetector -What "the startup key $($run.Path)" -Detector { Get-TuneupStartupRunValue -Path $run.Path }
         if (-not $values.Ok) { continue }
         $approvedPath = $script:StartupSources[$run.Source].Approved
         $approved = $(if ($approvedPath) { Read-TuneupStartupApprovedSet -Path $approvedPath } else { @{} })
@@ -521,7 +554,7 @@ function Get-TuneupStartupFolderEntry {
     foreach ($folder in $script:StartupFolders) {
         $path = Get-TuneupStartupFolderPath -Name $folder.Folder
         if (-not $path) { continue }
-        $items = Invoke-TuneupDetector -What "the startup folder $path" -Detector { Get-TuneupStartupFolderItem -Path $path }
+        $items = Invoke-TuneupStartupDetector -What "the startup folder $path" -Detector { Get-TuneupStartupFolderItem -Path $path }
         if (-not $items.Ok) { continue }
         $approvedPath = $script:StartupSources[$folder.Source].Approved
         $approved = Read-TuneupStartupApprovedSet -Path $approvedPath
@@ -529,7 +562,7 @@ function Get-TuneupStartupFolderEntry {
             $program = [string]$item.FullName
             $command = [string]$item.FullName
             if ([System.IO.Path]::GetExtension([string]$item.Name) -ieq '.lnk') {
-                $link = Invoke-TuneupDetector -What "the shortcut $($item.Name)" -Detector { Get-TuneupShortcutTarget -Path $item.FullName }
+                $link = Invoke-TuneupStartupDetector -What "the shortcut $($item.Name)" -Detector { Get-TuneupShortcutTarget -Path $item.FullName }
                 if ($link.Ok -and $null -ne $link.Value -and $link.Value.Target) {
                     $program = Expand-TuneupStartupPath -Text ([string]$link.Value.Target)
                     $command = ('"{0}" {1}' -f $program, [string]$link.Value.Arguments).Trim()
@@ -549,9 +582,9 @@ function Get-TuneupStartupFolderEntry {
 function Get-TuneupStartupStoreEntry {
     [CmdletBinding()]
     param()
-    $tasks = Invoke-TuneupDetector -What 'the startup tasks of Store apps' -Detector { Get-TuneupStartupStoreTask }
+    $tasks = Invoke-TuneupStartupDetector -What 'the startup tasks of Store apps' -Detector { Get-TuneupStartupStoreTask }
     if (-not $tasks.Ok -or -not @($tasks.Value | Where-Object { $null -ne $_ }).Count) { return }
-    $packages = Invoke-TuneupDetector -What 'the Store apps of this user' -Detector { Get-TuneupStartupPackage }
+    $packages = Invoke-TuneupStartupDetector -What 'the Store apps of this user' -Detector { Get-TuneupStartupPackage }
     if (-not $packages.Ok) { return }
     $byFamily = @{}
     foreach ($package in @($packages.Value | Where-Object { $null -ne $_ })) { $byFamily[$package.PackageFamilyName] = $package }
@@ -561,7 +594,7 @@ function Get-TuneupStartupStoreEntry {
         if ($null -eq $package -or -not $package.InstallLocation) { continue }
         if (-not $declared.ContainsKey($task.PackageFamilyName)) {
             $manifest = Join-Path $package.InstallLocation 'AppxManifest.xml'
-            $read = Invoke-TuneupDetector -What "the manifest of $($package.Name)" -Detector { Get-TuneupAppxManifestStartupTask -Path $manifest }
+            $read = Invoke-TuneupStartupDetector -What "the manifest of $($package.Name)" -Detector { Get-TuneupAppxManifestStartupTask -Path $manifest }
             $declared[$task.PackageFamilyName] = @(if ($read.Ok) { $read.Value | Where-Object { $null -ne $_ } })
         }
         $startupTask = @($declared[$task.PackageFamilyName] | Where-Object { $_.TaskId -eq $task.TaskId }) | Select-Object -First 1
@@ -586,7 +619,7 @@ function Get-TuneupStartupStoreEntry {
 function Get-TuneupStartupTaskEntry {
     [CmdletBinding()]
     param()
-    $tasks = Invoke-TuneupDetector -What 'the scheduled tasks' -Detector { Get-TuneupStartupScheduledTask }
+    $tasks = Invoke-TuneupStartupDetector -What 'the scheduled tasks' -Detector { Get-TuneupStartupScheduledTask }
     if (-not $tasks.Ok) { return }
     foreach ($task in @($tasks.Value | Where-Object { $null -ne $_ })) {
         $command = ('{0} {1}' -f [string]$task.Execute, [string]$task.Arguments).Trim()
@@ -607,14 +640,14 @@ function Get-TuneupStartupTaskEntry {
 function Get-TuneupStartupServiceEntry {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Rules)
-    $services = Invoke-TuneupDetector -What 'the services and drivers that start on their own' -Detector { Get-TuneupStartupServiceItem }
+    $services = Invoke-TuneupStartupDetector -What 'the services and drivers that start on their own' -Detector { Get-TuneupStartupServiceItem }
     if (-not $services.Ok) { return }
     foreach ($service in @($services.Value | Where-Object { $null -ne $_ })) {
         $program = Get-TuneupCommandProgram -Command $service.PathName
         $file = $(if ($program) { [System.IO.Path]::GetFileName($program) } else { $null })
         $hosted = $file -and @($Rules.hostPrograms) -contains $file
         $signature = $null
-        if ($program -and -not $hosted) { $signature = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
+        if ($program -and -not $hosted) { $signature = (Invoke-TuneupStartupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
         if (Test-TuneupWindowsSignature -Signature $signature -Rules $Rules) { continue }
         $inWindows = Test-TuneupWindowsFolderPath -Path $program
         $otherPublisher = $null -ne $signature -and $signature.Signer -and @($Rules.windowsSigners) -notcontains [string]$signature.Signer
@@ -624,7 +657,7 @@ function Get-TuneupStartupServiceEntry {
         $startType = $(if ($service.DelayedAutoStart) { 'AutomaticDelayed' } else { 'Automatic' })
         $launchProtected = $null
         if ($service.Kind -eq 'service') {
-            $launchProtected = (Invoke-TuneupDetector -What "whether $($service.Name) starts as a protected process" -Detector { Get-TuneupServiceLaunchProtected -Name $service.Name }).Value
+            $launchProtected = (Invoke-TuneupStartupDetector -What "whether $($service.Name) starts as a protected process" -Detector { Get-TuneupServiceLaunchProtected -Name $service.Name }).Value
         }
         $entry = New-TuneupStartupEntry -Source $service.Kind -Key ([string]$service.Name) -Name $name -Command $service.PathName -Path $program `
             -Target @{ ServiceName = [string]$service.Name; StartType = $startType; ProcessId = [int]$service.ProcessId; WindowsPart = [bool]$windowsPart; LaunchProtected = $launchProtected }
@@ -676,7 +709,7 @@ function Complete-TuneupStartupEntry {
     # Services keep the signature they were listed with, and a Store app the signer of its package.
     if ($null -eq $Entry.target.PSObject.Properties['Signer']) {
         $signature = $null
-        if ($program -and -not $hosted) { $signature = (Invoke-TuneupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
+        if ($program -and -not $hosted) { $signature = (Invoke-TuneupStartupDetector -What "the signature of $program" -Detector { Get-TuneupFileSignature -Path $program }).Value }
         Set-TuneupStartupSignature -Entry $Entry -Signature $signature -Rules $Rules
     }
     $Entry.protected = Get-TuneupStartupProtection -Entry $Entry -Rules $Rules -SecurityFolder $SecurityFolder
@@ -701,19 +734,54 @@ function Complete-TuneupStartupEntry {
 function Get-TuneupStartupEntry {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Rules, [bool]$WorkPc = $false)
+    Assert-TuneupStartupNativeProcess
     Clear-TuneupFileSignerCache
     $entries = @(Get-TuneupStartupRunEntry) + @(Get-TuneupStartupFolderEntry) + @(Get-TuneupStartupStoreEntry) +
         @(Get-TuneupStartupTaskEntry) + @(Get-TuneupStartupServiceEntry -Rules $Rules)
-    $processes = Invoke-TuneupDetector -What 'the running programs' -Detector { Get-TuneupStartupProcess }
+    $processes = Invoke-TuneupStartupDetector -What 'the running programs' -Detector { Get-TuneupStartupProcess }
     $running = $null
     if ($processes.Ok) { $running = @($processes.Value | Where-Object { $null -ne $_ }) }
     $securityFolders = @(foreach ($class in $script:SecurityCenterClasses) {
-            (Invoke-TuneupDetector -What "the $class products of Windows Security" -Detector { Get-TuneupSecurityProductFolder -ClassName $class }).Value
+            (Invoke-TuneupStartupDetector -What "the $class products of Windows Security" -Detector { Get-TuneupSecurityProductFolder -ClassName $class }).Value
         })
     $securityFolders = @($securityFolders | Where-Object { $_ })
     foreach ($entry in @($entries | Where-Object { $null -ne $_ })) {
-        Complete-TuneupStartupEntry -Entry $entry -Rules $Rules -SecurityFolder $securityFolders -Process $running -WorkPc $WorkPc
+        try {
+            Complete-TuneupStartupEntry -Entry $entry -Rules $Rules -SecurityFolder $securityFolders -Process $running -WorkPc $WorkPc
+        } catch {
+            # One entry that cannot be read never stops the list; what was not checked is never offered.
+            Write-Warning "Could not finish reading the startup entry $($entry.name), so it cannot be turned off from here: $($_.Exception.Message)"
+            $entry.target | Add-Member -NotePropertyName Incomplete -NotePropertyValue $true -Force
+            $entry.canDisable = $false
+            $entry.recommended = $false
+            $entry.recommendedReason = $null
+            $entry.notRecommendedReason = $null
+            $entry.uninstall = $null
+        }
         $entry
+    }
+}
+
+# Windows on 64 bits shows a 32-bit process another HKLM\SOFTWARE and another System32 (WOW64): the list
+# would be wrong, and so would what it turns off.
+function Test-TuneupWow64Process {
+    [Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess
+}
+
+# Stops -Startup (listing and turning off) in a 32-bit PowerShell on a 64-bit Windows.
+function Assert-TuneupStartupNativeProcess {
+    if (Test-TuneupWow64Process) { throw (Get-TuneupText -Key 'err.startupWow64') }
+}
+
+# A detector of -Startup: its value, or a warning that says the list may be incomplete.
+function Invoke-TuneupStartupDetector {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$What, [Parameter(Mandatory)][scriptblock]$Detector)
+    try {
+        [pscustomobject]@{ Ok = $true; Value = (& $Detector) }
+    } catch {
+        Write-Warning "Could not read $What, so the list of what starts with Windows may be incomplete: $($_.Exception.Message)"
+        [pscustomobject]@{ Ok = $false; Value = $null }
     }
 }
 
@@ -724,6 +792,6 @@ function Test-TuneupStartupWorkPc {
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Environment)
     if ($Environment.IsManaged) { return $true }
-    $entra = Invoke-TuneupDetector -What 'the Entra ID join' -Detector { Test-TuneupEntraJoined }
+    $entra = Invoke-TuneupStartupDetector -What 'the Entra ID join' -Detector { Test-TuneupEntraJoined }
     [bool]($entra.Ok -and $entra.Value -eq $true)
 }

@@ -204,6 +204,7 @@ Describe 'Get-TuneupStartupFixedReason' {
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Good') | Should -BeNullOrEmpty
         # A backtick is the escape character of PowerShell wildcards.
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Odd`Name') | Should -Be 'unsupported-name'
+        Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Key 'Half' -Target @{ Incomplete = $true }) | Should -Be 'unreadable'
     }
 }
 

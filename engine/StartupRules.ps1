@@ -179,6 +179,8 @@ function Get-TuneupStartupFixedReason {
     param([Parameter(Mandatory)]$Entry)
     if ($Entry.protected) { return [string]$Entry.protected }
     if ([string]$Entry.source -like 'runonce*') { return 'run-once' }
+    # The list could not finish reading it (a warning said so): what was not checked is never turned off.
+    if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'Incomplete') -eq $true) { return 'unreadable' }
     if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]`]') { return 'unsupported-name' }
 }
 
