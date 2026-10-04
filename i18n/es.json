@@ -299,6 +299,7 @@
   "startup.protected.policy": "lo fija una directiva",
   "startup.protected.driver": "controlador",
   "startup.protected.windows-component": "componente de Windows",
+  "startup.protected.unverified": "corre desde la carpeta de Windows y no se pudo comprobar su firma",
   "startup.protected.security": "seguridad o administración del equipo (antivirus, firewall, agentes de la organización)",
   "startup.protected.vpn": "VPN",
   "startup.protected.device": "software de un dispositivo (audio, teclado, panel táctil, gráficos)",

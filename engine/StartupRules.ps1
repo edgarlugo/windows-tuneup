@@ -9,7 +9,7 @@ $script:StartupRuleCategories = [ordered]@{
     recommend = @('updater', 'game-launcher', 'sync-client', 'chat-helper', 'companion-app')
 }
 # Every value of protected, in the order the checks give them.
-$script:StartupProtections = @('policy', 'driver', 'windows-component') + $script:StartupRuleCategories.protect
+$script:StartupProtections = @('policy', 'driver', 'windows-component', 'unverified') + $script:StartupRuleCategories.protect
 $script:StartupWingetIdPattern = '^[A-Za-z0-9][A-Za-z0-9.+_-]*$'
 # The fields each part of the rules can have: anything else is a typo that would silently do nothing.
 $script:StartupRuleFields = @{
@@ -132,9 +132,11 @@ function Get-TuneupStartupProtection {
         $base = $key -replace '_[0-9a-fA-F]{4,}$', ''
         if (@($Rules.windowsServices) -contains $key -or @($Rules.windowsServices) -contains $base) { return 'windows-component' }
     }
-    # A Store app of Windows, or a service that runs from the folder of Windows and could not be shown to be
-    # of another publisher (fail closed).
-    if ((Get-TuneupStartupTargetValue -Entry $Entry -Name 'WindowsPart') -eq $true) { return 'windows-component' }
+    # A Store app of Windows (by the kind of its signature).
+    if ($Entry.source -eq 'store-app' -and (Get-TuneupStartupTargetValue -Entry $Entry -Name 'WindowsPart') -eq $true) { return 'windows-component' }
+    # A service that runs from the folder of Windows and could not be shown to be of Windows or of another
+    # publisher: shown, never turned off (fail closed).
+    if (@('service', 'driver') -contains $Entry.source -and (Get-TuneupStartupTargetValue -Entry $Entry -Name 'Unverified') -eq $true) { return 'unverified' }
     # Windows starts it as a protected process (1 Windows, 2 Windows light, 3 antimalware light).
     if ($Entry.source -eq 'service' -and @(1, 2, 3) -contains (Get-TuneupStartupTargetValue -Entry $Entry -Name 'LaunchProtected')) { return 'security' }
     if ($Entry.path) {

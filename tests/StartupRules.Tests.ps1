@@ -173,7 +173,7 @@ Describe 'Get-TuneupStartupProtection' {
         @{ Case = 'RpcEptMapper'; Entry = { New-TestStartupEntry -Source 'service' -Key 'RpcEptMapper' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
         @{ Case = 'SamSs'; Entry = { New-TestStartupEntry -Source 'service' -Key 'SamSs' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
         @{ Case = 'ProfSvc'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ProfSvc' -Signer 'Vendor Inc.' }; Expected = 'windows-component' }
-        @{ Case = 'a service of Windows that could not be verified'; Entry = { New-TestStartupEntry -Source 'service' -Key 'OddSvc' -Target @{ WindowsPart = $true } }; Expected = 'windows-component' }
+        @{ Case = 'a service of Windows that could not be verified'; Entry = { New-TestStartupEntry -Source 'service' -Key 'OddSvc' -Target @{ Unverified = $true } }; Expected = 'unverified' }
     ) {
         param($Entry, $Expected)
         Get-TuneupStartupProtection -Entry (& $Entry) -Rules $Rules | Should -Be $Expected

@@ -89,6 +89,9 @@ Describe 'Startup path helpers' {
         @{ Command = 'C:\Tools\a.exe"--x"' }
         @{ Command = 'C:\x\a.exe|b' }
         @{ Command = '"C:\x\a<b>.exe" /run' }
+        @{ Command = 'C:\Tools\odd.exe:x -run' }
+        @{ Command = 'C:\Tools\a?b.exe' }
+        @{ Command = 'C:\Tools\a*.exe -x' }
     ) {
         param($Command)
         Get-TuneupCommandProgram -Command $Command | Should -BeNullOrEmpty
@@ -356,7 +359,8 @@ Describe 'Startup detectors' {
         Clear-TuneupFileSignerCache
         Mock -ModuleName Tuneup Test-TuneupMicrosoftRootChain { $false }
         Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; IsOSBinary = $false; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc., O=Vendor' } } }
-        $signature = Get-TuneupFileSignature -Path $file
+        $signers = @('Microsoft Windows', 'Microsoft Windows Publisher')
+        $signature = Get-TuneupFileSignature -Path $file -WindowsSigner $signers
         $signature.Signer | Should -Be 'Vendor Inc.'
         $signature.IsOSBinary | Should -BeFalse
         $signature.MicrosoftRoot | Should -BeFalse
@@ -364,7 +368,14 @@ Describe 'Startup detectors' {
         Should -Invoke -ModuleName Tuneup Get-AuthenticodeSignature -Times 1 -Exactly
         Clear-TuneupFileSignerCache
         Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; IsOSBinary = $true; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Windows, O=Microsoft Corporation' } } }
-        (Get-TuneupFileSignature -Path $file).IsOSBinary | Should -BeTrue
+        (Get-TuneupFileSignature -Path $file -WindowsSigner $signers).IsOSBinary | Should -BeTrue
+        # The chain is only built when it can decide something: a signer of Windows that Windows does not vouch for.
+        Should -Invoke -ModuleName Tuneup Test-TuneupMicrosoftRootChain -Times 0 -Exactly
+        Clear-TuneupFileSignerCache
+        Mock -ModuleName Tuneup Test-TuneupMicrosoftRootChain { $true }
+        Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'Valid'; IsOSBinary = $false; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Microsoft Windows, O=Microsoft Corporation' } } }
+        (Get-TuneupFileSignature -Path $file -WindowsSigner $signers).MicrosoftRoot | Should -BeTrue
+        Should -Invoke -ModuleName Tuneup Test-TuneupMicrosoftRootChain -Times 1 -Exactly
         Clear-TuneupFileSignerCache
         Mock -ModuleName Tuneup Get-AuthenticodeSignature { [pscustomobject]@{ Status = 'HashMismatch'; SignerCertificate = [pscustomobject]@{ Subject = 'CN=Vendor Inc.' } } }
         Get-TuneupFileSignature -Path $file | Should -BeNullOrEmpty
@@ -393,9 +404,13 @@ Describe 'Startup detectors' {
             $rsa.Dispose()
         }
         Test-TuneupMicrosoftRootChain -Certificate $selfSigned | Should -BeFalse
-        # A file of Windows itself, which every Windows has.
-        $windows = Get-AuthenticodeSignature -LiteralPath (Join-Path ([Environment]::SystemDirectory) 'ntdll.dll')
-        Test-TuneupMicrosoftRootChain -Certificate $windows.SignerCertificate | Should -BeTrue
+        # A root of Microsoft itself, from the root store of the machine: no chain to download, nothing to fetch.
+        $root = 'Cert:\LocalMachine\Root\3B1EFD3A66EA28B16697394703A72CA340A05BD5'
+        if (-not (Test-Path -LiteralPath $root)) {
+            Set-ItResult -Skipped -Because 'the Microsoft Root Certificate Authority 2010 is not in the root store of this machine'
+            return
+        }
+        Test-TuneupMicrosoftRootChain -Certificate (Get-Item -LiteralPath $root) | Should -BeTrue
     }
 
     It 'reads whether a service starts as a protected process' {
@@ -637,7 +652,7 @@ Describe 'Get-TuneupStartupEntry' {
         @($entries | Where-Object { $_.path -like '*\svchost.exe' -or $_.path -like '*\lsass.exe' }).Count | Should -Be 0
         foreach ($name in 'Odd Service', 'Claims Windows', 'Script Service') {
             $entry = Find-TestEntry $entries $name
-            $entry.protected | Should -Be 'windows-component' -Because $name
+            $entry.protected | Should -Be 'unverified' -Because $name
             $entry.canDisable | Should -BeFalse -Because $name
         }
         (Find-TestEntry $entries 'Script Service').publisher | Should -BeNullOrEmpty
@@ -721,6 +736,56 @@ Describe 'Get-TuneupStartupEntry' {
             $entry.path | Should -BeNullOrEmpty -Because $name
             $entry.canDisable | Should -BeTrue -Because $name
         }
+    }
+
+    It 'lists a service whose path has a character that no path can have, without a program' {
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem {
+            [pscustomobject]@{ Kind = 'service'; Name = 'Colon'; DisplayName = 'Colon'; PathName = 'C:\Tools\odd.exe:x -run'; State = 'Running'; ProcessId = 61; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'Question'; DisplayName = 'Question'; PathName = 'C:\Tools\a?b.exe'; State = 'Running'; ProcessId = 62; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'Star'; DisplayName = 'Star'; PathName = 'C:\Tools\a*.exe -x'; State = 'Running'; ProcessId = 63; DelayedAutoStart = $false }
+        }
+        $output = @(Get-TuneupStartupEntry -Rules $Rules 3>&1)
+        @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Count | Should -Be 0
+        foreach ($name in 'Colon', 'Question', 'Star') {
+            (Find-TestEntry $output $name).path | Should -BeNullOrEmpty -Because $name
+        }
+        Should -Invoke -ModuleName Tuneup Get-TuneupFileSignature -Times 0
+    }
+
+    It 'skips with a warning an item of any source that cannot be read, and lists the rest' {
+        $root = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData'
+        Mock -ModuleName Tuneup Get-TuneupStartupRunValue {
+            [pscustomobject]@{ Name = 'BadRun'; Command = 'C:\Tools\bad.exe' }
+            [pscustomobject]@{ Name = 'GoodRun'; Command = 'C:\Tools\good.exe' }
+        } -ParameterFilter { $Path -eq $UserRun }
+        Mock -ModuleName Tuneup Get-TuneupStartupFolderItem {
+            [pscustomobject]@{ Name = 'BadLink.lnk'; FullName = "$UserStartupFolder\BadLink.lnk" }
+            [pscustomobject]@{ Name = 'GoodLink.exe'; FullName = "$UserStartupFolder\GoodLink.exe" }
+        } -ParameterFilter { $Path -eq $UserStartupFolder }
+        Mock -ModuleName Tuneup Get-TuneupStartupScheduledTask {
+            [pscustomobject]@{ TaskPath = '\'; TaskName = 'BadTask'; State = 'Ready'; Execute = 'C:\Tools\t.exe'; Arguments = $null }
+            [pscustomobject]@{ TaskPath = '\'; TaskName = 'GoodTask'; State = 'Ready'; Execute = 'C:\Tools\t.exe'; Arguments = $null }
+        }
+        Mock -ModuleName Tuneup Get-TuneupStartupStoreTask {
+            [pscustomobject]@{ PackageFamilyName = 'Bad.App_x'; TaskId = 'Start'; State = 2; KeyPath = "$root\Bad.App_x\Start" }
+            [pscustomobject]@{ PackageFamilyName = 'Good.App_x'; TaskId = 'Start'; State = 2; KeyPath = "$root\Good.App_x\Start" }
+        }
+        Mock -ModuleName Tuneup Get-TuneupStartupPackage {
+            [pscustomobject]@{ PackageFamilyName = 'Bad.App_x'; Name = 'BadApp'; Publisher = 'CN=Bad'; InstallLocation = 'C:\Program Files\WindowsApps\Bad'; SignatureKind = 'Store' }
+            [pscustomobject]@{ PackageFamilyName = 'Good.App_x'; Name = 'GoodApp'; Publisher = 'CN=Good'; InstallLocation = 'C:\Program Files\WindowsApps\Good'; SignatureKind = 'Store' }
+        }
+        Mock -ModuleName Tuneup Get-TuneupAppxManifestStartupTask { [pscustomobject]@{ TaskId = 'Start'; DisplayName = 'ms-resource:x'; PublisherDisplayName = $null } }
+        Mock -ModuleName Tuneup Get-TuneupStartupServiceItem {
+            [pscustomobject]@{ Kind = 'service'; Name = 'BadSvc'; DisplayName = 'BadSvc'; PathName = 'C:\Tools\s.exe'; State = 'Running'; ProcessId = 70; DelayedAutoStart = $false }
+            [pscustomobject]@{ Kind = 'service'; Name = 'GoodSvc'; DisplayName = 'GoodSvc'; PathName = 'C:\Tools\s.exe'; State = 'Running'; ProcessId = 71; DelayedAutoStart = $false }
+        }
+        Mock -ModuleName Tuneup New-TuneupStartupEntry { throw 'Broken item' } -ParameterFilter { $Key -like '*Bad*' }
+        $output = @(Get-TuneupStartupEntry -Rules $Rules 3>&1)
+        $warned = @($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message })
+        $entries = @($output | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] })
+        @($warned | Where-Object { $_ -like 'Could not read the startup item*Broken item*' }).Count | Should -Be 5
+        @($entries | Where-Object { $_.key -like '*Bad*' }).Count | Should -Be 0
+        @($entries | ForEach-Object { $_.name } | Sort-Object) -join ',' | Should -Be 'GoodApp,GoodLink,GoodRun,GoodSvc,GoodTask'
     }
 
     It 'turns a failure while completing one entry into a warning, and leaves that entry fixed' {

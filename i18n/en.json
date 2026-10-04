@@ -299,6 +299,7 @@
   "startup.protected.policy": "a policy sets it",
   "startup.protected.driver": "driver",
   "startup.protected.windows-component": "part of Windows",
+  "startup.protected.unverified": "it runs from the folder of Windows and its signature could not be checked",
   "startup.protected.security": "security or management of the PC (antivirus, firewall, agents of the organization)",
   "startup.protected.vpn": "VPN",
   "startup.protected.device": "software of a device (audio, keyboard, touchpad, graphics)",
