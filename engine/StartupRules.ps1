@@ -11,11 +11,26 @@ $script:StartupRuleCategories = [ordered]@{
 # Every value of protected, in the order the checks give them.
 $script:StartupProtections = @('policy', 'driver', 'windows-component') + $script:StartupRuleCategories.protect
 $script:StartupWingetIdPattern = '^[A-Za-z0-9][A-Za-z0-9.+_-]*$'
+# The fields each part of the rules can have: anything else is a typo that would silently do nothing.
+$script:StartupRuleFields = @{
+    top    = @('schemaVersion', 'about', 'windowsSigners', 'hostPrograms', 'windowsServices', 'protect', 'protectSigners', 'recommend')
+    rule   = @('category', 'pattern', 'why', 'wingetId', 'workApp')
+    signer = @('category', 'signer', 'sources', 'why', 'wingetId', 'workApp')
+}
+
+# The fields of an object that are not in the list (wingetId and workApp have their own messages).
+function Get-TuneupStartupUnknownField {
+    param([Parameter(Mandatory)]$Object, [Parameter(Mandatory)][string[]]$Known)
+    foreach ($property in @($Object.PSObject.Properties)) {
+        if ($Known -cnotcontains $property.Name) { $property.Name }
+    }
+}
 
 # The problems of a set of rules; nothing when it is valid.
 function Test-TuneupStartupRuleSet {
     param([Parameter(Mandatory)]$Rules)
     if ($Rules.schemaVersion -ne 1) { 'schemaVersion must be 1' }
+    foreach ($field in @(Get-TuneupStartupUnknownField -Object $Rules -Known $script:StartupRuleFields.top)) { "the rules have an unknown field '$field'" }
     foreach ($field in 'windowsSigners', 'hostPrograms', 'windowsServices') {
         $values = @($Rules.$field | Where-Object { $null -ne $_ })
         if (-not $values.Count -or @($values | Where-Object { $_ -isnot [string] -or [string]::IsNullOrWhiteSpace($_) }).Count) {
@@ -29,12 +44,14 @@ function Test-TuneupStartupRuleSet {
         foreach ($rule in $items) {
             $pattern = [string]$rule.pattern
             if ($categories -cnotcontains [string]$rule.category) { "$list rule '$pattern' has an unknown category '$($rule.category)'" }
+            foreach ($field in @(Get-TuneupStartupUnknownField -Object $rule -Known $script:StartupRuleFields.rule)) { "$list rule '$pattern' has an unknown field '$field'" }
             if ([string]::IsNullOrWhiteSpace($pattern)) {
                 "$list has a rule without a pattern"
                 continue
             }
             try {
-                [void][regex]::new($pattern)
+                # A pattern that matches an empty text matches every entry (one with no publisher, say).
+                if ([regex]::IsMatch('', $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)) { "$list rule '$pattern' matches an empty text" }
             } catch {
                 "$list rule '$pattern' is not a valid pattern: $($_.Exception.Message)"
             }
@@ -65,6 +82,9 @@ function Test-TuneupStartupRuleSet {
             if (-not $script:StartupSources.Contains([string]$source)) { "protectSigners rule '$signer' has an unknown source '$source'" }
         }
         if ([string]::IsNullOrWhiteSpace([string]$rule.why)) { "protectSigners rule '$signer' has no why" }
+        foreach ($field in @(Get-TuneupStartupUnknownField -Object $rule -Known $script:StartupRuleFields.signer)) { "protectSigners rule '$signer' has an unknown field '$field'" }
+        if ($null -ne $rule.PSObject.Properties['wingetId']) { "protectSigners rule '$signer' cannot have a wingetId" }
+        if ($null -ne $rule.PSObject.Properties['workApp']) { "protectSigners rule '$signer' cannot have workApp" }
     }
 }
 
@@ -133,12 +153,13 @@ function Find-TuneupStartupSignerRule {
 
 # Why an entry cannot be turned off, or nothing: its protection, a run-once entry (Windows deletes it once
 # it ran; turning it off would mean deleting it), or a task whose name or folder holds a wildcard character
-# (the task handler looks tasks up with PowerShell wildcards and could not be sure it found that one).
+# or the backtick that escapes one (the task handler looks tasks up with PowerShell wildcards and could not
+# be sure it found that one).
 function Get-TuneupStartupFixedReason {
     param([Parameter(Mandatory)]$Entry)
     if ($Entry.protected) { return [string]$Entry.protected }
     if ([string]$Entry.source -like 'runonce*') { return 'run-once' }
-    if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]]') { return 'unsupported-name' }
+    if ($Entry.source -eq 'task' -and [string]$Entry.key -match '[*?\[\]`]') { return 'unsupported-name' }
 }
 
 # The recommend rule that names an entry, or nothing. Only a mark: nothing is turned off for it.

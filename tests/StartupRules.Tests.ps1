@@ -58,6 +58,11 @@ Describe 'Test-TuneupStartupRuleSet' {
         @{ Case = 'a signer rule without sources'; Change = { param($r) $r.protectSigners[0].sources = @() }; Expected = '*must name the sources it applies to*' }
         @{ Case = 'a signer rule with an unknown source'; Change = { param($r) $r.protectSigners[0].sources = @('service', 'nowhere') }; Expected = "*unknown source 'nowhere'*" }
         @{ Case = 'a signer rule without why'; Change = { param($r) $r.protectSigners[0].PSObject.Properties.Remove('why') }; Expected = '*protectSigners rule*has no why*' }
+        @{ Case = 'a wingetId on a signer rule'; Change = { param($r) $r.protectSigners[0] | Add-Member -NotePropertyName wingetId -NotePropertyValue 'A.B' }; Expected = '*protectSigners rule*cannot have a wingetId*' }
+        @{ Case = 'workApp on a signer rule'; Change = { param($r) $r.protectSigners[0] | Add-Member -NotePropertyName workApp -NotePropertyValue $true }; Expected = '*protectSigners rule*cannot have workApp*' }
+        @{ Case = 'an unknown field at the top'; Change = { param($r) $r | Add-Member -NotePropertyName extra -NotePropertyValue 1 }; Expected = "*unknown field 'extra'*" }
+        @{ Case = 'an unknown field in a rule'; Change = { param($r) $r.recommend[0] | Add-Member -NotePropertyName colour -NotePropertyValue 'red' }; Expected = "*unknown field 'colour'*" }
+        @{ Case = 'a pattern that matches an empty text'; Change = { param($r) $r.protect[0].pattern = 'x|' }; Expected = '*matches an empty text*' }
     ) {
         param($Change, $Expected)
         $copy = Copy-TestRules
@@ -91,6 +96,30 @@ Describe 'Get-TuneupStartupProtection' {
         @{ Case = 'the updater of Edge'; Entry = { New-TestStartupEntry -Source 'task' -Key '\MicrosoftEdgeUpdateTaskMachineCore{1}' -Name 'MicrosoftEdgeUpdateTaskMachineCore{1}' }; Expected = 'updates' }
         @{ Case = 'the update service of Brave'; Entry = { New-TestStartupEntry -Source 'service' -Key 'brave' -Name 'Brave Update Service (brave)' }; Expected = 'updates' }
         @{ Case = 'Office Click-to-Run'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ClickToRunSvc' -Name 'Microsoft Office Click-to-Run Service' }; Expected = 'updates' }
+        @{ Case = 'the update tasks of Brave'; Entry = { New-TestStartupEntry -Source 'task' -Key '\BraveSoftwareUpdateTaskMachineCore{A1}' -Name 'BraveSoftwareUpdateTaskMachineCore{A1}' }; Expected = 'updates' }
+        @{ Case = 'the updater of Opera'; Entry = { New-TestStartupEntry -Source 'task' -Key '\Opera scheduled Autoupdate 1700000000' -Name 'Opera scheduled Autoupdate 1700000000' }; Expected = 'updates' }
+        @{ Case = 'the updater of Vivaldi'; Entry = { New-TestStartupEntry -Source 'task' -Key '\VivaldiUpdateCheck' -Name 'VivaldiUpdateCheck' }; Expected = 'updates' }
+        @{ Case = 'the Update Health Service of Windows'; Entry = { New-TestStartupEntry -Source 'service' -Key 'uhssvc' -Name 'Microsoft Update Health Service' }; Expected = 'windows-component' }
+        @{ Case = 'Symantec'; Entry = { New-TestStartupEntry -Source 'service' -Key 'SepMasterService' -Name 'Symantec Endpoint Protection' }; Expected = 'security' }
+        @{ Case = 'a product of Broadcom'; Entry = { New-TestStartupEntry -Source 'service' -Key 'SepWscSvc' -Name 'Endpoint Security Center' -Publisher 'Broadcom Inc.' }; Expected = 'security' }
+        @{ Case = 'Trellix'; Entry = { New-TestStartupEntry -Source 'service' -Key 'masvc' -Name 'Trellix Agent Service' }; Expected = 'security' }
+        @{ Case = 'McAfee'; Entry = { New-TestStartupEntry -Source 'service' -Key 'mfemms' -Name 'McAfee Service Controller' }; Expected = 'security' }
+        @{ Case = 'Sysmon'; Entry = { New-TestStartupEntry -Source 'service' -Key 'Sysmon64' -Name 'Sysmon64' }; Expected = 'security' }
+        @{ Case = 'Carbon Black'; Entry = { New-TestStartupEntry -Source 'service' -Key 'CbDefense' -Name 'CbDefense' }; Expected = 'security' }
+        @{ Case = 'Cortex XDR'; Entry = { New-TestStartupEntry -Source 'service' -Key 'cyserver' -Name 'Cortex XDR' }; Expected = 'security' }
+        @{ Case = 'Cyvera'; Entry = { New-TestStartupEntry -Source 'service' -Key 'CyveraService' -Name 'CyveraService' }; Expected = 'security' }
+        @{ Case = 'the Elastic Agent'; Entry = { New-TestStartupEntry -Source 'service' -Key 'Elastic Agent' -Name 'Elastic Agent' }; Expected = 'security' }
+        @{ Case = 'Elastic Endpoint'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ElasticEndpoint' -Name 'Elastic Endpoint' }; Expected = 'security' }
+        @{ Case = 'Cybereason'; Entry = { New-TestStartupEntry -Source 'service' -Key 'CybereasonActiveProbe' -Name 'Cybereason Active Probe' }; Expected = 'security' }
+        @{ Case = 'Tanium'; Entry = { New-TestStartupEntry -Source 'service' -Key 'Tanium Client' -Name 'Tanium Client' }; Expected = 'security' }
+        @{ Case = 'Qualys'; Entry = { New-TestStartupEntry -Source 'service' -Key 'QualysAgent' -Name 'Qualys Cloud Agent' }; Expected = 'security' }
+        @{ Case = 'Rapid7'; Entry = { New-TestStartupEntry -Source 'service' -Key 'ir_agent' -Name 'Rapid7 Insight Agent' }; Expected = 'security' }
+        @{ Case = 'Huntress'; Entry = { New-TestStartupEntry -Source 'service' -Key 'HuntressAgent' -Name 'Huntress Agent' }; Expected = 'security' }
+        @{ Case = 'CrowdStrike'; Entry = { New-TestStartupEntry -Source 'service' -Key 'CSFalconService' -Name 'CSFalconService' }; Expected = 'security' }
+        @{ Case = 'SentinelOne'; Entry = { New-TestStartupEntry -Source 'service' -Key 'SentinelAgent' -Name 'Sentinel Agent' }; Expected = 'security' }
+        @{ Case = 'the Intune Management Extension'; Entry = { New-TestStartupEntry -Source 'service' -Key 'IntuneManagementExtension' -Name 'Microsoft Intune Management Extension' }; Expected = 'security' }
+        @{ Case = 'the Configuration Manager client'; Entry = { New-TestStartupEntry -Source 'service' -Key 'CcmExec' -Name 'SMS Agent Host' }; Expected = 'security' }
+        @{ Case = 'Defender for Identity'; Entry = { New-TestStartupEntry -Source 'service' -Key 'AATPSensor' -Name 'Azure Advanced Threat Protection Sensor' }; Expected = 'security' }
     ) {
         param($Entry, $Expected)
         Get-TuneupStartupProtection -Entry (& $Entry) -Rules $Rules | Should -Be $Expected
@@ -145,6 +174,8 @@ Describe 'Get-TuneupStartupFixedReason' {
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'runonce-user' -Key 'Cleanup') | Should -Be 'run-once'
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Bad[1]') | Should -Be 'unsupported-name'
         Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Good') | Should -BeNullOrEmpty
+        # A backtick is the escape character of PowerShell wildcards.
+        Get-TuneupStartupFixedReason -Entry (New-TestStartupEntry -Source 'task' -Key '\Vendor\Odd`Name') | Should -Be 'unsupported-name'
     }
 }
 
@@ -158,6 +189,9 @@ Describe 'Get-TuneupStartupRecommendation' {
         @{ Name = 'OneDrive'; Entry = { New-TestStartupEntry -Key 'OneDrive' -Path 'C:\Users\me\AppData\Local\Microsoft\OneDrive\OneDrive.exe' }; Category = 'sync-client'; Winget = $null }
         @{ Name = 'the Adobe updater'; Entry = { New-TestStartupEntry -Source 'task' -Key '\Adobe Acrobat Update Task' -Name 'Adobe Acrobat Update Task' }; Category = 'updater'; Winget = $null }
         @{ Name = 'the new Outlook'; Entry = { New-TestStartupEntry -Source 'store-app' -Key 'Microsoft.OutlookForWindows_8wekyb3d8bbwe\OutlookStartup' -Name 'Outlook (new)' }; Category = 'chat-helper'; Winget = $null }
+        @{ Name = 'the EA app'; Entry = { New-TestStartupEntry -Key 'EADM' -Path 'C:\Program Files\Electronic Arts\EA Desktop\EA Desktop\EADesktop.exe' -Publisher 'Electronic Arts, Inc.' }; Category = 'game-launcher'; Winget = 'winget uninstall --id ElectronicArts.EADesktop --exact' }
+        @{ Name = 'Battle.net'; Entry = { New-TestStartupEntry -Key 'Battle.net' -Path 'C:\Program Files (x86)\Battle.net\Battle.net Launcher.exe' -Publisher 'Blizzard Entertainment, Inc.' }; Category = 'game-launcher'; Winget = 'winget uninstall --id Blizzard.BattleNet --exact' }
+        @{ Name = 'the update task of OneDrive'; Entry = { New-TestStartupEntry -Source 'task' -Key '\OneDrive Standalone Update Task-S-1-5-21-1-2-3-1001' -Name 'OneDrive Standalone Update Task-S-1-5-21-1-2-3-1001' }; Category = 'updater'; Winget = $null }
     ) {
         param($Entry, $Category, $Winget)
         $rule = Get-TuneupStartupRecommendation -Entry (& $Entry) -Rules $Rules
@@ -167,12 +201,29 @@ Describe 'Get-TuneupStartupRecommendation' {
 
     It 'marks OneDrive, Teams and Outlook as apps of work, and only them' {
         $workApps = @($Rules.recommend | Where-Object { $null -ne $_.PSObject.Properties['workApp'] -and $_.workApp })
-        $workApps.Count | Should -Be 3
-        foreach ($name in 'OneDrive', 'MSTeams', 'Outlook') {
+        $workApps.Count | Should -Be 4
+        foreach ($name in 'OneDrive', 'MSTeams', 'Outlook', 'OneDrive Standalone Update Task-S-1-5-21-1-2-3-1001', 'Microsoft Teams Update') {
             $rule = Get-TuneupStartupRecommendation -Entry (New-TestStartupEntry -Key $name) -Rules $Rules
             $rule.workApp | Should -BeTrue -Because $name
         }
         (Get-TuneupStartupRecommendation -Entry (New-TestStartupEntry -Key 'Dropbox') -Rules $Rules).PSObject.Properties['workApp'] | Should -BeNullOrEmpty
+    }
+
+    It 'names the launcher of a game store by its program, never everything its publisher signs: <Name>' -TestCases @(
+        @{ Name = 'the service of Steam'; Entry = { New-TestStartupEntry -Source 'service' -Key 'Steam Client Service' -Path 'C:\Program Files (x86)\Common Files\Steam\steamservice.exe' -Publisher 'Valve Corp.' } }
+        @{ Name = 'SteamVR'; Entry = { New-TestStartupEntry -Key 'SteamVR' -Path 'C:\Games\Steam\steamapps\common\SteamVR\bin\win64\vrstartup.exe' -Publisher 'Valve Corp.' } }
+        @{ Name = 'Epic Online Services'; Entry = { New-TestStartupEntry -Source 'service' -Key 'EpicOnlineServices' -Name 'Epic Online Services' -Publisher 'Epic Games Inc.' } }
+        @{ Name = 'the service of the EA app'; Entry = { New-TestStartupEntry -Source 'service' -Key 'EABackgroundService' -Name 'EABackgroundService' -Publisher 'Electronic Arts, Inc.' } }
+        @{ Name = 'the agent of Blizzard'; Entry = { New-TestStartupEntry -Key 'BlizzardAgent' -Path 'C:\ProgramData\Battle.net\Agent\Agent.exe' -Publisher 'Blizzard Entertainment, Inc.' } }
+    ) {
+        param($Entry)
+        Get-TuneupStartupRecommendation -Entry (& $Entry) -Rules $Rules | Should -BeNullOrEmpty
+    }
+
+    It 'never matches an empty text with a pattern of the tool' {
+        foreach ($rule in @($Rules.protect) + @($Rules.recommend)) {
+            [regex]::IsMatch('', [string]$rule.pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase) | Should -BeFalse -Because $rule.pattern
+        }
     }
 
     It 'recommends nothing for a program no rule names' {

@@ -299,7 +299,7 @@
   "startup.protected.policy": "lo fija una directiva",
   "startup.protected.driver": "controlador",
   "startup.protected.windows-component": "componente de Windows",
-  "startup.protected.security": "seguridad (antivirus o firewall)",
+  "startup.protected.security": "seguridad o administración del equipo (antivirus, firewall, agentes de la organización)",
   "startup.protected.vpn": "VPN",
   "startup.protected.device": "software de un dispositivo (audio, teclado, panel táctil, gráficos)",
   "startup.protected.updates": "actualizaciones de seguridad del navegador o de Office",
