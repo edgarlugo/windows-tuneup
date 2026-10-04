@@ -391,3 +391,58 @@ Describe 'Turning off a scheduled task and a service' {
         Should -Invoke -ModuleName Tuneup New-TuneupRestorePoint -Times 0
     }
 }
+
+Describe 'Re-applying a startup entry that came back' {
+    BeforeEach {
+        Remove-TestKey
+        New-Item -Path $Key -Force | Out-Null
+        $script:Entries = @(New-TestSteam)
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:Entries }
+        Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Mock -ModuleName Tuneup Test-TuneupWow64Process { $false }
+    }
+    AfterAll { Remove-TestKey }
+
+    It 'leaves it out with a warning that says how to turn it off again, also when -Include names it' {
+        $context = New-TestContext -Json
+        Invoke-TestStartup $context -Disable @($SteamId) -Yes | Out-Null
+        New-ItemProperty -LiteralPath $Approved -Name 'Steam' -Value $On -PropertyType Binary -Force | Out-Null
+        $warning = Get-TuneupText -Key 'reapply.startupEntry' -Format $SteamId
+
+        $reapply = New-TestContext -Json -StateRoot $context.StateRoot
+        $plan = Invoke-TuneupStatusCommand -Context $reapply -Reapply -PlanOnly | ConvertFrom-Json
+        $reapply.ExitCode | Should -Be 0
+        $plan.source | Should -Be 'reapply'
+        @($plan.items).Count | Should -Be 0
+        $plan.warnings | Should -Contain $warning
+        @($plan.warnings | Where-Object { $_ -match 'no longer in the catalog' }).Count | Should -Be 0
+
+        $named = New-TestContext -Json -StateRoot $context.StateRoot
+        $plan = Invoke-TuneupStatusCommand -Context $named -Reapply -PlanOnly -Include @($SteamId) | ConvertFrom-Json
+        $named.ExitCode | Should -Be 0
+        $plan.command | Should -Be 'plan'
+        @($plan.warnings | Where-Object { $_ -eq $warning }).Count | Should -Be 1
+        @($plan.warnings | Where-Object { $_ -eq (Get-TuneupText -Key 'reapply.notRevertedUnverified' -Format $SteamId) }).Count | Should -Be 0
+        # Nothing was turned off again: it stays as the person left it.
+        (Get-TestApproved)[0] | Should -Be 2
+    }
+
+    It 'says that a startup entry named in -Include did not come back' {
+        $context = New-TestContext -Json
+        Invoke-TestStartup $context -Disable @($SteamId) -Yes | Out-Null
+        $named = New-TestContext -Json -StateRoot $context.StateRoot
+        $plan = Invoke-TuneupStatusCommand -Context $named -Reapply -PlanOnly -Include @($SteamId) | ConvertFrom-Json
+        $named.ExitCode | Should -Be 0
+        $plan.warnings | Should -Contain (Get-TuneupText -Key 'reapply.notRevertedUnverified' -Format $SteamId)
+    }
+
+    It 'still refuses an id that is neither in the catalog nor of a startup entry' {
+        $context = New-TestContext -Json
+        Invoke-TestStartup $context -Disable @($SteamId) -Yes | Out-Null
+        $named = New-TestContext -Json -StateRoot $context.StateRoot
+        $refused = Invoke-TuneupStatusCommand -Context $named -Reapply -PlanOnly -Include @('test.unknown') | ConvertFrom-Json
+        $named.ExitCode | Should -Be 1
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.unknownTweak' -Format 'test.unknown')
+    }
+}

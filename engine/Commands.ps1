@@ -120,13 +120,19 @@ function Invoke-TuneupReapply {
     $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
     if ($missing.Count) {
         Invoke-TuneupContextStep -Context $Context -Step {
-            foreach ($id in $missing) { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+            foreach ($id in $missing) {
+                # A startup entry is never in the catalog: it is turned off again from what starts now
+                # (-Startup -Disable), which reads the entry again.
+                if (Test-TuneupStartupId -Id $id) { Write-Warning (Get-TuneupText -Key 'reapply.startupEntry' -Format $id) }
+                else { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+            }
         }
     }
     $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
     $confirmed = @()
     if ($named.Count) {
-        $unknown = @($named | Where-Object { -not $known.ContainsKey($_) })
+        # A startup entry named here is not unknown: it is left out with its own warning.
+        $unknown = @($named | Where-Object { -not $known.ContainsKey($_) -and -not (Test-TuneupStartupId -Id $_) })
         if ($unknown.Count) {
             Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.unknownTweak' -Format ($unknown -join ', '))
             return
@@ -135,7 +141,8 @@ function Invoke-TuneupReapply {
         # those may have been reverted, and the warning says so.
         $notDriftedKey = $(if ((Get-TuneupContextEnvironment -Context $Context).IsAdmin) { 'reapply.notReverted' } else { 'reapply.notRevertedUnverified' })
         Invoke-TuneupContextStep -Context $Context -Step {
-            foreach ($id in @($named | Where-Object { $ids -notcontains $_ })) { Write-Warning (Get-TuneupText -Key $notDriftedKey -Format $id) }
+            # A startup entry that came back already has its own warning (reapply.startupEntry).
+            foreach ($id in @($named | Where-Object { $ids -notcontains $_ -and $missing -notcontains $_ })) { Write-Warning (Get-TuneupText -Key $notDriftedKey -Format $id) }
         }
         $ids = @($ids | Where-Object { $named -contains $_ })
         $confirmed = $ids
