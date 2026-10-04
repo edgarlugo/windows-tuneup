@@ -119,7 +119,7 @@ Describe 'Skill' {
             }
         }
         foreach ($expected in 'List', 'Suggest', 'WhatIf', 'Yes', 'Json', 'ResultId', 'ReadResult', 'Undo', 'Tweak', 'Health', 'Repair', 'Measure',
-            'Compare', 'IdleSeconds', 'Status', 'Reapply', 'Include', 'Exclude', 'Lang', 'Profile') {
+            'Compare', 'IdleSeconds', 'Status', 'Reapply', 'Include', 'Exclude', 'Lang', 'Profile', 'Startup', 'Disable') {
             $seen | Should -Contain $expected
         }
     }
@@ -244,9 +244,53 @@ Describe 'Skill' {
         @{ Phrase = 'Put on a command line only ids that the tool gave you, each checked against its form' }
         @{ Phrase = 'Never list or read the state folders' }
         @{ Phrase = 'never search the installed docs to find an id' }
+        @{ Phrase = '14. Turn off a startup entry only when the user chose that entry' }
+        @{ Phrase = '(guardrail 14)' }
     ) {
         param($Phrase)
         $Skill.Contains($Phrase) | Should -BeTrue -Because $Phrase
+    }
+
+    It 'turns off startup entries only when the user chose each one, and never runs the uninstall command' {
+        foreach ($term in 'a `recommended` mark is never a choice', 'never run the `uninstall` command', 'whose `canDisable` is false',
+            'Do we review what starts with Windows?', '`offersStartup`', "-Startup -Disable '<ids>' -WhatIf -Json", 'Never elevate the ones of the user',
+            '`-Startup -Json`', 'protected even though they are updaters', '`notRecommendedReason` = `work-app`', '`-Startup` (without `-Disable`)',
+            'Recommended ones first', '`needs-admin`', '`session-user`', 'never `-Status -Reapply`') {
+            $Skill.Contains($term) | Should -BeTrue -Because $term
+        }
+        foreach ($term in '`-Startup -Json`', "-Startup -Disable '<ids>' -Yes -Json", '^startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16}$', '`entries` of `-Startup -Json`') {
+            $Commands.Contains($term) | Should -BeTrue -Because $term
+        }
+        $Reading = Read-RepoText (Join-Path (Join-Path $SkillRoot 'reference') 'reading-json.md')
+        foreach ($term in '## `startup`', '`ambiguous`', '`unreadable`', '`unverified`', '`companion-app`', '`workPc`', '`not-present`', '`session-user`',
+            '`needs-admin`', 'protected even though they are updaters', 'never run it') {
+            $Reading.Contains($term) | Should -BeTrue -Because $term
+        }
+        # The uninstall command is shown as text, never run: no line of code of the skill runs winget uninstall.
+        foreach ($line in @($SkillLines | Where-Object { $_.Fenced })) {
+            $line.Text | Should -Not -Match '(?i)winget\s+uninstall' -Because "$($line.File): $($line.Text)"
+        }
+    }
+
+    It 'checks the ids of -Disable again in the elevated command, before the UAC prompt' {
+        # The id the engine writes fits the form the skill checks.
+        $id = & (Get-Module Tuneup) { Get-TuneupStartupId -Source 'run-machine' -Key 'Vendor Tray' }
+        $id | Should -MatchExactly '^startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16}$'
+        $elevated = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value } |
+            Where-Object { $_.Contains('-Verb RunAs') -and $_.Contains('$toolArguments') })[0]
+        $guard = [regex]::Match($elevated, "(?m)^if \(\`$toolArguments -match '(?<named>[^']+)' -and \`$toolArguments -cnotmatch `"(?<form>[^`"]+)`"\) \{ throw 'invalid-arguments")
+        $guard.Success | Should -BeTrue
+        $elevated.IndexOf($guard.Value) | Should -BeLessThan $elevated.IndexOf('Start-Process')
+        $refused = { param([string]$Arguments) ($Arguments -match $guard.Groups['named'].Value) -and ($Arguments -cnotmatch $guard.Groups['form'].Value) }
+        foreach ($good in "-Startup -Disable '$id' -Yes -Json -Lang en", "-Startup -Disable '$id,startup.service.vendorsvc-0f0f0f0f0f0f0f0f' -Yes -Json -Lang es",
+            "-Profile 'gaming,privacy' -Yes -Json -Lang en") {
+            & $refused $good | Should -BeFalse -Because $good
+        }
+        foreach ($bad in "-Startup -Disable 'startup.run-machine.vendor-tray-1a2b3c4d' -Yes -Json -Lang en", "-Startup -Disable 'privacy.telemetry' -Yes -Json -Lang en",
+            "-Startup -Disable '$id,base.ads' -Yes -Json -Lang en", "-Startup -disable '$id' -Yes -Json -Lang en", "-Startup -Disable '$($id.ToUpperInvariant())' -Yes -Json -Lang en",
+            "-Startup -Disable '' -Yes -Json -Lang en", "-Startup -Disable -Yes -Json -Lang en") {
+            & $refused $bad | Should -BeTrue -Because $bad
+        }
     }
 
     It 'links only to files that exist' {
@@ -309,7 +353,8 @@ Describe 'Skill' {
         # Arguments pass when they have the form of the tool (case-sensitive) and name no option the skill never passes (any case).
         $passes = { param([string]$Arguments) ($Arguments -cmatch $guard.Groups['arguments'].Value) -and -not ($Arguments -match $guard.Groups['forbidden'].Value) }
         foreach ($good in "-Profile 'gaming,privacy' -Yes -Json -Lang en", "-Undo '20261002-120000-01' -Tweak 'privacy.telemetry' -Json -Lang es",
-            "-Status -Reapply -Include 'lite.xbox-app,base.ads' -Yes -Json -Lang en", '-Health -Repair -Json -Lang es') {
+            "-Status -Reapply -Include 'lite.xbox-app,base.ads' -Yes -Json -Lang en", '-Health -Repair -Json -Lang es',
+            "-Startup -Disable 'startup.run-machine.vendor-tray-1a2b3c4d5e6f7081,startup.service.vendorsvc-0f0f0f0f0f0f0f0f' -Yes -Json -Lang en") {
             & $passes $good | Should -BeTrue -Because $good
         }
         foreach ($bad in "-Profile 'gaming'; Start-Process calc", "-Profile 'gaming' -Yes -Json -Lang en; calc", "-Profile 'port$([char]0x00E1)til' -Json -Lang es",
