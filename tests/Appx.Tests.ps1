@@ -137,6 +137,44 @@ Describe 'Appx handler' {
         $outcome.detail | Should -BeLike '*provisioned package*Access denied*'
     }
 
+    # On build 26300 the removal for all users also took the provisioning away, and deprovisioning then
+    # failed with "path not found": the app is gone, which is not a partial change.
+    It 'applies when deprovisioning fails because the package is no longer provisioned' {
+        $installed = New-FakePackage
+        $state = @{ provisioned = @($Provisioned) }
+        Mock -ModuleName Tuneup Get-TuneupAppxPackage { $installed }.GetNewClosure()
+        Mock -ModuleName Tuneup Get-TuneupAppxProvisionedPackage { $state.provisioned }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxPackage { $state.provisioned = @() }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxProvisionedPackage { throw 'The system cannot find the path specified.' }
+        @(Set-AppxTweakDesired -Tweak $Tweak).Count | Should -Be 0
+        Should -Invoke Get-TuneupAppxProvisionedPackage -ModuleName Tuneup -Times 2 -Exactly
+    }
+
+    It 'still reports the failure when the package stays provisioned after deprovisioning failed' {
+        $installed = New-FakePackage
+        $provisioned = $Provisioned
+        Mock -ModuleName Tuneup Get-TuneupAppxPackage { $installed }.GetNewClosure()
+        Mock -ModuleName Tuneup Get-TuneupAppxProvisionedPackage { $provisioned }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxPackage { }
+        Mock -ModuleName Tuneup Remove-TuneupAppxProvisionedPackage { throw 'The system cannot find the path specified.' }
+        $outcome = Get-TuneupOutcome -Output @(Set-AppxTweakDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -BeLike '*provisioned package*cannot find the path*'
+    }
+
+    It 'still reports the failure when the provisioned list cannot be read again' {
+        $installed = New-FakePackage
+        $state = @{ reads = 0 }
+        $provisioned = $Provisioned
+        Mock -ModuleName Tuneup Get-TuneupAppxPackage { $installed }.GetNewClosure()
+        Mock -ModuleName Tuneup Get-TuneupAppxProvisionedPackage { $state.reads++; if ($state.reads -gt 1) { throw 'list failed' }; $provisioned }.GetNewClosure()
+        Mock -ModuleName Tuneup Remove-TuneupAppxPackage { }
+        Mock -ModuleName Tuneup Remove-TuneupAppxProvisionedPackage { throw 'The system cannot find the path specified.' }
+        $outcome = Get-TuneupOutcome -Output @(Set-AppxTweakDesired -Tweak $Tweak)
+        $outcome.partial | Should -BeTrue
+        $outcome.detail | Should -BeLike '*provisioned package*cannot find the path*'
+    }
+
     It 'reports a partial change when the removal for users fails but deprovisioning works' {
         $installed = New-FakePackage
         $provisioned = $Provisioned
