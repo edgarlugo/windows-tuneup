@@ -99,7 +99,7 @@ function Write-TuneupMenuHeader {
     Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $adminKey)
     if ($environment.IsManaged) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.managed') }
     Write-TuneupMenuLine -Context $Context
-    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.exit') {
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.startup', 'menu.main.exit') {
         Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $key)
     }
 }
@@ -127,6 +127,7 @@ function Invoke-TuneupMenu {
                 '3' { 'Undo' }
                 '4' { 'Health' }
                 '5' { 'Measure' }
+                '6' { 'Startup' }
                 default { $null }
             }
             if ($null -eq $action -and $choice -ne '') { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid') }
@@ -241,6 +242,46 @@ function Invoke-TuneupMenuOptimize {
     if ($Context.ExitCode -ne 1 -and (Test-TuneupStartupOffered -Definition $definition -ProfileIds $profileIds)) {
         Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'startup.offer')
     }
+}
+
+# What starts with Windows: the table of -Startup, then the entries to turn off, picked by number among
+# the ones that can be turned off (recommended first, none picked beforehand), and the plan and the
+# confirmation of -Startup -Disable. Each number is the entry shown under it, and its id goes to -Disable,
+# which reads the entries again and refuses what changed. An id that two entries share is never offered.
+# What needs administrator is not turned off from a menu that is not elevated: it says so and goes back,
+# changing nothing, not even the entries of the user picked with it.
+function Invoke-TuneupMenuStartup {
+    param([Parameter(Mandatory)]$Context)
+    $Context.Pause = $true
+    $warningsBefore = $Context.Warnings.Count
+    Invoke-TuneupStartupCommand -Context $Context
+    $document = $Context.Result
+    if ($Context.ExitCode -ne 0 -or $null -eq $document) { return }
+    # The warnings of the list were shown with it; the run keeps only the ones about what is picked.
+    while ($Context.Warnings.Count -gt $warningsBefore) { $Context.Warnings.RemoveAt($Context.Warnings.Count - 1) }
+    $entries = @($document.entries)
+    $shared = @($entries | Group-Object -Property { [string]$_.id } | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    $offered = @($entries | Where-Object { $_.canDisable -and $shared -notcontains [string]$_.id })
+    $choices = @($offered | Where-Object { $_.recommended }) + @($offered | Where-Object { -not $_.recommended })
+    if (-not $choices.Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.none')
+        return
+    }
+    $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
+    $lines = @(foreach ($entry in $choices) {
+            $recommended = $(if ($entry.recommended) { Get-TuneupText -Key 'menu.startup.recommended' -Format (Get-TuneupText -Key "startup.recommend.$($entry.recommendedReason)") } else { '' })
+            '{0}{1}{2}' -f (Format-TuneupStartupText -Text $entry.name), $recommended, $(if ($entry.needsAdmin) { $adminMark } else { '' })
+        })
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.header')
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen -or -not @($chosen).Count) { return }
+    $picked = @($chosen | ForEach-Object { $choices[$_] })
+    if (-not (Get-TuneupContextEnvironment -Context $Context).IsAdmin -and @($picked | Where-Object { $_.needsAdmin }).Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.needsAdmin')
+        return
+    }
+    Invoke-TuneupStartupCommand -Context $Context -Disable @($picked | ForEach-Object { [string]$_.id })
 }
 
 # The status, and when Windows reverted something, the offer to apply it again.
