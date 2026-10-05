@@ -82,7 +82,7 @@ Two exit codes count: the one of the elevated process (`Start-Process -PassThru`
 
 ## `status`
 
-`items[]`: `id`, `title`, `runId` and `status`: `ok` (in place), `drift` (Windows reverted it: offer the re-apply), `not-present`, `unknown`, `needs-admin` (only an elevated check can read it: say so, and do not elevate to read). An `id` that starts with `startup.` is a startup entry turned off with `-Startup -Disable`: in `drift` it is on again (offer SKILL.md, "5. What starts with Windows", not the re-apply); `not-present`, it was uninstalled since.
+`items[]`: `id`, `title`, `runId` and `status`: `ok` (in place), `drift` (Windows reverted it: offer the re-apply), `not-present`, `unknown`, `needs-admin` (only an elevated check can read it: say so, and do not elevate to read). An `id` that starts with `startup.` is a startup entry turned off with `-Startup -Disable`: in `drift` it is on again (offer SKILL.md, "5. What starts with Windows", not the re-apply); `not-present`, it was uninstalled since; a scheduled task that only an elevated check can see is `needs-admin` instead.
 
 ## `undo`
 

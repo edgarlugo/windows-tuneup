@@ -132,7 +132,9 @@ function Test-TuneupStartupTweak {
 # Whether the entry a startup tweak turned off is still there: the value of its Run key, the file of its
 # startup folder, the key of its Store task (gone with the app), its scheduled task or its service. Once it
 # was uninstalled there is nothing to check or to give back: -Status says not-present (never drift) and
-# -Undo leaves it as it is, without making keys or values for something that no longer exists.
+# -Undo leaves it as it is, without making keys or values for something that no longer exists. Without
+# elevation Windows hides some scheduled tasks: a task that is not found then may still be there, so that
+# is an error (never not-present), and -Status says needs-admin (Test-TuneupStartupTweakHidden).
 function Test-TuneupStartupTweakPresent {
     param([Parameter(Mandatory)]$Tweak)
     $source = [string]$Tweak.startup.source
@@ -150,8 +152,22 @@ function Test-TuneupStartupTweakPresent {
             return [bool]($path -and (Test-Path -LiteralPath (Join-Path $path $key) -PathType Leaf))
         }
         '^store-app$' { return [bool](Test-Path -LiteralPath ([string]$Tweak.set.path)) }
-        '^task$' { return $null -ne (Get-TuneupScheduledTask -Tweak $Tweak) }
+        '^task$' {
+            if ($null -ne (Get-TuneupScheduledTask -Tweak $Tweak)) { return $true }
+            if (-not (Test-TuneupAdmin)) {
+                throw "The scheduled task $($Tweak.set.path)$($Tweak.set.name) was not found, and without administrator Windows hides some tasks: only an elevated check can tell whether it is still there."
+            }
+            return $false
+        }
         '^service$' { return [bool](Get-ServiceTweakState -Tweak $Tweak).present }
     }
     $true
+}
+
+# A scheduled task turned off by -Startup -Disable that this process cannot see without elevation: only an
+# elevated check can tell whether it is still there (-Status says needs-admin, not not-present).
+function Test-TuneupStartupTweakHidden {
+    param([Parameter(Mandatory)]$Tweak)
+    (Test-TuneupStartupTweak -Tweak $Tweak) -and [string]$Tweak.startup.source -ceq 'task' -and -not (Test-TuneupAdmin) -and
+        $null -eq (Get-TuneupScheduledTask -Tweak $Tweak)
 }

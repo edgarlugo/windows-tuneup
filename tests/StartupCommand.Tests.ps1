@@ -481,6 +481,8 @@ Describe 'Turning off a scheduled task and a service' {
     }
 
     It 'says not-present for a task and a service uninstalled since, and -Undo gives nothing back for them' {
+        # Only an elevated check can tell that a scheduled task is gone.
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
         $elevated = New-TestEnvironment -IsAdmin $true
         $context = New-TestContext -Json -Environment $elevated
         (Invoke-TestStartup $context -Disable @($Entries | ForEach-Object { $_.id }) -Yes).results.status -join ';' | Should -Be 'applied;applied'
@@ -493,6 +495,27 @@ Describe 'Turning off a scheduled task and a service' {
         $undoContext.ExitCode | Should -Be 0
         @($undo.results | ForEach-Object { "$($_.status):$($_.reason)" }) -join ';' | Should -Be 'restored:not-present;restored:not-present'
         @($Calls) -join ';' | Should -Be 'task off;sc VendorSvc demand'
+    }
+
+    It 'says needs-admin, never not-present, for a task that a check without elevation cannot find, and never gives it as restored' {
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        $elevated = New-TestEnvironment -IsAdmin $true
+        $context = New-TestContext -Json -Environment $elevated
+        (Invoke-TestStartup $context -Disable @($Entries | ForEach-Object { $_.id }) -Yes).results.status -join ';' | Should -Be 'applied;applied'
+        # Without elevation Windows hides some scheduled tasks: one that is not found then is not gone.
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $false }
+        Mock -ModuleName Tuneup Get-ScheduledTask { }
+        @((Invoke-TestStatus $context.StateRoot).items | ForEach-Object { "$($_.title)=$($_.status)" } | Sort-Object) -join ';' | Should -Be 'Up=needs-admin;Vendor service=ok'
+        # -Undo without elevation is refused for the whole run, and the restore itself fails instead of calling it gone.
+        $undoContext = New-TestContext -Json -StateRoot $context.StateRoot
+        (Invoke-TuneupUndoCommand -Context $undoContext -RunId 'last' | ConvertFrom-Json).reason | Should -Be 'needs-admin'
+        $result = & (Get-Module Tuneup) { param($Root, $Id) Invoke-TuneupUndo -Run (Resolve-TuneupRun -StateRoot $Root -RunId 'last') -TweakId $Id } $context.StateRoot $Entries[0].id
+        $result.status | Should -Be 'failed'
+        $result.error | Should -Match 'administrator'
+        @($Calls) -join ';' | Should -Be 'task off;sc VendorSvc demand'
+        # Elevated, a task that is not found is gone.
+        Mock -ModuleName Tuneup Test-TuneupAdmin { $true }
+        @((Invoke-TestStatus $context.StateRoot -Environment $elevated).items | ForEach-Object { "$($_.title)=$($_.status)" } | Sort-Object) -join ';' | Should -Be 'Up=not-present;Vendor service=ok'
     }
 
     It 'refuses them without administrator, with the reason needs-admin, and touches nothing' {

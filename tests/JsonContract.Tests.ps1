@@ -157,6 +157,7 @@ Describe 'docs/json-contract.md' {
         foreach ($reason in 'session-user', 'needs-admin') { $errorSection.Contains("``$reason``") | Should -BeTrue -Because $reason }
         foreach ($name in 'plan', 'apply') { (Get-ContractSection $name).Contains('`startup`') | Should -BeTrue -Because $name }
         foreach ($name in 'status', 'undo') { (Get-ContractSection $name).Contains('`not-present`') | Should -BeTrue -Because $name }
+        (Get-ContractSection 'status').Contains('a scheduled task that a check without elevation cannot find is `needs-admin`') | Should -BeTrue
         foreach ($term in '`-Startup -Json`', '`-Startup -Disable', '`title`, `name`, `key` and `command`') { $Contract.Contains($term) | Should -BeTrue -Because $term }
     }
 
