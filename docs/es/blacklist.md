@@ -74,3 +74,21 @@ Lo que se evaluó y quedó fuera por otros motivos (apps que no se pueden reinst
 | Cambio | Por qué no |
 |---|---|
 | Quitar Microsoft Edge o WebView2 | Rompe Widgets, la ayuda y muchas apps que muestran contenido web, y deja el equipo sin navegador soportado. |
+
+## Lo que `-Startup` nunca apaga
+
+`-Startup -Disable` apaga lo que arranca con Windows sin desinstalar ni borrar nada: escribe el valor de `StartupApproved` que usa el Administrador de tareas (o el estado de la tarea de inicio de una app de la Store, como Configuración), deshabilita la tarea o pasa el servicio a Manual, y `-Undo` lo devuelve. Nunca lo hace con lo que muestra como protegido (reglas en `catalog/startup/rules.json`, revisables) ni con lo que no puede apagar con seguridad:
+
+| Qué | Por qué no |
+|---|---|
+| Componentes de Windows (con una firma de Windows comprobada) y los servicios de esta lista | Windows los necesita; los servicios de seguridad y de actualización siguen la regla de arriba |
+| Servicios y controladores que corren desde la carpeta de Windows sin una firma comprobada (`unverified`) | No se sabe de quién son: se muestran, pero no se apagan |
+| Antivirus, firewall, lo que registra el Centro de seguridad de Windows, los procesos protegidos y los agentes de la organización (EDR, Sysmon, Intune, Configuration Manager) | Dejan el equipo expuesto o fuera de la administración de la organización |
+| Clientes VPN | Cortan el acceso a la red de la organización |
+| Ayudantes de los controladores (consola y servicios de audio, panel táctil, teclas Fn, servicios de pantalla y de lápiz), los servicios de los paquetes de controladores y los controladores | Se pierden teclas, sonido, gestos o modos de pantalla. Las apps de acompañamiento del fabricante (GeForce Experience o NVIDIA app, AMD Software, Armoury Crate, G HUB...) no se protegen: se pueden apagar y salen recomendadas |
+| Actualizadores de navegadores y de Office (Edge, Chrome, Firefox, Brave, Opera, Vivaldi, Yandex, Click-to-Run) | Se protegen aunque sean actualizadores: sin ellos el navegador y Office no reciben parches de seguridad, igual que con Windows Update. Los actualizadores de otros programas sí se pueden apagar |
+| Lo que fija una directiva de la organización | La organización lo decide |
+| Lo que corre una sola vez (`RunOnce`) | Apagarlo sería borrarlo |
+| Lo que no se pudo leer entero, lo que comparte el id con otra entrada y las tareas con comodines en el nombre | El id podría nombrar otra cosa que la que ves |
+
+Un servicio nunca pasa a Deshabilitado, solo a Manual, y no se detiene. Lo recomendado es solo una marca: nada se apaga sin que lo elijas. Para desinstalar un programa la herramienta solo muestra el comando (`winget uninstall --id <id> --exact`); nunca lo corre.

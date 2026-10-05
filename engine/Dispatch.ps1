@@ -42,6 +42,8 @@ function Get-TuneupState {
 
 function Test-TuneupState {
     param([Parameter(Mandatory)]$Tweak)
+    # A startup entry that was uninstalled since it was turned off is not present, not reverted.
+    if ((Test-TuneupStartupTweak -Tweak $Tweak) -and -not (Test-TuneupStartupTweakPresent -Tweak $Tweak)) { return 'not-present' }
     & "Test-$(Get-TuneupHandlerName -Tweak $Tweak)TweakState" -Tweak $Tweak
 }
 
@@ -52,6 +54,8 @@ function Set-TuneupDesired {
 
 function Restore-TuneupState {
     param([Parameter(Mandatory)]$Tweak, [Parameter(Mandatory)]$State)
+    # Nothing to give back to a startup entry that was uninstalled: no key or value is made for it.
+    if ((Test-TuneupStartupTweak -Tweak $Tweak) -and -not (Test-TuneupStartupTweakPresent -Tweak $Tweak)) { return (New-TuneupOutcome -Reason 'not-present') }
     & "Restore-$(Get-TuneupHandlerName -Tweak $Tweak)TweakState" -Tweak $Tweak -State $State
 }
 

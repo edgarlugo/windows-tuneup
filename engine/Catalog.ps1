@@ -151,6 +151,9 @@ function Test-TuneupProfileSet {
                 if ([string]::IsNullOrWhiteSpace([string]$profileData.$field.$lang)) { $errors.Add("profile $profileId is missing $field.$lang") }
             }
         }
+        # Optional: the profile offers the review of what starts with Windows (-Startup) once it is planned.
+        $offer = $profileData.PSObject.Properties['offersStartup']
+        if ($null -ne $offer -and $offer.Value -isnot [bool]) { $errors.Add("profile $profileId offersStartup must be true or false") }
         foreach ($tweakId in @($profileData.include | Where-Object { $_ }) + @($profileData.keep | Where-Object { $_ })) {
             if (-not $byId.ContainsKey($tweakId)) { $errors.Add("profile $profileId references unknown tweak $tweakId") }
         }

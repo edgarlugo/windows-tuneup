@@ -38,6 +38,14 @@ BeforeAll {
 }
 
 Describe 'Get-TuneupListDocument' {
+    It 'says which profiles offer the review of what starts with Windows' {
+        $definition = New-TestDefinition
+        $definition.Profiles[0] | Add-Member -NotePropertyName offersStartup -NotePropertyValue $true
+        $document = Get-TuneupListDocument -Definition $definition -Environment (New-TestEnvironment)
+        ($document.profiles | Where-Object { $_.id -eq 'work' }).offersStartup | Should -BeTrue
+        ($document.profiles | Where-Object { $_.id -eq 'base' }).offersStartup | Should -BeFalse
+    }
+
     It 'lists base first, then the other profiles, with their aliases and texts' {
         $document = Get-TuneupListDocument -Definition (New-TestDefinition) -Environment (New-TestEnvironment)
         $document.schemaVersion | Should -Be 1

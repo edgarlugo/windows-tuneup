@@ -18,7 +18,35 @@ Describe 'README' {
     }
 }
 
+Describe 'README and -Startup' {
+    It 'shows -Startup in the usage, the exit codes and the skill, which turns off only the entries the user names' {
+        $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        foreach ($term in '.\tuneup.ps1 -Startup ', ".\tuneup.ps1 -Startup -Disable '", '| `-Startup` |', '`-Measure`, `-Startup`)',
+            'cada entrada que nombres', 'each entry you name') {
+            $text.Contains($term) | Should -BeTrue -Because $term
+        }
+        $text.Contains('lo que elijas, uno por uno') | Should -BeFalse
+        $text.Contains('one by one, and never uninstalls') | Should -BeFalse
+    }
+}
+
 Describe 'Blacklist' {
+    It 'says what -Startup never turns off, in both languages' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'blacklist.md'
+            foreach ($term in '-Startup', 'catalog/startup/rules.json', 'StartupApproved', 'winget uninstall', 'Click-to-Run', 'unverified', 'Manual') {
+                $text.Contains($term) | Should -BeTrue -Because "$lang $term"
+            }
+        }
+    }
+
+    It 'says in both languages that gaming offers the review of what starts with Windows' {
+        foreach ($lang in 'es', 'en') {
+            $text = Get-DocText $lang 'profiles.md'
+            foreach ($term in 'offersStartup', '-Startup -Disable') { $text.Contains($term) | Should -BeTrue -Because "$lang $term" }
+        }
+    }
+
     It 'explains the cases of the design and of the research in both languages' {
         $terms = @('Defender', 'SmartScreen', 'Windows Update', 'WinRE', '/ResetBase', 'Spectre', 'PagingFiles', 'hosts',
             'SvcHostSplitThresholdInKB', 'NetworkThrottlingIndex', 'HPET', 'SharedAccess', 'OneDrive', 'CBS', 'WerSvc', 'Spooler')
@@ -44,7 +72,8 @@ Describe 'Virtual machine checklist' {
     It 'covers what Windows Sandbox cannot, in both languages' {
         foreach ($lang in 'es', 'en') {
             $text = Get-DocText $lang 'vm-checklist.md'
-            foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md') {
+            foreach ($term in 'Start-E2E.ps1', 'install.ps1', 'winget', 'apps.onedrive', 'onedrive-known-folders', 'Ctrl+C', '-Measure -IdleSeconds 120', '-Undo last', 'measuring.md',
+                '-Startup -Disable', 'StartupApproved', 'winget show --id', 'work-app', 'not-present', 'SysWOW64', 'needs-admin', 'skill-checklist.md') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }
@@ -58,7 +87,7 @@ Describe 'Skill checklist' {
             foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
                 '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
                 'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl', "-Status -Reapply -Include '<ids>'", '-Status -Reapply -WhatIf -Json', 'run_in_background', 'needs-admin',
-                'high-risk-not-requested') {
+                'high-risk-not-requested', '-Startup -Json', "-Startup -Disable '<ids>' -WhatIf -Json", 'work-app', 'winget uninstall') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }

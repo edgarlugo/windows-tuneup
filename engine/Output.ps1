@@ -58,7 +58,7 @@ function Write-TuneupPlanReport {
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][string[]]$Warnings = @(),
         [AllowEmptyCollection()][object[]]$Preflight = @(),
-        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles',
+        [ValidateSet('profiles', 'reapply', 'startup')][string]$Source = 'profiles',
         [switch]$Json,
         # The caller says it with its own line (the menu, when it stops a plan that needs administrator).
         [switch]$NoAdminHint
@@ -101,7 +101,7 @@ function New-TuneupApplyReport {
         [Parameter(Mandatory)][string]$RestorePoint,
         [Parameter(Mandatory)]$Environment,
         [AllowEmptyCollection()][object[]]$Preflight = @(),
-        [ValidateSet('profiles', 'reapply')][string]$Source = 'profiles'
+        [ValidateSet('profiles', 'reapply', 'startup')][string]$Source = 'profiles'
     )
     # A tweak left out because its backup could not be written was not done: it is counted apart, and
     # so are the tweaks left out because the run was stopped with Ctrl+C. A tweak that refused to
@@ -147,7 +147,8 @@ function Copy-TuneupObject {
 
 # Writes result.json, with the profile folder and the account name hidden (Hide-TuneupPersonalData)
 # field by field, only where they can appear: the run folder, the messages of the preflight and the
-# error and detail of each result. Ids, statuses, reasons and titles are written as they are: -Status
+# error and detail of each result (and the title of a startup entry, its name). Ids, statuses, reasons and
+# the other titles are written as they are: -Status
 # reads the ids of this file. The file is meant to be read and shared, and the run folder it names is
 # under the profile of the account. Fails when it cannot be written.
 function Write-TuneupRunResult {
@@ -164,6 +165,8 @@ function Write-TuneupRunResult {
         $change.results = @(foreach ($result in @($Report.results | Where-Object { $null -ne $_ })) {
             $fields = @{}
             foreach ($name in 'error', 'detail') { if ($result.PSObject.Properties[$name]) { $fields[$name] = & $hide $result.$name } }
+            # The title of a startup entry is its name, which can carry the SID or a profile folder.
+            if ((Test-TuneupStartupId -Id ([string]$result.id)) -and $result.PSObject.Properties['title']) { $fields.title = & $hide $result.title }
             Copy-TuneupObject -Object $result -Change $fields
         })
     }

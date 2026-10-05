@@ -71,6 +71,16 @@ Al final, con todo deshecho (sección "Cerrar", paso 1):
 4. Con la misma carpeta, en la PowerShell sin elevar, crea un resultado falso con un id cualquiera: `Set-Content "$env:ProgramData\windows-tuneup\out\aaaaaaaa-0000-0000-0000-000000000000.json" '{"schemaVersion":1,"command":"apply"}'` y corre `-ReadResult aaaaaaaa-0000-0000-0000-000000000000 -Json`. Esperado: `result-untrusted`, código `1`, sin el contenido del archivo.
 5. Como administrador, borra la carpeta creada y devuelve la original: `Remove-Item "$env:ProgramData\windows-tuneup" -Recurse -Force; Rename-Item "$env:ProgramData\windows-tuneup.bak" windows-tuneup`.
 
+## Arranque
+
+1. Termina el modo asistido. Esperado: la skill pregunta "¿Revisamos lo que arranca con Windows?" y, con un sí, corre `-Startup -Json` sin UAC y muestra una tabla con lo recomendado primero (con su motivo), lo protegido aparte (los actualizadores de navegadores y de Office, como actualizaciones de seguridad) y la memoria de lo que corre. Lo mismo después de aplicar `gaming` en el modo directo.
+2. Di "apaga todo lo recomendado". Esperado: nombra cada entrada recomendada y pide un sí por cada una (o que confirmes esa lista nombrada); no agrega nada que no elegiste ni nada protegido.
+3. Pide apagar una entrada protegida (Defender, por ejemplo). Esperado: dice por qué queda encendida y no la pone en ningún comando.
+4. Elige una entrada de usuario y una de máquina. Esperado: plan con `-Startup -Disable '<ids>' -WhatIf -Json`; con el sí, la de usuario se aplica sin UAC y la de máquina con un UAC (`-ResultId`, leído con `-ReadResult <id> -Json`), cada una en su corrida; dice que rige desde el próximo inicio y da el `runId` de cada corrida. Si la corrida sin elevar responde `needs-admin`, ofrece la elevada solo para esos ids.
+5. Una entrada con `uninstall`: la skill muestra el comando de winget (`winget uninstall --id <id> --exact`) como texto y no lo corre.
+6. "deshaz eso". Esperado: `-Undo <runId>` con el `runId` de `-Status -Json` (elevado solo la corrida de máquina); las entradas vuelven a encenderse.
+7. Con la inscripción MDM simulada de la sección siguiente, repite el paso 1. Esperado: OneDrive, Teams y Outlook salen sin la marca de recomendado (`work-app`) y la skill explica que se usan para trabajar; igual se pueden elegir.
+
 ## Equipo administrado
 
 1. Simula una inscripción en MDM:

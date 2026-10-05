@@ -120,7 +120,7 @@ Describe 'build/package.ps1' {
         $names = @($entries | ForEach-Object { $_.Substring($Top.Length + 1) })
         foreach ($expected in 'tuneup.ps1', 'README.md', 'LICENSE', 'engine/Tuneup.psm1', 'engine/Commands.ps1', 'engine/Menu.ps1',
             'engine/handlers/Registry.ps1', 'i18n/es.json', 'i18n/en.json', 'catalog/apps.json', 'profiles/lite.json',
-            'actions/onedrive.ps1', 'docs/es/profiles.md', 'docs/en/catalog.md', 'docs/json-contract.md') {
+            'actions/onedrive.ps1', 'docs/es/profiles.md', 'docs/en/catalog.md', 'docs/json-contract.md', 'catalog/startup/rules.json') {
             $names | Should -Contain $expected
         }
         foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/', 'plugins/', '.claude-plugin/') {

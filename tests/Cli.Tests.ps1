@@ -144,6 +144,43 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
         (ConvertFrom-PureJson $result.Output).message | Should -Be 'Invalid parameter combination: -List -Profile'
     }
 
+    It 'lists what starts with Windows as a startup document' {
+        $result = Invoke-Tuneup @('-Startup', '-Json')
+        $result.ExitCode | Should -Be 0 -Because $result.Output
+        $json = ConvertFrom-PureJson $result.Output
+        $json.command | Should -Be 'startup'
+        # What the runner has is not checked: only the shape of the document.
+        $json.PSObject.Properties.Name | Should -Contain 'entries'
+        $json.summary.total | Should -Be @($json.entries).Count
+        foreach ($entry in @($json.entries)) {
+            $entry.id | Should -MatchExactly '^startup\.[a-z0-9-]+\.[a-z0-9-]+$'
+            $entry.PSObject.Properties.Name | Should -Not -Contain 'target'
+        }
+        Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
+    It 'refuses to turn off ids that are not in the list, naming each one, and changes nothing' {
+        $result = Invoke-Tuneup @('-Startup', '-Disable', 'startup.run-user.nothing-0000000000000000,startup.run-user.other-1111111111111111', '-Yes', '-Json')
+        $result.ExitCode | Should -Be 1
+        # Unknown, or (on a runner elevated without a desktop session) of another account: either way named and refused.
+        $message = (ConvertFrom-PureJson $result.Output).message
+        $message | Should -Match 'startup\.run-user\.nothing-00000000'
+        $message | Should -Match 'startup\.run-user\.other-11111111'
+        Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
+    It 'rejects <Expected>, before reading anything' -TestCases @(
+        @{ Arguments = @('-Disable', 'startup.run-user.x-0000000000000000', '-Json'); Expected = 'Invalid parameter combination: -Disable (-Startup)' }
+        @{ Arguments = @('-Startup', '-Yes', '-Json'); Expected = 'Invalid parameter combination: -Startup -Yes' }
+        @{ Arguments = @('-Startup', '-List', '-Json'); Expected = 'Invalid parameter combination: -List -Startup' }
+        @{ Arguments = @('-Startup', '-Disable', 'startup.run-user.x-0000000000000000', '-Profile', 'extra', '-Json'); Expected = 'Invalid parameter combination: -Startup -Profile' }
+    ) {
+        param($Arguments, $Expected)
+        $result = Invoke-Tuneup $Arguments
+        $result.ExitCode | Should -Be 1
+        (ConvertFrom-PureJson $result.Output).message | Should -Be $Expected
+    }
+
     It 'also writes the JSON document to out\<id>.json with -ResultId' {
         $id = [guid]::NewGuid().ToString()
         $result = Invoke-Tuneup @('-Status', '-Json', '-ResultId', $id)

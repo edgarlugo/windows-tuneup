@@ -2,7 +2,7 @@
 .SYNOPSIS
     Builds the files of a release in -OutputPath.
 .DESCRIPTION
-    windows-tuneup-<version>.zip holds what runs (tuneup.ps1, engine, i18n, catalog, profiles,
+    windows-tuneup-<version>.zip holds what runs (tuneup.ps1, engine, i18n, catalog with the startup rules, profiles,
     actions) and what people read (docs/es, docs/en, docs/json-contract.md, README.md, LICENSE; the
     README links to them) under one folder,
     windows-tuneup-<version>. In a git checkout only tracked files go in (git ls-files -z, read as
@@ -33,7 +33,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid version '$Version': e
 $patterns = @(
     '^tuneup\.ps1$', '^README\.md$', '^LICENSE$',
     '^engine/[^/]+\.(ps1|psm1)$', '^engine/handlers/[^/]+\.ps1$',
-    '^i18n/[^/]+\.json$', '^catalog/[^/]+\.json$', '^profiles/[^/]+\.json$', '^actions/[^/]+\.ps1$',
+    '^i18n/[^/]+\.json$', '^catalog/[^/]+\.json$', '^catalog/startup/[^/]+\.json$', '^profiles/[^/]+\.json$', '^actions/[^/]+\.ps1$',
     '^docs/(es|en)/[^/]+\.md$', '^docs/json-contract\.md$'
 )
 # git runs as a process of its own: its output is read as UTF-8 (PowerShell would decode it with the code

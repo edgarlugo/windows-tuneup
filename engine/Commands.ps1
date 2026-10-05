@@ -120,13 +120,19 @@ function Invoke-TuneupReapply {
     $missing = @($drifted | Where-Object { -not $known.ContainsKey($_) })
     if ($missing.Count) {
         Invoke-TuneupContextStep -Context $Context -Step {
-            foreach ($id in $missing) { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+            foreach ($id in $missing) {
+                # A startup entry is never in the catalog: it is turned off again from what starts now
+                # (-Startup -Disable), which reads the entry again.
+                if (Test-TuneupStartupId -Id $id) { Write-Warning (Get-TuneupText -Key 'reapply.startupEntry' -Format $id) }
+                else { Write-Warning "Tweak $id was reverted but is no longer in the catalog: undo the run that applied it to restore it" }
+            }
         }
     }
     $ids = @($drifted | Where-Object { $known.ContainsKey($_) })
     $confirmed = @()
     if ($named.Count) {
-        $unknown = @($named | Where-Object { -not $known.ContainsKey($_) })
+        # A startup entry named here is not unknown: it is left out with its own warning.
+        $unknown = @($named | Where-Object { -not $known.ContainsKey($_) -and -not (Test-TuneupStartupId -Id $_) })
         if ($unknown.Count) {
             Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.unknownTweak' -Format ($unknown -join ', '))
             return
@@ -135,7 +141,8 @@ function Invoke-TuneupReapply {
         # those may have been reverted, and the warning says so.
         $notDriftedKey = $(if ((Get-TuneupContextEnvironment -Context $Context).IsAdmin) { 'reapply.notReverted' } else { 'reapply.notRevertedUnverified' })
         Invoke-TuneupContextStep -Context $Context -Step {
-            foreach ($id in @($named | Where-Object { $ids -notcontains $_ })) { Write-Warning (Get-TuneupText -Key $notDriftedKey -Format $id) }
+            # A startup entry that came back already has its own warning (reapply.startupEntry).
+            foreach ($id in @($named | Where-Object { $ids -notcontains $_ -and $missing -notcontains $_ })) { Write-Warning (Get-TuneupText -Key $notDriftedKey -Format $id) }
         }
         $ids = @($ids | Where-Object { $named -contains $_ })
         $confirmed = $ids
@@ -268,6 +275,148 @@ function Invoke-TuneupSuggestCommand {
     $Context.ExitCode = 0
 }
 
+# -Startup (design, section 15): what starts with Windows or runs in the background, read only. With
+# -Disable, the entries named by their id are turned off as a run of the tool: each one becomes a tweak of a
+# type that exists (StartupTweak.ps1) and goes through the same plan, confirmation, journal, restore point
+# and report as a profile (source startup), so -Status and -Undo work as for any run. Nothing is
+# uninstalled or deleted. The entries are read again here, never taken from an earlier list. An id that is
+# not in the list now, or that names an entry that stays on, stops everything before any change; an entry
+# that is already off is left out of the plan as already applied.
+function Invoke-TuneupStartupCommand {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [AllowEmptyCollection()][string[]]$Disable = @(),
+        [switch]$PlanOnly,
+        [switch]$Yes
+    )
+    # A 32-bit PowerShell on a 64-bit Windows sees another HKLM\SOFTWARE and another System32: the list
+    # and what it would turn off would be wrong, so nothing is read.
+    if (Test-TuneupWow64Process) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupWow64')
+        return
+    }
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    # Ids are lowercase; one written in capitals is the same id (and its scope is read from it below).
+    $ids = @($Disable | Where-Object { $_ } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+    if ($ids.Count) {
+        $unsupported = Get-TuneupUnsupportedMessage -Context $Context
+        if ($unsupported) {
+            Write-TuneupCommandError -Context $Context -Message $unsupported
+            return
+        }
+        # What is not an id of -Startup can never be in the list: refused before anything is read.
+        $malformed = @($ids | Where-Object { -not (Test-TuneupStartupId -Id $_) })
+        if ($malformed.Count) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($malformed -join ', '))
+            return
+        }
+        # Elevated with another administrator's password, HKCU is that administrator's: the entries of the
+        # account at this desktop cannot even be seen from here.
+        if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false) {
+            $userIds = @($ids | Where-Object { (Get-TuneupStartupIdScope -Id $_) -eq 'user' })
+            if ($userIds.Count) {
+                Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupSessionUser' -Format ($userIds -join ', ')) -Reason 'session-user'
+                return
+            }
+        }
+    }
+    $warningsBefore = $Context.Warnings.Count
+    # On a work PC (managed, or joined to Entra ID) the apps of work are not recommended.
+    $workArguments = @{ Environment = $environment }
+    $workPc = [bool](@(Invoke-TuneupContextStep -Context $Context -Step { Test-TuneupStartupWorkPc @workArguments }) | Select-Object -Last 1)
+    $entryArguments = @{ Rules = Import-TuneupStartupRuleSet; WorkPc = $workPc }
+    $entries = @(Invoke-TuneupContextStep -Context $Context -Step { Get-TuneupStartupEntry @entryArguments } | Where-Object { $null -ne $_ })
+    if (-not $ids.Count) {
+        if (-not $environment.IsAdmin) {
+            Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'startup.unelevatedNote') }
+        }
+        # Elevated with another administrator's password: what is of the user (Run of the user, its startup
+        # folder, Store apps) is that administrator's, not the one of the account at this desktop.
+        if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false) {
+            Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'startup.otherAccountNote') }
+        }
+        $document = Get-TuneupStartupDocument -Entry $entries -IsAdmin ([bool]$environment.IsAdmin) -WorkPc $workPc
+        $Context.Result = $document
+        Write-TuneupStartupReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        $Context.ExitCode = 0
+        return
+    }
+    # An id that more than one entry has could name the wrong one: none of them is turned off.
+    Invoke-TuneupContextStep -Context $Context -Step { Set-TuneupStartupAmbiguity -Entry $entries }
+    # What reading the list warned about other entries is not part of this run (its document and
+    # transcript): only the warnings that name a chosen entry stay.
+    $chosenTexts = @($entries | Where-Object { $ids -contains [string]$_.id } | ForEach-Object { [string]$_.id; [string]$_.name; [string]$_.key; [string]$_.path } | Where-Object { $_ })
+    for ($index = $Context.Warnings.Count - 1; $index -ge $warningsBefore; $index--) {
+        $warning = $Context.Warnings[$index]
+        if (-not @($chosenTexts | Where-Object { $warning.IndexOf($_, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }).Count) { $Context.Warnings.RemoveAt($index) }
+    }
+    $byId = @{}
+    $names = @{}
+    foreach ($entry in $entries) {
+        $id = [string]$entry.id
+        if (-not $byId.ContainsKey($id)) {
+            $byId[$id] = $entry
+            $names[$id] = New-Object System.Collections.Generic.List[string]
+        }
+        $names[$id].Add([string]$entry.name)
+    }
+    $unknown = @($ids | Where-Object { -not $byId.ContainsKey($_) })
+    if ($unknown.Count) {
+        # Without administrator Windows hides some scheduled tasks: an id of the machine may be one of them.
+        $hint = @(if (-not $environment.IsAdmin -and @($unknown | Where-Object { (Get-TuneupStartupIdScope -Id $_) -eq 'machine' }).Count) { Get-TuneupText -Key 'startup.unelevatedNote' })
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupUnknown' -Format ($unknown -join ', ')) -Details $hint
+        return
+    }
+    $chosen = @($ids | ForEach-Object { $byId[$_] })
+    # Protected, run once, not read completely, or a name the task handler cannot look up exactly: one line
+    # for each, with why.
+    $fixed = @($chosen | Where-Object { Get-TuneupStartupFixedReason -Entry $_ })
+    if ($fixed.Count) {
+        $details = @($fixed | ForEach-Object { Get-TuneupText -Key 'startup.refusedLine' -Format $_.id, (Format-TuneupStartupText -Text ($names[[string]$_.id] -join ', ')), (Get-TuneupStartupFixedText -Entry $_) })
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupFixed') -Details $details
+        return
+    }
+    $tweaks = @($chosen | ForEach-Object { ConvertTo-TuneupStartupTweak -Entry $_ })
+    $tweakIds = [string[]]@($tweaks | ForEach-Object { [string]$_.id })
+    # Named one by one, like -Include: no base profile, and the plan still checks each state (an entry that
+    # is already off is left out as already applied) and the account of a user entry.
+    $planArguments = @{
+        Catalog     = $tweaks
+        Profiles    = @()
+        Include     = $tweakIds
+        NoBase      = $true
+        Environment = $environment
+        TestState   = { param($tweak) Test-TuneupState -Tweak $tweak }
+    }
+    $plan = @(Invoke-TuneupContextStep -Context $Context -Step { New-TuneupPlan @planArguments })
+    # An entry of the machine needs an elevated process; the plan alone (-WhatIf) does not.
+    $machineIds = @($plan | Where-Object { $_.Action -eq 'apply' -and (Test-TuneupTweakNeedsAdmin -Tweak $_.Tweak) } | ForEach-Object { [string]$_.Id })
+    if ($machineIds.Count -and -not $PlanOnly -and -not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.startupNeedsAdmin' -Format ($machineIds -join ', ')) -Reason $script:NeedsAdminError
+        return
+    }
+    $request = New-TuneupApplyRequest -Source 'startup' -Include $tweakIds
+    Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+    # Only after something was applied (then the report is the result).
+    if (-not $Context.Json -and $null -ne $Context.Result -and $Context.ExitCode -ne 1) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'startup.nextStart')
+    }
+}
+
+# True when a profile named by id or alias offers the review of what starts with Windows (offersStartup:
+# gaming). A name that is not a profile offers nothing: the plan already said so.
+function Test-TuneupStartupOffered {
+    param([Parameter(Mandatory)]$Definition, [AllowEmptyCollection()][string[]]$ProfileIds = @())
+    foreach ($name in @($ProfileIds | Where-Object { $_ })) {
+        $needle = $name.Trim().ToLowerInvariant()
+        $profileData = @($Definition.Profiles | Where-Object { $_.id -eq $needle -or @($_.aliases) -contains $needle }) | Select-Object -First 1
+        if ($null -eq $profileData) { continue }
+        $offer = $profileData.PSObject.Properties['offersStartup']
+        if ($null -ne $offer -and $offer.Value -eq $true) { return $true }
+    }
+    $false
+}
+
 # -ReadResult: the document that a run with -ResultId saved, exactly as it was written, for a caller that
 # started the tool elevated (the Claude skill) and reads the result unelevated through the tool instead
 # of opening the file itself: the tool checks that only an administrator could have written it. An
@@ -373,13 +522,17 @@ function Invoke-TuneupApplyCommand {
     $plan = @(New-TuneupContextPlan -Context $Context -Definition $definition -ProfileIds $ProfileIds -Include $Include -Exclude $Exclude)
     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $ProfileIds -Include $Include -Exclude $Exclude
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request -PlanOnly:$PlanOnly -Yes:$Yes
+    # For people only: the JSON says it in profiles[].offersStartup of -List.
+    if (-not $Context.Json -and $Context.ExitCode -ne 1 -and (Test-TuneupStartupOffered -Definition $definition -ProfileIds $ProfileIds)) {
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'startup.offer')
+    }
 }
 
 # What was asked for, for the transcript and the JSON report: profiles and the -Include and -Exclude
 # lists, or a re-apply of what drifted.
 function New-TuneupApplyRequest {
     param(
-        [Parameter(Mandatory)][ValidateSet('profiles', 'reapply')][string]$Source,
+        [Parameter(Mandatory)][ValidateSet('profiles', 'reapply', 'startup')][string]$Source,
         [AllowEmptyCollection()][string[]]$Profiles = @(),
         [AllowEmptyCollection()][string[]]$Include = @(),
         [AllowEmptyCollection()][string[]]$Exclude = @()
@@ -583,11 +736,14 @@ function Invoke-TuneupCli {
         [int]$IdleSeconds = 0,
         [switch]$List,
         [switch]$Suggest,
+        [switch]$Startup,
+        [string[]]$Disable = @(),
         [AllowEmptyString()][string]$ReadResult
     )
     $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
     $Include = @(Get-TuneupCleanList ($Include -split ','))
     $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
+    $Disable = @(Get-TuneupCleanList ($Disable -split ','))
 
     # A parameter counts as given when it was bound and carries a value (a switch only when it is on).
     $present = @()
@@ -607,6 +763,8 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('IdleSeconds')) { $present += 'IdleSeconds' }
     if ($PSBoundParameters.ContainsKey('List') -and $List) { $present += 'List' }
     if ($PSBoundParameters.ContainsKey('Suggest') -and $Suggest) { $present += 'Suggest' }
+    if ($PSBoundParameters.ContainsKey('Startup') -and $Startup) { $present += 'Startup' }
+    if ($PSBoundParameters.ContainsKey('Disable') -and $Disable.Count) { $present += 'Disable' }
     if ($PSBoundParameters.ContainsKey('ReadResult')) { $present += 'ReadResult' }
     $conflict = Get-TuneupArgumentConflict -Present $present
     if ($conflict) {
@@ -663,6 +821,7 @@ function Invoke-TuneupCli {
         return
     }
     if ($List) { Invoke-TuneupListCommand -Context $Context; return }
+    if ($Startup) { Invoke-TuneupStartupCommand -Context $Context -Disable $Disable -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes -Include $Include; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }

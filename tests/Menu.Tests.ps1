@@ -23,8 +23,10 @@ BeforeAll {
         (New-TestTweak -Id 'menu.high' -Risk 'high' -Set ([pscustomobject]@{ path = $Key; name = 'High'; kind = 'DWord'; value = 1 }))
     )
     [System.IO.File]::WriteAllText((Join-Path $catalogDir 'menu.json'), (ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = $extra }) -Depth 10))
-    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'asking.json'),
-        (ConvertTo-Json -InputObject (New-TestProfile -Id 'asking' -Include @('menu.ask')) -Depth 10))
+    # asking also offers the review of what starts with Windows.
+    $asking = New-TestProfile -Id 'asking' -Include @('menu.ask')
+    $asking | Add-Member -NotePropertyName offersStartup -NotePropertyValue $true
+    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'asking.json'), (ConvertTo-Json -InputObject $asking -Depth 10))
     [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zadmin.json'),
         (ConvertTo-Json -InputObject (New-TestProfile -Id 'zadmin' -Include @('menu.askadmin')) -Depth 10))
     [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zmany.json'),
@@ -503,5 +505,211 @@ Describe 'Get-TuneupMenuBlockMessage' {
     It 'lets the menu run in an interactive PowerShell, whatever comes after the script' {
         Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-NoProfile', '-File', 'tuneup.ps1') | Should -BeNullOrEmpty
         Get-TuneupMenuBlockMessage -CommandLineArgument @('powershell.exe', '-File', 'tuneup.ps1', '-NonInteractive') | Should -BeNullOrEmpty
+    }
+}
+
+
+Describe 'Invoke-TuneupMenu: what starts with Windows' {
+    BeforeAll {
+        $script:Run = "$Key\Run"
+        $script:Approved = "$Key\StartupApproved\Run"
+        $script:MachineApproved = 'HKLM:\SOFTWARE\windows-tuneup-test\StartupApproved'
+        # Whether an entry is still there is read from the Run key of the test, and what a tweak may write is
+        # pinned to a copy of StartupApproved under the test key: never the ones of the account.
+        InModuleScope Tuneup -Parameters @{ Run = $Run; Key = $Key; Machine = $MachineApproved } {
+            param($Run, $Key, $Machine)
+            $script:StartupApprovedRoot = @{ user = "$Key\StartupApproved"; machine = $Machine }
+            $script:StoreTaskRoot = "$Key\SystemAppData"
+            $script:StartupRunKeys = @(
+                [pscustomobject]@{ Source = 'run-user'; Path = $Run }
+                [pscustomobject]@{ Source = 'run-machine'; Path = "$Run-machine" }
+            )
+        }
+        # A Run entry of the user (or, with -Machine, of every user) that can be turned off.
+        function New-MenuStartupEntry([string]$Name, [switch]$Machine) {
+            $source = $(if ($Machine) { 'run-machine' } else { 'run-user' })
+            $approved = $(if ($Machine) { "$MachineApproved\Run" } else { $Approved })
+            $entry = New-TuneupStartupEntry -Source $source -Key $Name -Name $Name -Command "`"C:\Programs\$Name\$Name.exe`"" -Path "C:\Programs\$Name\$Name.exe" `
+                -Target @{ ApprovedPath = $approved; ApprovedName = $Name; ApprovedValue = $null }
+            $entry.canDisable = $true
+            $entry
+        }
+        function Get-MenuApproved([string]$Name) {
+            if (-not (Test-Path -LiteralPath $Approved)) { return $null }
+            $item = Get-Item -LiteralPath $Approved
+            try { , [byte[]]$item.GetValue($Name) } finally { $item.Close() }
+        }
+    }
+
+    BeforeEach {
+        $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+        New-Item -Path $Run -Force | Out-Null
+        foreach ($name in 'Steam', 'Dropbox') {
+            New-ItemProperty -LiteralPath $Run -Name $name -Value "`"C:\Programs\$name\$name.exe`"" -PropertyType String -Force | Out-Null
+        }
+        $dropbox = New-MenuStartupEntry 'Dropbox'
+        $steam = New-MenuStartupEntry 'Steam'
+        $steam.recommended = $true
+        $steam.recommendedReason = 'game-launcher'
+        $steam.publisher = 'Valve Corp.'
+        $tray = New-MenuStartupEntry 'Tray' -Machine
+        $vpn = New-MenuStartupEntry 'GlobalProtect'
+        $vpn.canDisable = $false
+        $vpn.protected = 'vpn'
+        $once = New-TuneupStartupEntry -Source 'runonce-user' -Key 'Setup' -Name 'Setup'
+        # Listed before the recommended one on purpose: the menu puts the recommended first.
+        $script:StartupEntries = @($dropbox, $tray, $steam, $vpn, $once)
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry { $script:StartupEntries }
+        Mock -ModuleName Tuneup Get-TuneupPreflight { }
+        Mock -ModuleName Tuneup Test-TuneupEntraJoined { $false }
+        Mock -ModuleName Tuneup Test-TuneupWow64Process { $false }
+        Mock -ModuleName Tuneup Get-TuneupSystemDriveFreeGB { 50 }
+    }
+
+    AfterAll {
+        if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+    }
+
+    It 'offers it in the main menu' {
+        $context = New-MenuContext @('0')
+        Invoke-Menu $context
+        Get-Output $context | Should -Match ' 6\. What starts with Windows: see it and turn off what you choose'
+    }
+
+    It 'turns off only what was picked, the recommended first and nothing picked beforehand, after the plan and a yes' {
+        $context = New-MenuContext @('6', '1', '', 'y', '', '0')
+        Invoke-Menu $context
+        $context.ExitCode | Should -Be 0
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.header')))
+        # Each line says who signed it and where it starts from, so entries with the same name can be told apart.
+        $text | Should -Match '\[ \]  1\. Steam \(Valve Corp\.\) - at sign-in \(Run of the user\) \[recommended: game launcher\]'
+        $text | Should -Match '\[ \]  2\. Dropbox - at sign-in \(Run of the user\)\r?\n'
+        $text | Should -Match '\[ \]  3\. Tray - at sign-in, for every user \(Run\) \(administrator\)'
+        # What stays on is in the table, never among what can be picked.
+        $text | Should -Not -Match '\d\. GlobalProtect'
+        $text | Should -Not -Match '\d\. Setup'
+        (Get-MenuApproved 'Steam')[0] | Should -Be 3
+        Get-MenuApproved 'Dropbox' | Should -BeNullOrEmpty
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'startup.nextStart')))
+        $result = Get-Content -LiteralPath (Join-Path @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName 'result.json') -Raw | ConvertFrom-Json
+        $result.source | Should -Be 'startup'
+        @($result.results | ForEach-Object { $_.id }) -join ',' | Should -BeExactly $StartupEntries[2].id
+    }
+
+    It 'turns off the entry that was shown under the number, also when another entry has the same name' {
+        # Two entries named alike: the number decides, never the name.
+        $script:StartupEntries[0].name = 'Steam'
+        $context = New-MenuContext @('6', '2', '', 'y', '', '0')
+        Invoke-Menu $context
+        (Get-MenuApproved 'Dropbox')[0] | Should -Be 3
+        Get-MenuApproved 'Steam' | Should -BeNullOrEmpty
+    }
+
+    It 'changes nothing when the plan is declined' {
+        $context = New-MenuContext @('6', '1', '', 'n', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Test-Path -LiteralPath "$Key\StartupApproved" | Should -BeFalse
+    }
+
+    It 'goes back without changing anything when nothing is picked, or with 0' {
+        foreach ($answers in @(, @('6', '', '', '0')) + @(, @('6', '1', '0', '', '0'))) {
+            $context = New-MenuContext $answers
+            Invoke-Menu $context
+            $context.Io.Pending.Count | Should -Be 0
+            Test-Path -LiteralPath "$Key\StartupApproved" | Should -BeFalse
+        }
+    }
+
+    It 'says that an entry of the machine needs administrator, and changes nothing, not even what else was picked' {
+        $context = New-MenuContext @('6', '1,3', '', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.needsAdmin')))
+        Test-Path -LiteralPath "$Key\StartupApproved" | Should -BeFalse
+        Test-Path -LiteralPath $MachineApproved | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $Root 'runs') | Should -BeFalse
+    }
+
+    It 'never offers entries that share an id, even when the list gives them as possible' {
+        $twin = New-MenuStartupEntry 'steam'
+        $script:StartupEntries = @($StartupEntries[2], $twin)
+        $context = New-MenuContext @('6', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.none')))
+    }
+
+    It 'says when nothing can be turned off' {
+        $script:StartupEntries = @($StartupEntries | Where-Object { -not $_.canDisable })
+        $context = New-MenuContext @('6', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.none')))
+    }
+
+    It 'does not offer the entries of the user when elevated as another account, and says why' {
+        $context = New-MenuContext @('6', '', '', '0') -Admin
+        $context.Environment = New-TestEnvironment -IsAdmin $true -IsSessionUser $false
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match '\[ \]  1\. Tray - at sign-in, for every user \(Run\)'
+        $text | Should -Not -Match '\d\. (Steam|Dropbox)'
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.otherAccount')))
+    }
+
+    It 'leaves startup entries out of what the status offers to apply again, and points to option 6 for them' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Invoke-Menu (New-MenuContext @('6', '1', '', 'y', '', '0'))
+        # Steam turned itself on again.
+        New-ItemProperty -LiteralPath $Approved -Name 'Steam' -Value ([byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) -PropertyType Binary -Force | Out-Null
+        $context = New-MenuContext @('2', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match 'Tweaks reverted by Windows: 1\.'
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.status.startupDrift' -Format 1)))
+        # Only the startup entry came back: nothing to apply again here, only the pointer to option 6.
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 1
+        $context = New-MenuContext @('2', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Not -Match 'Tweaks reverted by Windows'
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.status.startupDrift' -Format 1)))
+    }
+
+    It 'offers the review after Optimize with option 6, not with the command line' {
+        $context = New-MenuContext @('1', '2', '', 'n', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $context.Io.Output | Should -Contain (Get-TuneupText -Key 'menu.startup.offer')
+        $context.Io.Output | Should -Not -Contain (Get-TuneupText -Key 'startup.offer')
+    }
+
+    It 'starts each option without the warnings of the one before' {
+        Mock -ModuleName Tuneup Get-TuneupStatus { Write-Warning 'EarlierThing went wrong' }
+        $context = New-MenuContext @('2', '', '6', '1', '', 'y', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $runDir = @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'transcript.log')) | Should -Not -Match 'EarlierThing'
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'result.json')) | Should -Not -Match 'EarlierThing'
+    }
+
+    It 'keeps in the run only the warnings about what was picked' {
+        Mock -ModuleName Tuneup Get-TuneupStartupEntry {
+            Write-Warning 'Could not read the startup item PrivateThing in the startup folder, so it is left out of the list: denied'
+            $script:StartupEntries
+        }
+        $context = New-MenuContext @('6', '1', '', 'y', '', '0')
+        Invoke-Menu $context
+        $runDir = @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'transcript.log')) | Should -Not -Match 'PrivateThing'
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'result.json')) | Should -Not -Match 'PrivateThing'
     }
 }

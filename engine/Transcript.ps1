@@ -26,7 +26,34 @@ function Hide-TuneupPersonalData {
     if ($name.Length -ge 3) {
         $Text = [regex]::Replace($Text, '(?<=[\\/])' + [regex]::Escape($name) + '(?=[\\/"''\s:;,)\]]|$)', '%USERNAME%', $ignoreCase)
     }
-    $Text
+    # The folder of any other account under the profiles folder (C:\Users\<name>); the shared ones stay.
+    $profiles = Get-TuneupProfilesFolder
+    if ($profiles) {
+        $separator = $(if ($JsonEscaped) { '\\\\' } else { '\\' })
+        $literal = [regex]::Escape($(if ($JsonEscaped) { $profiles.Replace('\', '\\') } else { $profiles }))
+        $shared = '(?!(?:Public|Default|Default User|All Users)(?:' + $separator + '|/|"|$))'
+        $Text = [regex]::Replace($Text, '(?<folder>' + $literal + $separator + ')' + $shared + '[^\\/"''\r\n]+', '${folder}%USERNAME%', $ignoreCase)
+    }
+    # The SID of an account of a person (S-1-5-21-..., or S-1-12-1-... of Entra ID); the SIDs of Windows
+    # accounts (S-1-5-18, S-1-5-32-545...) name nobody.
+    [regex]::Replace($Text, '\bS-1-(?:5-21|12-1)(?:-\d+)+', '%SID%', $ignoreCase)
+}
+
+# The folder that holds the profiles of the accounts (C:\Users), once per process: where Windows keeps it,
+# or the folder above the profile of this account.
+function Get-TuneupProfilesFolder {
+    if ($null -eq $script:ProfilesFolder) {
+        $folder = $null
+        try {
+            $value = (Get-Item -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList' -ErrorAction Stop).GetValue('ProfilesDirectory')
+            if ($value) { $folder = [Environment]::ExpandEnvironmentVariables([string]$value) }
+        } catch {
+            $folder = $null
+        }
+        if (-not $folder) { $folder = Split-Path ([Environment]::GetFolderPath('UserProfile')) -Parent }
+        $script:ProfilesFolder = $(if ($folder) { ([string]$folder).TrimEnd('\') } else { '' })
+    }
+    $script:ProfilesFolder
 }
 
 # The lines that a step writes to the host, captured instead of shown.

@@ -71,6 +71,16 @@ At the end, with everything undone ("Close", step 1):
 4. With the same folder, in the PowerShell that is not elevated, create a fake result with any id: `Set-Content "$env:ProgramData\windows-tuneup\out\aaaaaaaa-0000-0000-0000-000000000000.json" '{"schemaVersion":1,"command":"apply"}'` and run `-ReadResult aaaaaaaa-0000-0000-0000-000000000000 -Json`. Expected: `result-untrusted`, exit code `1`, without the content of the file.
 5. As administrator, delete the folder that was made and bring back the original: `Remove-Item "$env:ProgramData\windows-tuneup" -Recurse -Force; Rename-Item "$env:ProgramData\windows-tuneup.bak" windows-tuneup`.
 
+## Startup
+
+1. Finish the assisted mode. Expected: the skill asks "Do we review what starts with Windows?" and, with a yes, runs `-Startup -Json` without UAC and shows a table with what is recommended first (with its reason), what is protected apart (the updaters of browsers and of Office, as security updates) and the memory of what runs. The same after applying `gaming` in direct mode.
+2. Say "turn off everything recommended". Expected: it names each recommended entry and asks for a yes to each one (or for you to confirm that named list); it adds nothing you did not choose and nothing protected.
+3. Ask to turn off a protected entry (Defender, for example). Expected: it says why it stays on and puts it in no command.
+4. Choose one entry of the user and one of the machine. Expected: a plan with `-Startup -Disable '<ids>' -WhatIf -Json`; with the yes, the one of the user is applied without UAC and the one of the machine with one UAC prompt (`-ResultId`, read with `-ReadResult <id> -Json`), each in its own run; it says that it takes effect at the next start and gives the `runId` of each run. If the run without elevation answers `needs-admin`, it offers the elevated one for those ids only.
+5. An entry with `uninstall`: the skill shows the winget command (`winget uninstall --id <id> --exact`) as text and does not run it.
+6. "undo that". Expected: `-Undo <runId>` with the `runId` of `-Status -Json` (elevated only for the run of the machine); the entries are on again.
+7. With the MDM enrollment simulated in the next section, repeat step 1. Expected: OneDrive, Teams and Outlook come without the recommended mark (`work-app`) and the skill explains that they are used for work; they can still be chosen.
+
 ## Managed PC
 
 1. Fake an MDM enrollment:

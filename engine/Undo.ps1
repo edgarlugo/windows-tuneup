@@ -109,7 +109,7 @@ function Get-TuneupStatus {
     foreach ($id in @($latest.Keys)) {
         $item = $latest[$id]
         try {
-            if ((Test-TuneupHandlerReadNeedsAdmin -Tweak $item.tweak) -and -not (Test-TuneupAdmin)) {
+            if (((Test-TuneupHandlerReadNeedsAdmin -Tweak $item.tweak) -and -not (Test-TuneupAdmin)) -or (Test-TuneupStartupTweakHidden -Tweak $item.tweak)) {
                 $status = 'needs-admin'
             } else {
                 $state = Test-TuneupState -Tweak $item.tweak

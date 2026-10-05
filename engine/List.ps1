@@ -38,6 +38,7 @@ function Get-TuneupListDocument {
             description = Get-TuneupLocalizedText $profileData.description
             tweakCount  = $usable.Count
             needsAdmin  = (@($usable | Where-Object { Test-TuneupTweakNeedsAdmin -Tweak $_ }).Count -gt 0)
+            offersStartup = ($null -ne $profileData.PSObject.Properties['offersStartup'] -and $profileData.offersStartup -eq $true)
         }
     })
     $tweakViews = @(foreach ($tweak in $Definition.Catalog) {

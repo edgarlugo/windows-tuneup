@@ -18,6 +18,9 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'the list'; Present = @('List') }
         @{ Name = 'the suggestions'; Present = @('Suggest') }
         @{ Name = 'reading a result'; Present = @('ReadResult') }
+        @{ Name = 'what starts with Windows'; Present = @('Startup') }
+        @{ Name = 'turning startup entries off'; Present = @('Startup', 'Disable', 'Yes') }
+        @{ Name = 'the plan of turning them off'; Present = @('Startup', 'Disable', 'WhatIf') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -51,6 +54,17 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('ReadResult', 'Profile'); Expected = '-ReadResult -Profile' }
         @{ Present = @('ReadResult', 'Yes'); Expected = '-ReadResult -Yes' }
         @{ Present = @('ReadResult', 'WhatIf'); Expected = '-ReadResult -WhatIf' }
+        @{ Present = @('Disable'); Expected = '-Disable (-Startup)' }
+        @{ Present = @('Status', 'Disable'); Expected = '-Disable (-Startup)' }
+        @{ Present = @('Startup', 'Yes'); Expected = '-Startup -Yes' }
+        @{ Present = @('Startup', 'WhatIf'); Expected = '-Startup -WhatIf' }
+        @{ Present = @('Startup', 'List'); Expected = '-List -Startup' }
+        @{ Present = @('Startup', 'Suggest'); Expected = '-Suggest -Startup' }
+        @{ Present = @('Startup', 'ReadResult'); Expected = '-Startup -ReadResult' }
+        @{ Present = @('Startup', 'Profile'); Expected = '-Startup -Profile' }
+        @{ Present = @('Startup', 'Disable', 'Include', 'Yes'); Expected = '-Startup -Include' }
+        @{ Present = @('Startup', 'Disable', 'Exclude'); Expected = '-Startup -Exclude' }
+        @{ Present = @('Startup', 'Reapply'); Expected = '-Reapply (-Status)' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected
@@ -96,5 +110,27 @@ Describe 'Invoke-TuneupStepCollectingWarning' {
     It 'returns what the step returns, and lets an error go through' {
         @(Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { 1, 2, 3 }) -join ',' | Should -Be '1,2,3'
         { Invoke-TuneupStepCollectingWarning -Warnings $Collected -Step { throw 'boom' } } | Should -Throw 'boom'
+    }
+}
+
+Describe 'Forwarding the arguments from PowerShell 7 to Windows PowerShell' {
+    BeforeAll {
+        # tuneup.ps1 defines it before anything else runs; here it is taken from the script and defined alone.
+        $tokens = $null
+        $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '..\tuneup.ps1'), [ref]$tokens, [ref]$errors)
+        $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-TuneupRelaunchArgument' }, $true)
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+
+    It 'passes -Startup -Disable with every id in one comma-separated value, and nothing else' {
+        $bound = [ordered]@{ Startup = [switch]$true; Disable = [string[]]@('startup.run-user.a-0000000000000000', 'startup.task.b-1111111111111111'); Yes = [switch]$true; Json = [switch]$true; WhatIf = [switch]$false; Verbose = [switch]$true }
+        $arguments = @(Get-TuneupRelaunchArgument -Bound $bound -Rest @() -CommonParameter @('Verbose') -ScriptPath 'C:\t\tuneup.ps1')
+        $arguments -join ' ' | Should -BeExactly '-NoProfile -ExecutionPolicy Bypass -File C:\t\tuneup.ps1 -Startup -Disable startup.run-user.a-0000000000000000,startup.task.b-1111111111111111 -Yes -Json'
+    }
+
+    It 'keeps what could not be bound at the end, as it came' {
+        $arguments = @(Get-TuneupRelaunchArgument -Bound ([ordered]@{ Startup = [switch]$true }) -Rest @('-Disabel', 'x') -CommonParameter @() -ScriptPath 'C:\t\tuneup.ps1')
+        $arguments[-3..-1] -join ' ' | Should -BeExactly '-Startup -Disabel x'
     }
 }

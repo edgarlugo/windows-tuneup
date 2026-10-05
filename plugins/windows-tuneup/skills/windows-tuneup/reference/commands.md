@@ -6,10 +6,11 @@ Replace only what is written between `<` and `>`. Every id you put on a command 
 
 - A profile: an `id` of `profiles` in `-List -Json` (never an alias: say `privacy` for `privacidad`), matching `^[a-z]+$`.
 - A tweak: an `id` of `tweaks` or `incompatible` of `-List -Json` (for `-Undo -Tweak`, an `id` of that run in `items` of `-Status -Json`), matching `^[a-z]+(\.[a-z0-9-]+)+$`.
+- A startup entry: an `id` of `entries` of `-Startup -Json` whose `canDisable` is true, matching `^startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16}$`.
 - A run or a measurement: a `runId` of `-Status -Json`, or the `id` of a `measure` document, matching `^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$`.
 - A result id: the GUID you made in a call of its own ("Run elevated"), matching `^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
 
-The elevated snippet checks the result id and the form of `$toolArguments` again, and that `$toolArguments` names none of the options the skill never passes (`-ResultId` included: the snippet adds it), and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
+The elevated snippet checks the result id and the form of `$toolArguments` again (only the full names of the parameters of the elevated templates below, because PowerShell takes a prefix of a parameter name as that parameter; each id of `-Disable` against the form of a startup entry), and that `$toolArguments` names none of the options the skill never passes (`-ResultId` included: the snippet adds it), and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
 
 ## Paths
 
@@ -57,6 +58,9 @@ Put the arguments of the table in place of `-Suggest -Json -Lang en`, always wit
 | Re-apply when that plan has `requiresAdmin` false and no `needs-admin` item was added | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json` |
 | Measure | `-Measure -IdleSeconds 120 -Json`, or `-Measure -IdleSeconds 120 -Compare '<id>' -Json`; it waits two minutes ("Long runs") |
 | Measure and compare with the earlier one, id not in the conversation | `-Measure -IdleSeconds 120 -Compare last -Json`; `last` is the newest saved measurement, resolved before the new one is taken, so it is never the new one. Same rules as above (without elevation, "Long runs"). Report which one it compared with `comparison.againstId`. There is no way to list measurements and `last` is the only way to compare without an id: never look for the id in the state folders or in the installed docs |
+| What starts with Windows | `-Startup -Json` |
+| The plan to turn startup entries off | `-Startup -Disable '<ids>' -WhatIf -Json` |
+| Turn off the startup entries whose `needsAdmin` is false | `-Startup -Disable '<ids>' -Yes -Json`. An `error` with `reason` = `needs-admin`: an id is of the machine and nothing was turned off |
 | Undo a run (try this first) | `-Undo '<runId>' -Json`; one tweak with `-Tweak '<id>'`. The `runId` comes from `-Status -Json`, never `last`. An `error` with `reason` = `needs-admin`: run it elevated |
 | The result of an elevated run | `-ReadResult '<id>' -Json` (see "Read the result") |
 
@@ -76,7 +80,8 @@ Then, only after the user said yes to this UAC prompt, run this snippet with tha
 if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $id = '<result id>'
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
-if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-[A-Za-z]+|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$" -or $toolArguments -match '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath|ResultId)\b') { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool, or name an option the skill never passes; nothing ran.' }
+if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-(Profile|Include|Exclude|Yes|Json|Lang|Undo|Tweak|Status|Reapply|Health|Repair|Startup|Disable)(?= |$)|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$" -or $toolArguments -match '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath|ResultId)\b') { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool, or name an option the skill never passes; nothing ran.' }
+if ($toolArguments -match '-Disable\b' -and $toolArguments -cnotmatch "-Disable '(startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16})(,startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16})*'") { throw 'invalid-arguments: an id of -Disable is not the id of a startup entry; nothing ran.' }
 $modules = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules'
 $command = "[Environment]::SetEnvironmentVariable('PSModulePath', '$modules', 'Process'); & '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -90,13 +95,14 @@ try {
 
 Before anything else, the elevated process takes its modules only from the folder of Windows, which only administrators can change: the module path of the account (`Documents\WindowsPowerShell\Modules`, and what its environment adds) can be changed by any program of the user, and a module there named like one of Windows would run as administrator. The tool and `install.ps1` do the same.
 
-`$toolArguments` by purpose (always `-Json` and `-Lang`; `-Yes` only to apply or re-apply, because `-Undo` and `-Health` refuse it):
+`$toolArguments` by purpose (always `-Json` and `-Lang`; `-Yes` only to apply, re-apply or turn startup entries off, because `-Undo` and `-Health` refuse it):
 
 | Purpose | `$toolArguments` |
 |---|---|
 | Apply a plan whose `requiresAdmin` is true | `-Profile '<ids>' -Include '<ids>' -Exclude '<ids>' -Yes -Json -Lang <es or en>` |
 | Undo a run that needs administrator | `-Undo '<runId>' -Json -Lang <es or en>`, or with `-Tweak '<id>'` |
 | Re-apply what drifted, with system changes | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json -Lang <es or en>` (the ids of the classification plus the `needs-admin` ids you listed before the UAC prompt) |
+| Turn off the startup entries whose `needsAdmin` is true (only those) | `-Startup -Disable '<ids>' -Yes -Json -Lang <es or en>` |
 | Windows health | `-Health -Json -Lang <es or en>`; the repair: `-Health -Repair -Json -Lang <es or en>` |
 
 What the output means:

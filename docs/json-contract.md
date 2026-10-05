@@ -10,7 +10,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 - An unknown or misspelled parameter, or a value without its parameter name (parameters are never positional), ends in an `error` document (exit `1`) and nothing is done. A value PowerShell cannot take (a `-Lang` other than `es`/`en`, an `-IdleSeconds` that is not a number) is rejected by PowerShell itself: no JSON document, exit code `1`.
 - `-Json` never asks anything. Applying needs `-Yes` (or `-WhatIf` to only see the plan); without either, a plan with changes ends in an `error` (exit `1`), `-Json` alone included. Without a command and without `-Json` the tool opens the menu, which has no JSON output.
 - Texts meant for people (`title`, `why`, `description`, `message`, `detail`, `error`, `text`, `warnings`) follow `-Lang`; ids, statuses, reasons and `evidence` never change with the language.
-- `-ResultId <id>` (with `-Json` only, any command) also writes the document to `out\<id>.json` under the state folder: `%ProgramData%\windows-tuneup` when elevated (only administrators can write there; users can read; the folder and `out` are checked like the rest of the machine state, and one that other accounts can change, or that is a junction, is refused, so no one else can put a file or a link there), `%LOCALAPPDATA%\windows-tuneup` otherwise (`-StateRoot` in tests and development, as for the runs). It is for a program that starts the tool elevated with UAC and cannot read its standard output; that program reads the result back with `-ReadResult` (below), never by opening the file itself. The id is 8 to 64 characters among `A-Z`, `a-z`, `0-9` and `-`, and starts with a letter or a digit (a GUID fits; one that starts with `-` would be taken by PowerShell as a parameter name); the caller never gives a path. An invalid id or an id whose file already exists (an existing file or hard link is never replaced) ends in an `error` document on the standard output; `-ResultId` without `-Json` ends in the same refusal as plain text, with no document. Either way: exit `1`, nothing done, no file written. The file is created, empty, before the command runs and gets, when it ends, the same document as the standard output, `error` documents included (an unknown parameter too, when the id is valid). In the machine folder, which users can read, the profile folder and the account name in a path are hidden in the free texts that can carry one (`warnings`, `message`, `details`, `runDir`, `path`, `error`, `detail`, `output`, `repairedFiles`, `unrepairedFiles`) as `%USERPROFILE%` and `%USERNAME%`, like `result.json` does; ids, statuses, reasons and titles are as on the standard output, which is never hidden. `manual` keeps its paths: it is a command to run, and the run folder already holds those values. `out` keeps the 50 newest results (only files named like a result id count: folders and links are left alone, and a result that cannot be removed is a warning in the document). An empty file, or one that is not a single JSON document, means the command is still running or was stopped before it could write (window closed, process killed): read it as no document and check with `-Status` (`-ReadResult` says `result-incomplete`). No file after the process ended means the document could not be written (the exit code is then `2` if it would have been `0`) or Ctrl+C stopped PowerShell itself (see `apply`).
+- `-ResultId <id>` (with `-Json` only, any command) also writes the document to `out\<id>.json` under the state folder: `%ProgramData%\windows-tuneup` when elevated (only administrators can write there; users can read; the folder and `out` are checked like the rest of the machine state, and one that other accounts can change, or that is a junction, is refused, so no one else can put a file or a link there), `%LOCALAPPDATA%\windows-tuneup` otherwise (`-StateRoot` in tests and development, as for the runs). It is for a program that starts the tool elevated with UAC and cannot read its standard output; that program reads the result back with `-ReadResult` (below), never by opening the file itself. The id is 8 to 64 characters among `A-Z`, `a-z`, `0-9` and `-`, and starts with a letter or a digit (a GUID fits; one that starts with `-` would be taken by PowerShell as a parameter name); the caller never gives a path. An invalid id or an id whose file already exists (an existing file or hard link is never replaced) ends in an `error` document on the standard output; `-ResultId` without `-Json` ends in the same refusal as plain text, with no document. Either way: exit `1`, nothing done, no file written. The file is created, empty, before the command runs and gets, when it ends, the same document as the standard output, `error` documents included (an unknown parameter too, when the id is valid). In the machine folder, which users can read, the profile folder and the account name in a path are hidden in the free texts that can carry one (`warnings`, `message`, `details`, `runDir`, `path`, `error`, `detail`, `output`, `repairedFiles`, `unrepairedFiles`) as `%USERPROFILE%` and `%USERNAME%`, like `result.json` does, and so are the folder of any other account under the profiles folder (`C:\Users\<name>` becomes `C:\Users\%USERNAME%`; `Public` and `Default` stay) and the SID of an account of a person (`S-1-5-21-...`, or `S-1-12-1-...` of Entra ID, written `%SID%`; the SIDs of Windows accounts stay). An object whose `id` is a startup id (`startup.<source>.<slug>-<hash>`: an entry of `startup`, or an item or result of `plan`, `apply`, `status` or `undo` about one) also has its `title`, `name`, `key` and `command` hidden that way, in any document: they name a value, file, task or service that can carry the SID or the profile folder, and the command line can hold the profile folder. Other ids, statuses, reasons and titles are as on the standard output, which is never hidden. `manual` keeps its paths: it is a command to run, and the run folder already holds those values. `out` keeps the 50 newest results (only files named like a result id count: folders and links are left alone, and a result that cannot be removed is a warning in the document). An empty file, or one that is not a single JSON document, means the command is still running or was stopped before it could write (window closed, process killed): read it as no document and check with `-Status` (`-ReadResult` says `result-incomplete`). No file after the process ended means the document could not be written (the exit code is then `2` if it would have been `0`) or Ctrl+C stopped PowerShell itself (see `apply`).
 - `-ReadResult <id>` prints the document that a run with `-ResultId <id>` saved, after checking who could have written it (see "Reading a result").
 
 | Command line | `command` of the document |
@@ -24,6 +24,8 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 | `-Measure [-Compare <id\|last>] [-IdleSeconds <n>] -Json` | `measure` |
 | `-List -Json` | `list` |
 | `-Suggest -Json` | `suggest` |
+| `-Startup -Json` | `startup` |
+| `-Startup -Disable <ids> -WhatIf -Json` or `-Startup -Disable <ids> -Yes -Json` | `plan` or `apply`, with `source` = `startup` (without `-WhatIf` or `-Yes`, something to turn off ends in an `error`; an entry already off is an item skipped as `already-applied`, and a `plan` with nothing to apply is the document of `-Yes` too). See `startup` for the refusals |
 | `-ReadResult <id> [-Json]` | the document saved by `-ResultId`, unchanged (any `command`), or `error` |
 | any refusal or failure before the work | `error` |
 
@@ -31,7 +33,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 
 `-ReadResult <id>` is how a program that started the tool elevated gets the document: it runs the installed `tuneup.ps1` again, **without** elevation, with `-ReadResult <id> -Json`, and never opens `out\<id>.json` itself. The reason: a standard user can create `%ProgramData%\windows-tuneup` (or its `out` folder) before the first elevated run; that run then refuses to write there (its `error` goes only to the elevated window, which the caller does not see) and the file found by its path would be whatever that user put there.
 
-- It excludes every other command (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`), the options of applying, and `-ResultId`: `error` (`Invalid parameter combination`), exit `1`. Elevated or not, it needs no administrator. It reads no catalog, profiles, state or environment. Run elevated (never by the skill, which reads results without elevation), it first goes through the check of every elevated command (see `error`): with a machine state folder that cannot be trusted it ends in a plain `error` without `reason`, not in `result-untrusted`.
+- It excludes every other command (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`, `-Startup`), the options of applying, and `-ResultId`: `error` (`Invalid parameter combination`), exit `1`. Elevated or not, it needs no administrator. It reads no catalog, profiles, state or environment. Run elevated (never by the skill, which reads results without elevation), it first goes through the check of every elevated command (see `error`): with a machine state folder that cannot be trusted it ends in a plain `error` without `reason`, not in `result-untrusted`.
 - The id follows the rule of `-ResultId`; another id is an `error` (exit `1`, no `reason`).
 - Where: first `out\<id>.json` of the machine folder (`CommonApplicationData`, that is `%ProgramData%\windows-tuneup`), only if the folder that holds it, the state folder, `out` and the file pass the checks of the machine state (owned by Administrators, SYSTEM or TrustedInstaller; no write right for anyone else; not a junction or a link; the file has one name only, no hard link). Then, only when the caller is not elevated, `out\<id>.json` of `%LOCALAPPDATA%\windows-tuneup`, where unelevated runs write; never when the machine state folder exists and fails those checks, which is `result-untrusted` before anything else. With `-StateRoot` (tests and development) only that folder, without checks.
 - Success: the stored document exactly as it was written (ASCII JSON; in the machine folder the profile folder and the account name are hidden as described for `-ResultId`), with or without `-Json`, and exit `0` whatever the document says. The exit code of the run itself is the one of the process that ran it (`Start-Process -PassThru`); its `command` says what it is, an `error` included. The warnings of the read itself are not added.
@@ -69,13 +71,13 @@ Fields that several documents carry.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `source` | string | `profiles` (profiles and lists) or `reapply` (`-Status -Reapply`). |
+| `source` | string | `profiles` (profiles and lists), `reapply` (`-Status -Reapply`) or `startup` (`-Startup -Disable`: each item is a startup entry, with its `id` and its name as `title`, of type `registry`, `task` or `service`, risk `low`; see `startup`). |
 | `environment` | object | See `shared`. |
 | `requiresAdmin` | boolean | The plan has system changes, or policies under `HKCU`: applying needs elevation. |
 | `preflight` | object[] | Warnings before applying (see `shared`); empty when nothing would change. |
 | `items` | object[] | One per tweak considered, in order. |
-| `items[].id` | string | Tweak id. |
-| `items[].title` | string | Tweak title in the language of the run. |
+| `items[].id` | string | Tweak id, or the id of a startup entry (`startup.<source>.<slug>-<hash>`). |
+| `items[].title` | string | Tweak title in the language of the run (the name of a startup entry, not translated). |
 | `items[].why` | string | What the tweak does and why, in the language of the run. |
 | `items[].risk` | string | `low`, `medium` or `high`. |
 | `items[].ask` | boolean | The tweak asks before it is applied: a profile alone leaves it out (`needs-confirmation`); `-Include <id>` asks for it by name. |
@@ -93,11 +95,11 @@ Fields that several documents carry.
 
 ## `apply`
 
-Also saved, without `warnings` and `toolVersion`, as `result.json` in the run folder. In the saved copy the profile folder is written `%USERPROFILE%` and the account name `%USERNAME%` (`runDir` included, so the file can be shared); the standard output keeps the real `runDir`.
+Also saved, without `warnings` and `toolVersion`, as `result.json` in the run folder. In the saved copy the profile folder is written `%USERPROFILE%`, the account name `%USERNAME%` (also as the folder of any other account under the profiles folder) and the SID of an account of a person `%SID%`, in `runDir`, the messages of `preflight`, `results[].error`, `results[].detail` and the `title` of a startup entry (so the file can be shared); the standard output keeps the real values.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `source` | string | `profiles` or `reapply`. |
+| `source` | string | `profiles`, `reapply` or `startup`. |
 | `runId` | string | Id of the run (`yyyyMMdd-HHmmss`, maybe with `-NN`): what `-Undo` takes. |
 | `runDir` | string | Folder of the run. |
 | `finishedAt` | string | Local time, ISO 8601 without zone. |
@@ -136,9 +138,9 @@ Ctrl+C with `-Json`: when it reaches the console as a key (between two tweaks, w
 | Field | Type | Meaning |
 |---|---|---|
 | `items` | object[] | One per tweak that a pending run applied, from the latest run that touched it. |
-| `items[].id` | string | Tweak id. |
-| `items[].title` | string | Tweak title. |
-| `items[].status` | string | `ok` (still applied), `drift` (Windows reverted it: `-Status -Reapply` applies it again), `not-present`, `unknown` (could not be read), `needs-admin` (only readable elevated). |
+| `items[].id` | string | Tweak id; `startup.<source>.<slug>-<hash>` for a startup entry turned off with `-Startup -Disable`. |
+| `items[].title` | string | Tweak title (the name of a startup entry). |
+| `items[].status` | string | `ok` (still applied), `drift` (Windows reverted it: `-Status -Reapply` applies it again; a startup entry that is on again is left out of the re-apply with a warning, and is turned off again with `-Startup -Disable`), `not-present` (what it changes is not on this machine; for a startup entry, its `Run` value, Startup folder file, Store task key, task or service is gone, usually uninstalled: it is never `drift`), `unknown` (could not be read), `needs-admin` (only readable elevated; Windows hides some scheduled tasks from a process without elevation, so a scheduled task that a check without elevation cannot find is `needs-admin`, never `not-present`). |
 | `items[].runId` | string | Run that applied it. |
 
 ## `undo`
@@ -152,7 +154,7 @@ Ctrl+C with `-Json`: when it reaches the console as a key (between two tweaks, w
 | `results[].id` | string | Tweak id. |
 | `results[].title` | string | Tweak title. |
 | `results[].status` | string | `restored`, `failed`, `skipped`. |
-| `results[].reason` | string or null | `already-undone`, `other-user` (it belongs to another account, which can undo it), `unchanged` (`restored`: the tweak was already as before it was applied, so its restore was not run), or a note of the restore: `reinstalled`, `installed-for-other-users`, `not-reprovisioned`, `reinstalled-onedrive`. |
+| `results[].reason` | string or null | `already-undone`, `other-user` (it belongs to another account, which can undo it), `unchanged` (`restored`: the tweak was already as before it was applied, so its restore was not run), `not-present` (`restored`: a startup entry that is no longer on this machine, usually uninstalled since; nothing is made for it), or a note of the restore: `reinstalled`, `installed-for-other-users`, `not-reprovisioned`, `reinstalled-onedrive`. |
 | `results[].error` | string or null | Why the restore failed. |
 | `results[].detail` | string or null | What the restore could not give back. |
 | `results[].rebootRequired` | boolean | This restore needs a restart. |
@@ -244,6 +246,7 @@ What the catalog and the profiles offer on this machine. Read only, no elevation
 | `profiles[].description` | string | What the profile does, in the language of the run. |
 | `profiles[].tweakCount` | number | Tweaks of the profile that suit this machine (the ones not in `incompatible`). |
 | `profiles[].needsAdmin` | boolean | Some of those tweaks need elevation. |
+| `profiles[].offersStartup` | boolean | The profile offers to review what starts with Windows (`-Startup`) after it is planned or applied (`gaming`). Only an offer: nothing is turned off unless it is named in `-Startup -Disable`. |
 | `tweaks` | object[] | Every tweak of the catalog that suits this machine, in catalog order. |
 | `tweaks[].id` | string | Tweak id: what `-Include` and `-Exclude` take. |
 | `tweaks[].title` | string | Title in the language of the run. |
@@ -277,13 +280,63 @@ What this machine has and the profiles that fit it. Read only, no elevation need
 | `questions[].id` | string | The profile it asks about: `privacy` or `lite`. |
 | `questions[].text` | string | The question, in the language of the run. |
 
+## `startup`
+
+What starts with Windows or runs in the background, from `-Startup -Json`. Read only, no elevation needed, nothing is sent anywhere. Exit code `0` (`1` with an `error` only for parameters it does not take, or a 32-bit PowerShell on a 64-bit Windows, below). Listing is not refused on a Windows the tool does not support. When `catalog/startup/rules.json` of the installed copy is missing or not valid, listing and turning off end in an `error` (exit `1`) and nothing is read or changed: the rules are never skipped. A source, Store package or entry that cannot be read leaves out only that and adds a warning that the list may be incomplete; the document is still written. Without elevation Windows hides some scheduled tasks: a warning says so (`isAdmin` false). Elevated with another administrator's password, a warning says that the entries of the user (`run-user`, `folder-user`, `store-app`) are that account's. The services, drivers and scheduled tasks of Windows are not listed (signed by Windows, run by `svchost.exe` or `lsass.exe` from the Windows folder, or under `\Microsoft\`), nor services that are a DLL in a shared `svchost`; the entries of Windows in the other sources are, as protected. A service already set to Manual is no longer listed (only automatic ones are).
+
+To turn entries off: `-Startup -Disable '<ids>'` (comma separated) with `-WhatIf` or `-Yes`, which give the `plan` and `apply` documents with `source` = `startup`. The entries are read again for that, never taken from an earlier list. Each entry becomes a tweak of type `registry` (its value in `StartupApproved`, `03 00 00 00` and the time, as Task Manager writes it, or `State` = 1 of a Store task, as Settings does), `task` (disabled) or `service` (Manual, never Disabled, and not stopped), with the `id` of the entry and its name as `title`, so `-Status` and `-Undo` show and restore it like any tweak. `-Status` reads a `StartupApproved` entry only as on or off (its first byte), never by the date Task Manager writes, so turning it off again from Task Manager is not a drift; `-Undo` gives back the exact bytes it found. An entry uninstalled since is `not-present` in `-Status`, and `-Undo` gives it as `restored` with `reason` = `not-present`, making nothing for it; for a scheduled task only an elevated check can tell (without elevation it is `needs-admin`, and its restore fails rather than call it gone). `-Status -Reapply` never turns a startup entry off again: it leaves it out with a warning. Nothing is uninstalled or deleted, nothing is stopped or closed, and the change takes effect the next time Windows or the session starts (no restart or sign-out is asked for).
+
+Refusals of `-Startup -Disable`, always before any change (exit `1`, nothing done, not even the other ids):
+
+| `message` | `reason` | When |
+|---|---|---|
+| `err.startupUnknown` | (none) | An id that is not in the list now, or that is not an id of `-Startup` at all; ids are read without case. Without elevation, an unknown id of the machine adds to `details` that Windows hides some tasks. |
+| `err.startupFixed` | (none) | An id of an entry with `canDisable` false; `details` has one line per such entry: `<id> (<name>): <why>`. |
+| `err.startupNeedsAdmin` | `needs-admin` | Without elevation, an entry of the machine (`needsAdmin` true) that is still on; the message names them. With `-WhatIf` the plan is given instead, with `requiresAdmin` true. |
+| `err.startupSessionUser` | `session-user` | Elevated with another administrator's password, an id of an entry of the user (its `<source>` is `run-user`, `runonce-user`, `policy-user`, `folder-user` or `store-app`), before anything is read. |
+| `err.startupWow64` | (none) | A 32-bit PowerShell on a 64-bit Windows (also when listing): it would see another `HKLM\SOFTWARE` and System32. |
+| `err.server`, `err.unsupported` | (none) | A Windows the tool does not support, without `-Force`, as when applying profiles. |
+
+The `message` column names the text of `i18n/<lang>.json`; the document carries that text in the language of the run, so programs decide by `reason` or by the ids they sent.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `isAdmin` | boolean | The list was read elevated (without it, Windows hides some scheduled tasks). |
+| `workPc` | boolean | A work PC: managed (domain or MDM, as `environment.isManaged`) or joined to Entra ID, the same rule as the `work` signal of `suggest`; a join that cannot be read counts as not joined, with a warning. There OneDrive, Teams and Outlook are not recommended (`entries[].notRecommendedReason`). |
+| `entries` | object[] | Every entry, in the order of the sources. |
+| `entries[].id` | string | `startup.<source>.<slug>-<hash>`: `<slug>` is the key in lowercase without account SIDs, with each run of characters other than `a-z0-9` as one `-` (at most 32 characters, `entry` when empty), and `<hash>` the first 16 hexadecimal digits of the SHA256 of `<source>|<key in lowercase>`. The same in every run, elevated or not: what `-Disable` takes (`^startup\.[a-z0-9-]+\.[a-z0-9-]+$`, which also fits the pattern of tweak ids, so `-Undo -Tweak` takes it). Two entries can share one (see `canDisable`). |
+| `entries[].name` | string | What Windows shows: the name of the `Run` value, the file of the Startup folder without its extension, the name of the Store app, the task, or the display name of the service. Not translated. |
+| `entries[].source` | string | `run-user`, `run-machine`, `run32-machine`, `runonce-user`, `runonce-machine`, `runonce32-machine`, `policy-user`, `policy-machine`, `folder-user`, `folder-machine`, `store-app`, `task`, `service`, `driver`. |
+| `entries[].scope` | string | `user` or `machine`. |
+| `entries[].key` | string | Where it is: the name of the value, the file name, `<package family>\<task id>`, the folder and name of the task, or the name of the service. |
+| `entries[].publisher` | string or null | Who signed its program (a valid Authenticode signature), or the publisher of the Store package (the one Settings shows, or the name of its certificate); null when it is not signed, cannot be read, or runs through a host program (`rundll32.exe`, `cmd.exe`, `powershell.exe`...). |
+| `entries[].command` | string or null | The command line, as Windows keeps it. |
+| `entries[].path` | string or null | The program it runs, as a full path; null when it cannot be told. |
+| `entries[].enabled` | boolean | It starts now; `false` when it was turned off (Task Manager, Settings, this tool), the task is disabled or the Store task is not on. |
+| `entries[].running` | boolean or null | Its program runs now; null when that cannot be known (the processes could not be read, or a host program). Best effort: without elevation Windows does not give the path of some processes. |
+| `entries[].memoryMB` | number or null | Working set of its processes, in MB. |
+| `entries[].cpuSeconds` | number or null | CPU time its processes used since they started, in seconds (not a percentage). |
+| `entries[].protected` | string or null | Why it stays on, the first that applies in this order: `policy` (a policy sets it), `driver`, `windows-component` (a signature of Windows that Windows vouches for, a service of the list of Windows services, or a Store package of Windows), `unverified` (a service or driver that runs from the Windows folder whose signature could not be checked: it is not known whose it is), `security` (antivirus, firewall, what Windows Security Center lists, a service Windows starts as a protected process, or agents of the organization such as EDR, Sysmon, Intune or Configuration Manager), `vpn`, `device` (helpers of the audio, touchpad, Fn-key, display and pen drivers, and the services of driver packages; never the companion apps of the vendor), `updates` (the updaters of browsers and of Office: protected even though they are updaters, because they bring security patches). The rules, each with its `why`, are `catalog/startup/rules.json` of the installed copy; `-CatalogPath` does not change them. |
+| `entries[].canDisable` | boolean | It is on and `-Disable` can turn it off. `false` when it is off already, protected, or for one of these reasons, which the text for people and the `details` of `err.startupFixed` give: `run-once` (`runonce-*`: Windows deletes it after it runs), `unsupported-name` (a task with `*`, `?`, `[`, `]` or a backtick in its folder or name, which cannot be looked up exactly), `unreadable` (it could not be read completely, a warning says why, or its name or key has a control character: people see `?` in its place) or `ambiguous` (another entry has the same `id`, so the id could name the wrong one; a warning names them). |
+| `entries[].needsAdmin` | boolean | Turning it off needs elevation (`scope` = `machine`). |
+| `entries[].recommended` | boolean | Turning it off is recommended. Only a mark: nothing is turned off unless it is named in `-Disable`. Never true for an entry that cannot be turned off. |
+| `entries[].recommendedReason` | string or null | `updater` (an updater in the background, not of a browser or Office), `game-launcher`, `sync-client`, `chat-helper` (chat or mail), `companion-app` (companion app of a hardware vendor: overlay, lighting, driver downloads; the driver works without it). |
+| `entries[].notRecommendedReason` | string or null | Why an entry that a rule would recommend is not recommended: `work-app` (OneDrive, Teams or Outlook when `workPc` is true). It can still be turned off. |
+| `entries[].uninstall` | string or null | `winget uninstall --id <id> --exact` for a recommended program whose winget id is known: to show, never run by the tool. Null for Store apps, OneDrive and Teams. |
+| `summary` | object | Counts. |
+| `summary.total` | number | Entries (the length of `entries`). |
+| `summary.enabled` | number | Entries that start now. |
+| `summary.canDisable` | number | Entries that `-Disable` can turn off. |
+| `summary.recommended` | number | Entries marked recommended. |
+| `summary.protected` | number | Protected entries. |
+
 ## `error`
 
 | Field | Type | Meaning |
 |---|---|---|
 | `message` | string | What went wrong, for people. |
 | `details` | string[] | More lines (for example, each problem of the catalog). |
-| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, or `-Health`, without elevation: run it elevated), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
+| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, `-Health`, or `-Startup -Disable` of an entry of the machine, without elevation: run it elevated), `session-user` (`-Startup -Disable` of an entry of the user, elevated with another administrator's password: turn it off without elevation), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
 
 Exit code: `1`.
 
@@ -297,7 +350,7 @@ Not a document of the standard output, but what a caller reads after a run: `run
 |---|---|
 | `run.json` | `schemaVersion`, `toolVersion`, `userSid`, `machine` (the run is in the protected machine folder), `createdAt`. |
 | `plan.json` | The plan that was confirmed: an array with the fields of `items[]` of `plan`. |
-| `snapshot.jsonl` | The journal: one JSON line per tweak with its `id`, the tweak itself and the state before the change, written before each change. `-Undo` restores from it. |
+| `snapshot.jsonl` | The journal: one JSON line per tweak with its `id`, the tweak itself and the state before the change, written before each change. `-Undo` restores from it. For a run of `-Startup -Disable` it keeps, as they are, the names of the startup entries (the `Run` value, the file of the Startup folder, the Store task key, the task or the service) and their `StartupApproved` path, because `-Undo` needs them to find each entry again: the name of a task can carry the SID of an account (OneDrive), and users can read the machine folder (`%ProgramData%`). It is never hidden like `result.json`. |
 | `result.json` | The `apply` document (see `apply`). |
 | `transcript.log` | What was shown to people, without the account name; each `-Undo` adds its own section. |
 | `undone.json`, `undone-tweaks.txt` | The run was undone (`undoneAt` and the `results` of the undo), or the tweaks of it already restored one by one. |

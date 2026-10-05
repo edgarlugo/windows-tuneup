@@ -19,6 +19,8 @@ function Test-RegistryTweakDefinition {
         'scope does not match its registry hive'
     }
     if ([string]::IsNullOrEmpty([string]$set.name)) { 'is missing set.name' }
+    # Only the tweaks that -Startup -Disable builds compare that way (StartupTweak.ps1).
+    if ($null -ne $set.PSObject.Properties['compare']) { 'set.compare is only for startup entries (-Startup), never for the catalog' }
     if ($null -ne $set.value) {
         if ($script:RegistryKinds -cnotcontains $set.kind) {
             "has an invalid registry kind '$($set.kind)'"
@@ -154,6 +156,14 @@ function Test-RegistryTweakState {
         return 'applied'
     }
     if (-not $current.exists -or $current.kind -ne $desired.kind) { return 'not-applied' }
+    # A startup entry turned off by -Startup -Disable: off is an odd first byte, whatever date follows it,
+    # because Task Manager writes a new date each time it turns an entry off. Get still reads the exact bytes,
+    # so the journal keeps them and -Undo gives them back as they were.
+    $compare = $desired.PSObject.Properties['compare']
+    if ($null -ne $compare -and [string]$compare.Value -ceq 'startupApproved') {
+        if (Test-TuneupStartupApprovedEnabled -Value @($current.value)) { return 'not-applied' }
+        return 'applied'
+    }
     if (Test-TuneupRegistryValueEqual -Kind $desired.kind -Current $current.value -Desired $desired.value) { return 'applied' }
     'not-applied'
 }

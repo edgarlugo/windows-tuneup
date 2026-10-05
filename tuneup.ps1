@@ -10,6 +10,10 @@
 .EXAMPLE
     .\tuneup.ps1 -Suggest
 .EXAMPLE
+    .\tuneup.ps1 -Startup
+.EXAMPLE
+    .\tuneup.ps1 -Startup -Disable 'startup.run-user.steam-eb4bc901e3d06cf1' -WhatIf
+.EXAMPLE
     .\tuneup.ps1 -List -Json -ResultId 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12
 .EXAMPLE
     .\tuneup.ps1 -ReadResult 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12 -Json
@@ -18,6 +22,13 @@
 .PARAMETER Suggest
     Shows what this machine has (development tools, games, a battery, an organization, modest
     hardware) and the profiles that fit it. Read only.
+.PARAMETER Startup
+    Shows what starts with Windows or runs in the background (Run keys, Startup folders, Store apps,
+    scheduled tasks and services of other publishers), with what is protected and what is recommended to
+    turn off. Read only, no administrator needed.
+.PARAMETER Disable
+    With -Startup only: turns off the entries named by their id, as a run that -Undo restores. Nothing is
+    uninstalled or deleted. Takes -WhatIf and -Yes; needs administrator only for entries of the machine.
 .PARAMETER ResultId
     With -Json only: also writes the JSON document to out\<id>.json in the state folder (the machine
     one when elevated, which only administrators can change), so a program that started the tool
@@ -63,6 +74,8 @@ param(
     [int]$IdleSeconds = 0,
     [switch]$List,
     [switch]$Suggest,
+    [switch]$Startup,
+    [string[]]$Disable = @(),
     [string]$ResultId,
     [string]$ReadResult,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$_Rest = @()
@@ -73,10 +86,14 @@ $ErrorActionPreference = 'Stop'
 # tool: they are left out of what is passed on. -WhatIf is ours (it is not ShouldProcess here).
 $commonParameters = @([System.Management.Automation.PSCmdlet]::CommonParameters)
 
-if ($PSVersionTable.PSEdition -eq 'Core') {
-    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
-    foreach ($entry in $PSBoundParameters.GetEnumerator()) {
-        if ($entry.Key -eq '_Rest' -or $commonParameters -contains $entry.Key) { continue }
+# The arguments that PowerShell 7 passes to Windows PowerShell to run this script again: each switch that is
+# on, each value (a list as one comma-separated value: -Profile, -Include, -Exclude and -Disable split it
+# again), and at the end what could not be bound, as it came, so Windows PowerShell rejects it with its report.
+function Get-TuneupRelaunchArgument {
+    param([Parameter(Mandatory)]$Bound, [AllowEmptyCollection()][string[]]$Rest = @(), [AllowEmptyCollection()][string[]]$CommonParameter = @(), [Parameter(Mandatory)][string]$ScriptPath)
+    $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath)
+    foreach ($entry in $Bound.GetEnumerator()) {
+        if ($entry.Key -eq '_Rest' -or $CommonParameter -contains $entry.Key) { continue }
         if ($entry.Value -is [System.Management.Automation.SwitchParameter]) {
             if ($entry.Value.IsPresent) { $argumentList += "-$($entry.Key)" }
         } else {
@@ -84,8 +101,11 @@ if ($PSVersionTable.PSEdition -eq 'Core') {
             $argumentList += (@($entry.Value) -join ',')
         }
     }
-    # What could not be bound goes as it came, so Windows PowerShell rejects it with its report.
-    $argumentList += @($_Rest)
+    $argumentList + @($Rest)
+}
+
+if ($PSVersionTable.PSEdition -eq 'Core') {
+    $argumentList = @(Get-TuneupRelaunchArgument -Bound $PSBoundParameters -Rest @($_Rest) -CommonParameter $commonParameters -ScriptPath $PSCommandPath)
     & ([System.IO.Path]::Combine([Environment]::SystemDirectory, 'WindowsPowerShell\v1.0\powershell.exe')) @argumentList
     exit $LASTEXITCODE
 }

@@ -48,6 +48,8 @@ Reglas que valen para todos:
 
 **Riesgo alto, solo con `-Include`:** `gaming.memory-integrity-off` (integridad de memoria): puede dar entre 1 y 15 % más de FPS en algunos juegos a cambio de menos protección contra drivers maliciosos.
 
+**Ofrece revisar lo que arranca con Windows** (`offersStartup`): al planear o aplicar `gaming` termina con una línea que sugiere `.\tuneup.ps1 -Startup`, donde los lanzadores de juegos, los clientes de sincronización y los chats que arrancan solos salen recomendados. No apaga nada: cada entrada se elige con `-Startup -Disable '<id>'`.
+
 **Administrador:** sí. La GPU acelerada pide reiniciar.
 
 ## Privacidad (`privacy`, alias `privacidad`)

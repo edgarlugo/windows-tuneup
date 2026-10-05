@@ -291,3 +291,18 @@ Describe 'New-TuneupPlan when elevated as another account' {
         Get-Reason (Invoke-Plan -ProfileIds 'gaming' -Exclude 'ui.b' -Environment $Foreign) 'ui.b' | Should -Be 'excluded'
     }
 }
+
+Describe 'New-TuneupPlan without profiles' {
+    It 'plans only the tweaks it is given by name, with no profile set at all' {
+        $tweak = New-TestTweak -Id 'test.alone'
+        $plan = @(New-TuneupPlan -Catalog @($tweak) -Profiles @() -Include @('test.alone') -NoBase -Environment (New-TestEnvironment) -TestState { 'not-applied' })
+        $plan.Count | Should -Be 1
+        $plan[0].Id | Should -Be 'test.alone'
+        $plan[0].Action | Should -Be 'apply'
+    }
+
+    It 'still needs the profiles it is asked for' {
+        { New-TuneupPlan -Catalog @(New-TestTweak -Id 'test.alone') -Profiles @() -ProfileIds @('gaming') -NoBase -Environment (New-TestEnvironment) -TestState { 'not-applied' } } |
+            Should -Throw '*gaming*'
+    }
+}

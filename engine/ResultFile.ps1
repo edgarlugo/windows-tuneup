@@ -9,11 +9,17 @@
 $script:ResultIdPattern = '^[A-Za-z0-9][A-Za-z0-9-]{7,63}\z'
 $script:ResultFileKeep = 50
 # The fields of the documents that can carry a path (the run folder, a state file, a file that could not
-# be written, the output of sfc or DISM): in the machine folder, which Users can read, the profile folder
-# and the account name are hidden there, as in result.json. Ids, statuses, reasons and titles are written
+# be written, the output of sfc or DISM): in the machine folder, which Users can read, the profile folder,
+# the account name and the SID of an account are hidden there, as in result.json (Hide-TuneupPersonalData).
+# Ids, statuses, reasons and titles are written
 # as they are, and so is manual: it is a command to run (hidden, it would restore a wrong value, or a
 # wrong key for an account named like one of its folders), and the run folder already holds its values.
 $script:ResultFreeTextFields = @('warnings', 'message', 'details', 'runDir', 'path', 'error', 'detail', 'output', 'repairedFiles', 'unrepairedFiles')
+# What an item of a startup entry adds to those fields, in any document (the list, a plan, a run, -Status,
+# -Undo): it is named by the value, file, task or service it is (a task of OneDrive carries the SID of the
+# account in its name, a file the profile folder), and its command line can hold the profile folder. Name,
+# key, command and title of anything else are written as they are.
+$script:StartupItemFreeTextFields = @('title', 'name', 'key', 'command')
 
 # The reason -ResultId cannot be used, or nothing. Without -Json there is no document to save.
 function Get-TuneupResultIdProblem {
@@ -114,9 +120,10 @@ function Open-TuneupContextResultFile {
     }
 }
 
-# The free texts of a document (see ResultFreeTextFields) with the profile folder and the account name
-# hidden, everything else as it was. A document with nothing to hide is kept as it came, the same text
-# as the standard output. Text that is not one JSON document is hidden as a whole.
+
+# The free texts of a document (see ResultFreeTextFields) with the profile folder, the account name and
+# the SID of an account hidden, everything else as it was. A document with nothing to hide is kept as it
+# came, the same text as the standard output. Text that is not one JSON document is hidden as a whole.
 function Hide-TuneupResultPersonalData {
     param([Parameter(Mandatory)][string]$Text)
     try {
@@ -141,8 +148,11 @@ function Hide-TuneupValuePersonalData {
         $hidden
     }
     if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $fields = $script:ResultFreeTextFields
+        $id = $Value.PSObject.Properties['id']
+        if ($null -ne $id -and (Test-TuneupStartupId -Id ([string]$id.Value))) { $fields = $fields + $script:StartupItemFreeTextFields }
         foreach ($property in @($Value.PSObject.Properties)) {
-            if ($script:ResultFreeTextFields -cnotcontains $property.Name) {
+            if ($fields -cnotcontains $property.Name) {
                 Hide-TuneupValuePersonalData -Value $property.Value -Changes $Changes
             }
             elseif ($property.Value -is [array]) {

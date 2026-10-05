@@ -99,7 +99,7 @@ function Write-TuneupMenuHeader {
     Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $adminKey)
     if ($environment.IsManaged) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.managed') }
     Write-TuneupMenuLine -Context $Context
-    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.exit') {
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.startup', 'menu.main.exit') {
         Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $key)
     }
 }
@@ -127,12 +127,15 @@ function Invoke-TuneupMenu {
                 '3' { 'Undo' }
                 '4' { 'Health' }
                 '5' { 'Measure' }
+                '6' { 'Startup' }
                 default { $null }
             }
             if ($null -eq $action -and $choice -ne '') { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid') }
         }
         if ($leave) { break }
         $Context.Pause = $false
+        # Each option is a command of its own: the warnings of the one before are not part of its run.
+        $Context.Warnings.Clear()
         # A failure ends that option, not the menu: it is shown and the menu comes back.
         try {
             & "Invoke-TuneupMenu$action" -Context $Context
@@ -238,14 +241,71 @@ function Invoke-TuneupMenuOptimize {
     $request = New-TuneupApplyRequest -Source 'profiles' -Profiles $profileIds -Include $highRisk -Exclude $declined
     $Context.Pause = $true
     Invoke-TuneupPlannedApply -Context $Context -Plan $plan -Request $request
+    if ($Context.ExitCode -ne 1 -and (Test-TuneupStartupOffered -Definition $definition -ProfileIds $profileIds)) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.offer')
+    }
 }
 
-# The status, and when Windows reverted something, the offer to apply it again.
+# What starts with Windows: the table of -Startup, then the entries to turn off, picked by number among
+# the ones that can be turned off (recommended first, none picked beforehand), and the plan and the
+# confirmation of -Startup -Disable. Each number is the entry shown under it, and its id goes to -Disable,
+# which reads the entries again and refuses what changed. An id that two entries share is never offered.
+# What needs administrator is not turned off from a menu that is not elevated: it says so and goes back,
+# changing nothing, not even the entries of the user picked with it.
+function Invoke-TuneupMenuStartup {
+    param([Parameter(Mandatory)]$Context)
+    $Context.Pause = $true
+    $warningsBefore = $Context.Warnings.Count
+    Invoke-TuneupStartupCommand -Context $Context
+    $document = $Context.Result
+    if ($Context.ExitCode -ne 0 -or $null -eq $document) { return }
+    # The warnings of the list were shown with it; the run keeps only the ones about what is picked.
+    while ($Context.Warnings.Count -gt $warningsBefore) { $Context.Warnings.RemoveAt($Context.Warnings.Count - 1) }
+    $entries = @($document.entries)
+    $shared = @($entries | Group-Object -Property { [string]$_.id } | Where-Object { $_.Count -gt 1 } | ForEach-Object { $_.Name })
+    $offered = @($entries | Where-Object { $_.canDisable -and $shared -notcontains [string]$_.id })
+    # Elevated with another administrator's password, the entries of the user are that account's: -Disable
+    # refuses them, so they are not offered.
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false -and @($offered | Where-Object { $_.scope -eq 'user' }).Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.otherAccount')
+        $offered = @($offered | Where-Object { $_.scope -ne 'user' })
+    }
+    $choices = @($offered | Where-Object { $_.recommended }) + @($offered | Where-Object { -not $_.recommended })
+    if (-not $choices.Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.none')
+        return
+    }
+    $adminMark = ' ' + (Get-TuneupText -Key 'menu.profile.admin')
+    $lines = @(foreach ($entry in $choices) {
+            $recommended = $(if ($entry.recommended) { Get-TuneupText -Key 'menu.startup.recommended' -Format (Get-TuneupText -Key "startup.recommend.$($entry.recommendedReason)") } else { '' })
+            # Who signed it and where it starts from: entries with the same name can be told apart.
+            $publisher = $(if ($entry.publisher) { Get-TuneupText -Key 'startup.publisher' -Format (Format-TuneupStartupText -Text $entry.publisher) } else { '' })
+            '{0}{1} - {2}{3}{4}' -f (Format-TuneupStartupText -Text $entry.name), $publisher, (Get-TuneupText -Key "startup.source.$($entry.source)"), $recommended,
+                $(if ($entry.needsAdmin) { $adminMark } else { '' })
+        })
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.header')
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen -or -not @($chosen).Count) { return }
+    $picked = @($chosen | ForEach-Object { $choices[$_] })
+    if (-not $environment.IsAdmin -and @($picked | Where-Object { $_.needsAdmin }).Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.startup.needsAdmin')
+        return
+    }
+    Invoke-TuneupStartupCommand -Context $Context -Disable @($picked | ForEach-Object { [string]$_.id })
+}
+
+# The status, and when Windows reverted something, the offer to apply it again. A startup entry that is on
+# again is never applied again from here (the re-apply leaves it out): option 6 turns it off.
 function Invoke-TuneupMenuStatus {
     param([Parameter(Mandatory)]$Context)
     Invoke-TuneupStatusCommand -Context $Context
     $Context.Pause = $true
-    $items = @($Context.Result)
+    $all = @($Context.Result)
+    $startupDrifted = @($all | Where-Object { $_.status -eq 'drift' -and (Test-TuneupStartupId -Id ([string]$_.id)) }).Count
+    if ($startupDrifted) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.status.startupDrift' -Format $startupDrifted) }
+    $items = @($all | Where-Object { -not (Test-TuneupStartupId -Id ([string]$_.id)) })
     $drifted = @($items | Where-Object { $_.status -eq 'drift' }).Count
     if (-not $drifted) { return }
     while ($true) {

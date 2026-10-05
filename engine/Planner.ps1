@@ -1,6 +1,6 @@
 function Resolve-TuneupProfileId {
     param(
-        [Parameter(Mandatory)][object[]]$Profiles,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles,
         [Parameter(Mandatory)][string]$Name
     )
     $needle = $Name.Trim().ToLowerInvariant()
@@ -54,7 +54,8 @@ function Get-TuneupCleanList {
 function New-TuneupPlan {
     param(
         [Parameter(Mandatory)][object[]]$Catalog,
-        [Parameter(Mandatory)][object[]]$Profiles,
+        # Empty for a plan of tweaks named one by one (-NoBase without -ProfileIds: -Startup -Disable).
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Profiles,
         [AllowEmptyCollection()][AllowNull()][string[]]$ProfileIds = @(),
         [AllowEmptyCollection()][AllowNull()][string[]]$Include = @(),
         [AllowEmptyCollection()][AllowNull()][string[]]$Exclude = @(),
