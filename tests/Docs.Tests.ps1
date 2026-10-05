@@ -18,6 +18,18 @@ Describe 'README' {
     }
 }
 
+Describe 'README and -Startup' {
+    It 'shows -Startup in the usage, the exit codes and the skill, which turns off only the entries the user names' {
+        $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        foreach ($term in '.\tuneup.ps1 -Startup ', ".\tuneup.ps1 -Startup -Disable '", '| `-Startup` |', '`-Measure`, `-Startup`)',
+            'cada entrada que nombres', 'each entry you name') {
+            $text.Contains($term) | Should -BeTrue -Because $term
+        }
+        $text.Contains('lo que elijas, uno por uno') | Should -BeFalse
+        $text.Contains('one by one, and never uninstalls') | Should -BeFalse
+    }
+}
+
 Describe 'Blacklist' {
     It 'says what -Startup never turns off, in both languages' {
         foreach ($lang in 'es', 'en') {

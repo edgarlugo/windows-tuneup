@@ -85,6 +85,27 @@ Describe 'Invoke-TuneupStartupCommand' {
         Should -Invoke -ModuleName Tuneup Get-TuneupStartupEntry -Times 1 -Exactly
     }
 
+    It 'ends in an error, and turns nothing off, when its rules are missing or not valid' {
+        $original = & (Get-Module Tuneup) { $script:StartupRulesPath }
+        $bad = Join-Path $TestDrive 'rules-bad.json'
+        [System.IO.File]::WriteAllText($bad, '{ "schemaVersion": 1 }')
+        try {
+            foreach ($path in @((Join-Path $TestDrive 'missing.json'), $bad)) {
+                & (Get-Module Tuneup) { param($Path) $script:StartupRulesPath = $Path } $path
+                foreach ($disable in @(@(), @($SteamId))) {
+                    $context = New-TestContext -Json
+                    $output = @(Invoke-TuneupGuarded -Context $context -Command { Invoke-TuneupStartupCommand -Context $context -Disable $disable -Yes:([bool]$disable.Count) })
+                    $context.ExitCode | Should -Be 1 -Because $path
+                    ($output -join "`n" | ConvertFrom-Json).command | Should -Be 'error'
+                    Get-TestRunCount $context.StateRoot | Should -Be 0
+                }
+            }
+        } finally {
+            & (Get-Module Tuneup) { param($Path) $script:StartupRulesPath = $Path } $original
+        }
+        Test-Path -LiteralPath $Approved | Should -BeFalse
+    }
+
     It 'gives no warning about hidden tasks when elevated' {
         $context = New-TestContext -Json -Environment (New-TestEnvironment -IsAdmin $true)
         $document = Invoke-TestStartup $context
