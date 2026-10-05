@@ -23,8 +23,10 @@ BeforeAll {
         (New-TestTweak -Id 'menu.high' -Risk 'high' -Set ([pscustomobject]@{ path = $Key; name = 'High'; kind = 'DWord'; value = 1 }))
     )
     [System.IO.File]::WriteAllText((Join-Path $catalogDir 'menu.json'), (ConvertTo-Json -InputObject ([pscustomobject]@{ tweaks = $extra }) -Depth 10))
-    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'asking.json'),
-        (ConvertTo-Json -InputObject (New-TestProfile -Id 'asking' -Include @('menu.ask')) -Depth 10))
+    # asking also offers the review of what starts with Windows.
+    $asking = New-TestProfile -Id 'asking' -Include @('menu.ask')
+    $asking | Add-Member -NotePropertyName offersStartup -NotePropertyValue $true
+    [System.IO.File]::WriteAllText((Join-Path $profilesDir 'asking.json'), (ConvertTo-Json -InputObject $asking -Depth 10))
     [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zadmin.json'),
         (ConvertTo-Json -InputObject (New-TestProfile -Id 'zadmin' -Include @('menu.askadmin')) -Depth 10))
     [System.IO.File]::WriteAllText((Join-Path $profilesDir 'zmany.json'),
@@ -550,6 +552,7 @@ Describe 'Invoke-TuneupMenu: what starts with Windows' {
         $steam = New-MenuStartupEntry 'Steam'
         $steam.recommended = $true
         $steam.recommendedReason = 'game-launcher'
+        $steam.publisher = 'Valve Corp.'
         $tray = New-MenuStartupEntry 'Tray' -Machine
         $vpn = New-MenuStartupEntry 'GlobalProtect'
         $vpn.canDisable = $false
@@ -581,9 +584,10 @@ Describe 'Invoke-TuneupMenu: what starts with Windows' {
         $context.Io.Pending.Count | Should -Be 0
         $text = Get-Output $context
         $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.header')))
-        $text | Should -Match '\[ \]  1\. Steam \[recommended: game launcher\]'
-        $text | Should -Match '\[ \]  2\. Dropbox\r?\n'
-        $text | Should -Match '\[ \]  3\. Tray \(administrator\)'
+        # Each line says who signed it and where it starts from, so entries with the same name can be told apart.
+        $text | Should -Match '\[ \]  1\. Steam \(Valve Corp\.\) - at sign-in \(Run of the user\) \[recommended: game launcher\]'
+        $text | Should -Match '\[ \]  2\. Dropbox - at sign-in \(Run of the user\)\r?\n'
+        $text | Should -Match '\[ \]  3\. Tray - at sign-in, for every user \(Run\) \(administrator\)'
         # What stays on is in the table, never among what can be picked.
         $text | Should -Not -Match '\d\. GlobalProtect'
         $text | Should -Not -Match '\d\. Setup'
@@ -645,6 +649,56 @@ Describe 'Invoke-TuneupMenu: what starts with Windows' {
         Invoke-Menu $context
         $context.Io.Pending.Count | Should -Be 0
         Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.none')))
+    }
+
+    It 'does not offer the entries of the user when elevated as another account, and says why' {
+        $context = New-MenuContext @('6', '', '', '0') -Admin
+        $context.Environment = New-TestEnvironment -IsAdmin $true -IsSessionUser $false
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match '\[ \]  1\. Tray - at sign-in, for every user \(Run\)'
+        $text | Should -Not -Match '\d\. (Steam|Dropbox)'
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.startup.otherAccount')))
+    }
+
+    It 'leaves startup entries out of what the status offers to apply again, and points to option 6 for them' {
+        Invoke-TuneupApplyCommand -Context (New-MenuContext @()) -Yes 6>$null
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 5
+        Invoke-Menu (New-MenuContext @('6', '1', '', 'y', '', '0'))
+        # Steam turned itself on again.
+        New-ItemProperty -LiteralPath $Approved -Name 'Steam' -Value ([byte[]](2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)) -PropertyType Binary -Force | Out-Null
+        $context = New-MenuContext @('2', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $text = Get-Output $context
+        $text | Should -Match 'Tweaks reverted by Windows: 1\.'
+        $text | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.status.startupDrift' -Format 1)))
+        # Only the startup entry came back: nothing to apply again here, only the pointer to option 6.
+        Set-ItemProperty -LiteralPath $Key -Name 'One' -Value 1
+        $context = New-MenuContext @('2', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        Get-Output $context | Should -Not -Match 'Tweaks reverted by Windows'
+        Get-Output $context | Should -Match ([regex]::Escape((Get-TuneupText -Key 'menu.status.startupDrift' -Format 1)))
+    }
+
+    It 'offers the review after Optimize with option 6, not with the command line' {
+        $context = New-MenuContext @('1', '2', '', 'n', 'y', 'y', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $context.Io.Output | Should -Contain (Get-TuneupText -Key 'menu.startup.offer')
+        $context.Io.Output | Should -Not -Contain (Get-TuneupText -Key 'startup.offer')
+    }
+
+    It 'starts each option without the warnings of the one before' {
+        Mock -ModuleName Tuneup Get-TuneupStatus { Write-Warning 'EarlierThing went wrong' }
+        $context = New-MenuContext @('2', '', '6', '1', '', 'y', '', '0')
+        Invoke-Menu $context
+        $context.Io.Pending.Count | Should -Be 0
+        $runDir = @(Get-ChildItem -LiteralPath (Join-Path $Root 'runs') -Directory)[-1].FullName
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'transcript.log')) | Should -Not -Match 'EarlierThing'
+        [System.IO.File]::ReadAllText((Join-Path $runDir 'result.json')) | Should -Not -Match 'EarlierThing'
     }
 
     It 'keeps in the run only the warnings about what was picked' {

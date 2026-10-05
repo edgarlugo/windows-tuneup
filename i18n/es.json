@@ -331,5 +331,8 @@
   "menu.startup.header": "Elige lo que quieres apagar (no hay nada marcado de antemano; lo recomendado va primero):",
   "menu.startup.recommended": " [recomendado: {0}]",
   "menu.startup.needsAdmin": "Algo de lo elegido arranca para todos los usuarios: abre PowerShell como administrador para apagarlo. No se cambió nada.",
-  "menu.startup.none": "No hay nada que arranque con Windows que se pueda apagar desde aquí."
+  "menu.startup.none": "No hay nada que arranque con Windows que se pueda apagar desde aquí.",
+  "menu.startup.offer": "¿Revisamos lo que arranca con Windows? La opción 6 de este menú muestra la lista y lo recomendado; no se apaga nada que no elijas.",
+  "menu.startup.otherAccount": "Las entradas de tu cuenta no se ofrecen aquí: este PowerShell corre como otra cuenta de administrador. Apágalas desde este menú sin elevar.",
+  "menu.status.startupDrift": "Entradas de arranque que volvieron a encenderse: {0}. No se vuelven a aplicar desde aquí: apágalas con la opción 6 (Lo que arranca con Windows)."
 }

@@ -331,5 +331,8 @@
   "menu.startup.header": "Pick what to turn off (nothing is picked for you; the recommended ones come first):",
   "menu.startup.recommended": " [recommended: {0}]",
   "menu.startup.needsAdmin": "Something you picked starts for every user: open PowerShell as administrator to turn it off. Nothing was changed.",
-  "menu.startup.none": "Nothing that starts with Windows can be turned off from here."
+  "menu.startup.none": "Nothing that starts with Windows can be turned off from here.",
+  "menu.startup.offer": "Do we review what starts with Windows? Option 6 of this menu shows the list and what is recommended; nothing is turned off unless you choose it.",
+  "menu.startup.otherAccount": "The entries of your account are not offered here: this PowerShell runs as another administrator account. Turn them off from this menu without elevation.",
+  "menu.status.startupDrift": "Entries that start with Windows and are on again: {0}. They are not applied again from here: turn them off with option 6 (What starts with Windows)."
 }
