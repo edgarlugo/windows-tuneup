@@ -160,7 +160,7 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
     }
 
     It 'refuses to turn off ids that are not in the list, naming each one, and changes nothing' {
-        $result = Invoke-Tuneup @('-Startup', '-Disable', 'startup.run-user.nothing-00000000,startup.run-user.other-11111111', '-Yes', '-Json')
+        $result = Invoke-Tuneup @('-Startup', '-Disable', 'startup.run-user.nothing-0000000000000000,startup.run-user.other-1111111111111111', '-Yes', '-Json')
         $result.ExitCode | Should -Be 1
         # Unknown, or (on a runner elevated without a desktop session) of another account: either way named and refused.
         $message = (ConvertFrom-PureJson $result.Output).message
@@ -170,10 +170,10 @@ try { & '$(Join-Path $broken 'tuneup.ps1')' -List -Json | Out-Null; 'ran' } catc
     }
 
     It 'rejects <Expected>, before reading anything' -TestCases @(
-        @{ Arguments = @('-Disable', 'startup.run-user.x-00000000', '-Json'); Expected = 'Invalid parameter combination: -Disable (-Startup)' }
+        @{ Arguments = @('-Disable', 'startup.run-user.x-0000000000000000', '-Json'); Expected = 'Invalid parameter combination: -Disable (-Startup)' }
         @{ Arguments = @('-Startup', '-Yes', '-Json'); Expected = 'Invalid parameter combination: -Startup -Yes' }
         @{ Arguments = @('-Startup', '-List', '-Json'); Expected = 'Invalid parameter combination: -List -Startup' }
-        @{ Arguments = @('-Startup', '-Disable', 'startup.run-user.x-00000000', '-Profile', 'extra', '-Json'); Expected = 'Invalid parameter combination: -Startup -Profile' }
+        @{ Arguments = @('-Startup', '-Disable', 'startup.run-user.x-0000000000000000', '-Profile', 'extra', '-Json'); Expected = 'Invalid parameter combination: -Startup -Profile' }
     ) {
         param($Arguments, $Expected)
         $result = Invoke-Tuneup $Arguments

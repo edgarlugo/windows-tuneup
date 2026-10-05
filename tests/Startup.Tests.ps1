@@ -52,10 +52,10 @@ Describe 'Startup ids' {
 
     It 'tells the scope of an id from its source' {
         Get-TuneupStartupIdScope -Id 'startup.run-user.steam-eb4bc901e3d06cf1' | Should -Be 'user'
-        Get-TuneupStartupIdScope -Id 'startup.store-app.x-00000000' | Should -Be 'user'
+        Get-TuneupStartupIdScope -Id 'startup.store-app.x-0000000000000000' | Should -Be 'user'
         Get-TuneupStartupIdScope -Id 'startup.run-machine.steam-bb5ab8ea20c71de2' | Should -Be 'machine'
-        Get-TuneupStartupIdScope -Id 'startup.service.x-00000000' | Should -Be 'machine'
-        Get-TuneupStartupIdScope -Id 'startup.nowhere.x-00000000' | Should -BeNullOrEmpty
+        Get-TuneupStartupIdScope -Id 'startup.service.x-0000000000000000' | Should -Be 'machine'
+        Get-TuneupStartupIdScope -Id 'startup.nowhere.x-0000000000000000' | Should -BeNullOrEmpty
         Get-TuneupStartupIdScope -Id 'privacy.advertising-id' | Should -BeNullOrEmpty
     }
 }
@@ -991,12 +991,12 @@ Describe 'A startup document in the machine folder' {
                 warnings      = [string[]]@("Could not read the startup item the task \$task, so it is left out of the list: x")
                 entries       = @(
                     [pscustomobject]@{
-                        id = 'startup.task.onedrive-standalone-update-task-12345678'; name = $task; key = "\$task"; source = 'task'
+                        id = 'startup.task.onedrive-standalone-update-task-123456789abcdef0'; name = $task; key = "\$task"; source = 'task'
                         command = "`"$ProfileFolder\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe`""
                         path = "$ProfileFolder\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe"
                     }
                     [pscustomobject]@{
-                        id = 'startup.folder-user.x-00000000'; name = "Tool of $EntraSid"; key = "$ProfileFolder\x.lnk"; source = 'folder-user'
+                        id = 'startup.folder-user.x-0000000000000000'; name = "Tool of $EntraSid"; key = "$ProfileFolder\x.lnk"; source = 'folder-user'
                         command = "`"$ProfileFolder\Apps\x.exe`" -a"; path = "$ProfileFolder\Apps\x.exe"
                     }
                 )
@@ -1006,7 +1006,7 @@ Describe 'A startup document in the machine folder' {
         $hidden = $hiddenText | ConvertFrom-Json
         $hidden.command | Should -Be 'startup'
         $hidden.warnings[0] | Should -Be 'Could not read the startup item the task \OneDrive Standalone Update Task-%SID%, so it is left out of the list: x'
-        $hidden.entries[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-12345678'
+        $hidden.entries[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-123456789abcdef0'
         $hidden.entries[0].name | Should -Be 'OneDrive Standalone Update Task-%SID%'
         $hidden.entries[0].key | Should -Be '\OneDrive Standalone Update Task-%SID%'
         $hidden.entries[0].command | Should -Be '"%USERPROFILE%\AppData\Local\Microsoft\OneDrive\OneDriveStandaloneUpdater.exe"'
@@ -1021,11 +1021,11 @@ Describe 'A startup document in the machine folder' {
     It 'hides the SID in the titles of what -Startup -Disable plans and applies' {
         $text = ConvertTo-Json -Depth 10 -InputObject ([pscustomobject]@{
                 command = 'apply'; source = 'startup'
-                results = @([pscustomobject]@{ id = 'startup.task.onedrive-standalone-update-task-12345678'; title = "OneDrive Standalone Update Task-$Sid"; status = 'applied' })
+                results = @([pscustomobject]@{ id = 'startup.task.onedrive-standalone-update-task-123456789abcdef0'; title = "OneDrive Standalone Update Task-$Sid"; status = 'applied' })
             })
         $hidden = Hide-TuneupResultPersonalData -Text $text | ConvertFrom-Json
         $hidden.results[0].title | Should -Be 'OneDrive Standalone Update Task-%SID%'
-        $hidden.results[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-12345678'
+        $hidden.results[0].id | Should -Be 'startup.task.onedrive-standalone-update-task-123456789abcdef0'
     }
 
     It 'leaves name, key and title of other documents as they are, and hides the SID in their free texts' {

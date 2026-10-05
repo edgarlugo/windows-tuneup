@@ -265,10 +265,10 @@ Describe 'Invoke-TuneupStartupCommand' {
 
     It 'refuses ids that are not in the list, naming each one, and does nothing' {
         $context = New-TestContext -Json
-        $refused = Invoke-TestStartup $context -Disable @($SteamId, 'startup.run-user.gone-00000000', 'startup.task.other-11111111') -Yes
+        $refused = Invoke-TestStartup $context -Disable @($SteamId, 'startup.run-user.gone-0000000000000000', 'startup.task.other-1111111111111111') -Yes
         $context.ExitCode | Should -Be 1
         $refused.command | Should -Be 'error'
-        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupUnknown' -Format 'startup.run-user.gone-00000000, startup.task.other-11111111')
+        $refused.message | Should -Be (Get-TuneupText -Key 'err.startupUnknown' -Format 'startup.run-user.gone-0000000000000000, startup.task.other-1111111111111111')
         Test-Path -LiteralPath $Approved | Should -BeFalse
         Get-TestRunCount $context.StateRoot | Should -Be 0
     }
