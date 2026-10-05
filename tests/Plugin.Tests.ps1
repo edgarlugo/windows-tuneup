@@ -246,6 +246,8 @@ Describe 'Skill' {
         @{ Phrase = 'never search the installed docs to find an id' }
         @{ Phrase = '14. Turn off a startup entry only when the user chose that entry' }
         @{ Phrase = '(guardrail 14)' }
+        @{ Phrase = '(protected, already off, run once, ambiguous, unreadable, or a task whose name has wildcard characters)' }
+        @{ Phrase = 'the entries that are on but cannot be turned off and are not protected' }
     ) {
         param($Phrase)
         $Skill.Contains($Phrase) | Should -BeTrue -Because $Phrase
@@ -291,6 +293,9 @@ Describe 'Skill' {
             "-Startup -Disable '' -Yes -Json -Lang en", "-Startup -Disable -Yes -Json -Lang en") {
             & $refused $bad | Should -BeTrue -Because $bad
         }
+        # A prefix of -Disable never reaches this check: the form of the arguments refuses it first.
+        $form = [regex]::Match($elevated, "-or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`"").Groups['arguments'].Value
+        foreach ($bad in "-Startup -Dis 'x' -Yes -Json -Lang en", "-Startup -Disabl 'x' -Yes -Json -Lang en") { $bad | Should -Not -MatchExactly $form -Because $bad }
     }
 
     It 'links only to files that exist' {
@@ -361,7 +366,11 @@ Describe 'Skill' {
             "-Profile ' gaming' -Json -Lang en", "-Undo 'x`$(calc)' -Json -Lang en", "-Profile `"gaming`" -Json -Lang en", "-Lang fr",
             "-Profile 'base' -Force -Yes -Json -Lang en", "-Profile 'base' -force -Yes -Json -Lang en", "-Status -StateRoot 'x' -Json -Lang en",
             "-Profile 'base' -CatalogPath 'x' -Yes -Json -Lang en", "-Profile 'base' -actionspath 'x' -Yes -Json -Lang en",
-            "-Profile 'base' -ProfilesPath 'x' -Yes -Json -Lang en", "-Health -Json -Lang en -ResultId 'abcdefgh'") {
+            "-Profile 'base' -ProfilesPath 'x' -Yes -Json -Lang en", "-Health -Json -Lang en -ResultId 'abcdefgh'",
+            # PowerShell takes a prefix of a parameter name as the parameter: only the full names the skill uses pass.
+            "-Profile 'base' -Forc -Yes -Json -Lang en", "-Status -StateR 'x' -Json -Lang en", "-Profile 'base' -Catalog 'x' -Yes -Json -Lang en",
+            "-Startup -Dis 'x' -Yes -Json -Lang en", "-Startup -Disabl 'x' -Yes -Json -Lang en", "-Health -Json -Lang en -Res 'abcdefgh'",
+            "-Profile 'base' -Yes -Json -Lang en -Act 'x'", "-Measure -Json -Lang en", "-Profile 'base' -WhatIf -Json -Lang en") {
             & $passes $bad | Should -BeFalse -Because $bad
         }
     }
