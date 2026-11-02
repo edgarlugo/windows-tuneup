@@ -30,6 +30,24 @@ Describe 'README and -Startup' {
     }
 }
 
+Describe 'README and -Clean' {
+    It 'shows -Clean in the usage, the parameters, the exit codes and the JSON, and says it cannot be undone, in both languages' {
+        $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
+        foreach ($term in '.\tuneup.ps1 -Clean ', ".\tuneup.ps1 -Clean -Remove '", '| `-Clean [-Remove <ids>] [-Large]` |', '| `-Clean` |', '| `clean` |',
+            '`-Startup`, `-Clean` y `-ReadResult`', '`-Startup`, `-Clean` and `-ReadResult`', 'No se puede deshacer', 'It cannot be undone',
+            'catalog/clean/rules.json', 'nunca cookies', 'never cookies') {
+            $text.Contains($term) | Should -BeTrue -Because $term
+        }
+    }
+
+    It 'describes the clean document and its refusals' {
+        $contract = [System.IO.File]::ReadAllText((Join-Path $Repo 'docs\json-contract.md'))
+        foreach ($term in '## `clean`', '`err.cleanUnknown`', '`err.cleanReportOnly`', '`err.cleanNeedsAdmin`', '`err.cleanSessionUser`', '**cannot be undone**', 'reparse point') {
+            $contract.Contains($term) | Should -BeTrue -Because $term
+        }
+    }
+}
+
 Describe 'Blacklist' {
     It 'says what -Startup never turns off, in both languages' {
         foreach ($lang in 'es', 'en') {

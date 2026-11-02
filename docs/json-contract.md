@@ -26,6 +26,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 | `-Suggest -Json` | `suggest` |
 | `-Startup -Json` | `startup` |
 | `-Startup -Disable <ids> -WhatIf -Json` or `-Startup -Disable <ids> -Yes -Json` | `plan` or `apply`, with `source` = `startup` (without `-WhatIf` or `-Yes`, something to turn off ends in an `error`; an entry already off is an item skipped as `already-applied`, and a `plan` with nothing to apply is the document of `-Yes` too). See `startup` for the refusals |
+| `-Clean [-Large] -Json`, `-Clean -Remove <ids> -WhatIf -Json` or `-Clean -Remove <ids> -Yes -Json` | `clean` (without `-WhatIf` or `-Yes`, `-Remove` ends in an `error`). See `clean` for the refusals |
 | `-ReadResult <id> [-Json]` | the document saved by `-ResultId`, unchanged (any `command`), or `error` |
 | any refusal or failure before the work | `error` |
 
@@ -33,7 +34,7 @@ What `tuneup.ps1 ... -Json` writes, for programs that drive it (the Claude skill
 
 `-ReadResult <id>` is how a program that started the tool elevated gets the document: it runs the installed `tuneup.ps1` again, **without** elevation, with `-ReadResult <id> -Json`, and never opens `out\<id>.json` itself. The reason: a standard user can create `%ProgramData%\windows-tuneup` (or its `out` folder) before the first elevated run; that run then refuses to write there (its `error` goes only to the elevated window, which the caller does not see) and the file found by its path would be whatever that user put there.
 
-- It excludes every other command (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`, `-Startup`), the options of applying, and `-ResultId`: `error` (`Invalid parameter combination`), exit `1`. Elevated or not, it needs no administrator. It reads no catalog, profiles, state or environment. Run elevated (never by the skill, which reads results without elevation), it first goes through the check of every elevated command (see `error`): with a machine state folder that cannot be trusted it ends in a plain `error` without `reason`, not in `result-untrusted`.
+- It excludes every other command (`-Status`, `-Undo`, `-Health`, `-Measure`, `-List`, `-Suggest`, `-Startup`, `-Clean`), the options of applying, and `-ResultId`: `error` (`Invalid parameter combination`), exit `1`. Elevated or not, it needs no administrator. It reads no catalog, profiles, state or environment. Run elevated (never by the skill, which reads results without elevation), it first goes through the check of every elevated command (see `error`): with a machine state folder that cannot be trusted it ends in a plain `error` without `reason`, not in `result-untrusted`.
 - The id follows the rule of `-ResultId`; another id is an `error` (exit `1`, no `reason`).
 - Where: first `out\<id>.json` of the machine folder (`CommonApplicationData`, that is `%ProgramData%\windows-tuneup`), only if the folder that holds it, the state folder, `out` and the file pass the checks of the machine state (owned by Administrators, SYSTEM or TrustedInstaller; no write right for anyone else; not a junction or a link; the file has one name only, no hard link). Then, only when the caller is not elevated, `out\<id>.json` of `%LOCALAPPDATA%\windows-tuneup`, where unelevated runs write; never when the machine state folder exists and fails those checks, which is `result-untrusted` before anything else. With `-StateRoot` (tests and development) only that folder, without checks.
 - Success: the stored document exactly as it was written (ASCII JSON; in the machine folder the profile folder and the account name are hidden as described for `-ResultId`), with or without `-Json`, and exit `0` whatever the document says. The exit code of the run itself is the one of the process that ran it (`Start-Process -PassThru`); its `command` says what it is, an `error` included. The warnings of the read itself are not added.
@@ -330,13 +331,80 @@ The `message` column names the text of `i18n/<lang>.json`; the document carries 
 | `summary.recommended` | number | Entries marked recommended. |
 | `summary.protected` | number | Protected entries. |
 
+## `clean`
+
+What takes space that Windows or a program makes again by itself, from `-Clean -Json`, and what `-Clean -Remove '<ids>'` deleted. Read only unless `-Remove` names a rule; listing needs no elevation and nothing is sent anywhere. The rules, each with its `why` and its sources, are `catalog/clean/rules.json` of the installed copy; `-CatalogPath` does not change them, and rules that are missing or not valid end in an `error` (exit `1`) before anything is measured. Paths start with a variable that is read from Windows, never from the environment (`%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%` for `scope` = `user`; `%PROGRAMDATA%`, `%SYSTEMROOT%`, `%SYSTEMDRIVE%` for `machine`), and a rule can never name the logs of CBS and DISM, `Recovery`, `WinSxS`, `System32`, `Installer`, or the Documents, Desktop, Pictures or OneDrive folders.
+
+Deleting **cannot be undone** and is no run of the tool: `-Status` and `-Undo` never see it, and nothing is written to the state folder. The rules are measured again for `-Remove`, never taken from an earlier list, and each rule is checked once more right before it is deleted (a program opened since then leaves it out). What a rule deletes: files that match its `filter` (all by default), older than its `minAgeDays` (temporary files: 7 days, the age Disk Cleanup uses), not read-only, in its folders and, unless the rule says otherwise, their subfolders; a folder the deletion emptied goes too, never the folder of the rule itself. A junction, symbolic link or other reparse point is never followed nor deleted, at any level, and every folder is checked again right before its files are deleted. A file that is open or denied stays and is counted (`keptFiles`). Kinds that are not plain files: the old versions of Logitech G HUB (every folder under `depots` but the build ids that `current.json` and `next.json` name, and what changed in the last day; when neither file can be read, nothing is deleted and `reason` is `unreadable`), and the Delivery Optimization cache, which Windows deletes itself (`Delete-DeliveryOptimizationCache -Force`). Windows Update downloads are deleted only while the `wuauserv` service is stopped; the tool never stops it.
+
+Refusals of `-Clean -Remove`, always before anything is deleted (exit `1`, nothing done, not even the other ids):
+
+| `message` | `reason` | When |
+|---|---|---|
+| `err.cleanUnknown` | (none) | An id that is not a rule; ids are read without case. |
+| `err.cleanReportOnly` | (none) | A rule that is only measured (`reportOnly` true): the tool never deletes it. |
+| `err.cleanNeedsAdmin` | `needs-admin` | Without elevation, a rule of the machine (`needsAdmin` true). With `-WhatIf` the document is given instead, with that rule `skipped` as `needs-admin`. |
+| `err.cleanSessionUser` | `session-user` | Elevated with another administrator's password, a rule of the user: its folders would be that account's. |
+| `err.jsonNeedsYes` | (none) | `-Remove` with `-Json` and without `-Yes` or `-WhatIf`. |
+
+| Field | Type | Meaning |
+|---|---|---|
+| `isAdmin` | boolean | Measured elevated. Without it, folders of the machine may not be readable (`unreadable`) and their sizes are a minimum; a warning says so. |
+| `freeBytes` | number | Free space on the system drive before anything was deleted. |
+| `rules` | object[] | Every rule (with `-Remove`, only the ones named), in the order of the rules file. |
+| `rules[].id` | string | `clean.<words>` (`^clean\.[a-z0-9]+(-[a-z0-9]+)*$`): what `-Remove` takes. |
+| `rules[].category` | string | `temp`, `browser`, `installers`, `dev` or `report` (only measured). |
+| `rules[].title` | string | What it is, in the language of the run. |
+| `rules[].why` | string | Why it can go, or for what is only measured, why the tool leaves it. |
+| `rules[].hint` | string or null | For what is only measured, how to free it by hand (a command or a place in Settings, never run by the tool); null for the others. |
+| `rules[].scope` | string | `user` (folders of the account of the process) or `machine`. |
+| `rules[].reportOnly` | boolean | Only measured, never deleted (`category` = `report`). |
+| `rules[].needsAdmin` | boolean | Deleting it needs elevation (`scope` = `machine`). |
+| `rules[].paths` | string[] | The folders or files it found now; empty when none is on this PC. |
+| `rules[].files` | number | Files it would delete now (for what is only measured, files it holds). |
+| `rules[].bytes` | number | Their size, in bytes. |
+| `rules[].unreadable` | number | Folders that could not be read (denied, or gone while reading); the sizes leave them out. |
+| `rules[].runningApps` | string[] | Processes of the rule that run now (by name, as `Get-Process` gives it). |
+| `rules[].runningServices` | string[] | Services of the rule that are not stopped. |
+| `rules[].canRemove` | boolean | `-Remove` would delete something now. |
+| `rules[].reason` | string or null | Why not, the first that applies in this order: `report-only`, `needs-admin`, `session-user`, `not-present` (none of its folders is on this PC), `unreadable`, `app-running`, `service-running`, `nothing-to-remove`. Null when `canRemove` is true. |
+| `summary` | object | Counts. |
+| `summary.total` | number | Rules in `rules`. |
+| `summary.canRemove` | number | Rules that `-Remove` would delete now. |
+| `summary.removableBytes` | number | What those would free, in bytes. |
+| `summary.reportBytes` | number | What the rules that are only measured hold, in bytes. |
+| `largest` | object or null | With `-Large` (without `-Remove`): the biggest folders of the account (the children of the profile but `AppData`, of `AppData\Local` and of `AppData\Roaming`) and of the system drive (the children of its root but Windows, `Users` and the folders of the system), measured for up to 3 minutes without following reparse points. Read only. Null otherwise. |
+| `largest.complete` | boolean | Everything was measured before the time ran out. |
+| `largest.items` | object[] | The 15 biggest, biggest first. |
+| `largest.items[].path` | string | The folder. |
+| `largest.items[].bytes` | number | Its size, in bytes. |
+| `largest.items[].partial` | boolean | It could not be measured completely (time, or a folder it could not read): the size is a minimum. |
+| `removal` | object or null | With `-Remove`: what was deleted (or, with `-WhatIf`, would be). Null otherwise. |
+| `removal.planOnly` | boolean | `-WhatIf`: nothing was deleted. |
+| `removal.results` | object[] | One per rule named, in the order of `rules`. |
+| `removal.results[].id` | string | The rule. |
+| `removal.results[].title` | string | Its title. |
+| `removal.results[].status` | string | `removed` (everything it allowed was deleted), `partial` (some files stayed: in use or denied), `skipped` (nothing deleted: see `reason`), `failed` (an error stopped it: see `error`), or with `-WhatIf`, `planned`. |
+| `removal.results[].reason` | string or null | For `skipped` and `partial`: a value of `rules[].reason`, or `in-use` (files were open). |
+| `removal.results[].freedBytes` | number | Bytes deleted (with `-WhatIf`, the bytes it would delete). |
+| `removal.results[].deletedFiles` | number | Files deleted (with `-WhatIf`, the files it would delete). |
+| `removal.results[].keptFiles` | number | Files that stayed because they were open, denied or read-only. |
+| `removal.results[].runningApps` | string[] | For `app-running`, the processes that run. |
+| `removal.results[].runningServices` | string[] | For `service-running`, the services that run. |
+| `removal.results[].error` | string or null | For `failed`, what went wrong. |
+| `removal.freedBytes` | number | Sum of `freedBytes`. |
+| `removal.freeBytesBefore` | number | Free space on the system drive before. |
+| `removal.freeBytesAfter` | number or null | Free space after (null with `-WhatIf`); it can differ from `freeBytesBefore` + `freedBytes` when other programs write at the same time. |
+
+Exit code: `0` when the list was written, with `-WhatIf`, or when every rule named was `removed` or `skipped` as `nothing-to-remove`; `2` when something stayed (`partial`, `failed`, or `skipped` for another reason); `1` for a refusal, a no answer to the question (without `-Json`), or rules that are not valid.
+
 ## `error`
 
 | Field | Type | Meaning |
 |---|---|---|
 | `message` | string | What went wrong, for people. |
 | `details` | string[] | More lines (for example, each problem of the catalog). |
-| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, `-Health`, or `-Startup -Disable` of an entry of the machine, without elevation: run it elevated), `session-user` (`-Startup -Disable` of an entry of the user, elevated with another administrator's password: turn it off without elevation), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
+| `reason` | string | A stable token for programs, only in some errors (absent otherwise): `needs-admin` (`-Undo` of a run with system changes, `-Health`, `-Startup -Disable` of an entry of the machine, or `-Clean -Remove` of a rule of the machine, without elevation: run it elevated), `session-user` (`-Startup -Disable` of an entry of the user or `-Clean -Remove` of a rule of the user, elevated with another administrator's password: do it without elevation), and the errors of `-ReadResult`: `result-missing`, `result-incomplete` or `result-untrusted` (see "Reading a result"). Never changes with the language; decide by it, not by `message`. |
 
 Exit code: `1`.
 

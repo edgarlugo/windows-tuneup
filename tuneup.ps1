@@ -14,6 +14,10 @@
 .EXAMPLE
     .\tuneup.ps1 -Startup -Disable 'startup.run-user.steam-eb4bc901e3d06cf1' -WhatIf
 .EXAMPLE
+    .\tuneup.ps1 -Clean
+.EXAMPLE
+    .\tuneup.ps1 -Clean -Remove 'clean.temp-user,clean.edge-cache' -WhatIf
+.EXAMPLE
     .\tuneup.ps1 -List -Json -ResultId 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12
 .EXAMPLE
     .\tuneup.ps1 -ReadResult 3f2a9c1e-0b7d-4e55-9a10-2c4b6d8e0f12 -Json
@@ -29,6 +33,16 @@
 .PARAMETER Disable
     With -Startup only: turns off the entries named by their id, as a run that -Undo restores. Nothing is
     uninstalled or deleted. Takes -WhatIf and -Yes; needs administrator only for entries of the machine.
+.PARAMETER Clean
+    Shows what takes space that Windows or a program makes again by itself (temporary files, caches,
+    installers already used, crash reports) and big items that are only measured (hibernation, Downloads).
+    Read only, no administrator needed.
+.PARAMETER Remove
+    With -Clean only: deletes now what the rules named by their id allow. It cannot be undone and is no run
+    of the tool. Takes -WhatIf and -Yes; needs administrator only for rules of the machine.
+.PARAMETER Large
+    With -Clean only: also measures the biggest folders of the account and of the system drive, for up to
+    three minutes. Read only.
 .PARAMETER ResultId
     With -Json only: also writes the JSON document to out\<id>.json in the state folder (the machine
     one when elevated, which only administrators can change), so a program that started the tool
@@ -76,6 +90,9 @@ param(
     [switch]$Suggest,
     [switch]$Startup,
     [string[]]$Disable = @(),
+    [switch]$Clean,
+    [string[]]$Remove = @(),
+    [switch]$Large,
     [string]$ResultId,
     [string]$ReadResult,
     [Parameter(ValueFromRemainingArguments = $true)][string[]]$_Rest = @()
@@ -87,7 +104,7 @@ $ErrorActionPreference = 'Stop'
 $commonParameters = @([System.Management.Automation.PSCmdlet]::CommonParameters)
 
 # The arguments that PowerShell 7 passes to Windows PowerShell to run this script again: each switch that is
-# on, each value (a list as one comma-separated value: -Profile, -Include, -Exclude and -Disable split it
+# on, each value (a list as one comma-separated value: -Profile, -Include, -Exclude, -Disable and -Remove split it
 # again), and at the end what could not be bound, as it came, so Windows PowerShell rejects it with its report.
 function Get-TuneupRelaunchArgument {
     param([Parameter(Mandatory)]$Bound, [AllowEmptyCollection()][string[]]$Rest = @(), [AllowEmptyCollection()][string[]]$CommonParameter = @(), [Parameter(Mandatory)][string]$ScriptPath)

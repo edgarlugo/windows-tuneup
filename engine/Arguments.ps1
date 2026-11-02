@@ -1,13 +1,14 @@
 # Commands exclude each other and the options of applying a plan.
-$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure', 'List', 'Suggest', 'Startup', 'ReadResult')
+$script:CliCommands = @('Status', 'Undo', 'Health', 'Measure', 'List', 'Suggest', 'Startup', 'Clean', 'ReadResult')
 $script:CliApplyOptions = @('Profile', 'Include', 'Exclude', 'WhatIf', 'Yes')
 # Options that only make sense with one command.
-$script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure'; Reapply = 'Status'; Disable = 'Startup' }
+$script:CliDependentOptions = [ordered]@{ Tweak = 'Undo'; Repair = 'Health'; Compare = 'Measure'; IdleSeconds = 'Measure'; Reapply = 'Status'; Disable = 'Startup'; Remove = 'Clean'; Large = 'Clean' }
 # Options of applying that an option of a command brings back: -Status -Reapply applies again what
 # drifted, so it takes -Yes and -WhatIf, and -Include to name the drifted tweaks to apply again (and
 # still not -Profile or -Exclude). -Startup -Disable turns entries off as a run, so it takes -Yes and
-# -WhatIf; the entries are named by -Disable itself.
-$script:CliApplyingOptions = @{ Reapply = @('Yes', 'WhatIf', 'Include'); Disable = @('Yes', 'WhatIf') }
+# -WhatIf; the entries are named by -Disable itself. -Clean -Remove deletes the rules it names, so it takes
+# -Yes and -WhatIf too.
+$script:CliApplyingOptions = @{ Reapply = @('Yes', 'WhatIf', 'Include'); Disable = @('Yes', 'WhatIf'); Remove = @('Yes', 'WhatIf') }
 
 function Get-TuneupArgumentConflict {
     param([Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Present)

@@ -21,6 +21,10 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Name = 'what starts with Windows'; Present = @('Startup') }
         @{ Name = 'turning startup entries off'; Present = @('Startup', 'Disable', 'Yes') }
         @{ Name = 'the plan of turning them off'; Present = @('Startup', 'Disable', 'WhatIf') }
+        @{ Name = 'what can be freed'; Present = @('Clean') }
+        @{ Name = 'what can be freed and the biggest folders'; Present = @('Clean', 'Large') }
+        @{ Name = 'deleting what is named'; Present = @('Clean', 'Remove', 'Yes') }
+        @{ Name = 'what would be deleted'; Present = @('Clean', 'Remove', 'WhatIf') }
     ) {
         param($Present)
         Get-TuneupArgumentConflict -Present $Present | Should -BeNullOrEmpty
@@ -65,6 +69,14 @@ Describe 'Get-TuneupArgumentConflict' {
         @{ Present = @('Startup', 'Disable', 'Include', 'Yes'); Expected = '-Startup -Include' }
         @{ Present = @('Startup', 'Disable', 'Exclude'); Expected = '-Startup -Exclude' }
         @{ Present = @('Startup', 'Reapply'); Expected = '-Reapply (-Status)' }
+        @{ Present = @('Remove'); Expected = '-Remove (-Clean)' }
+        @{ Present = @('Large'); Expected = '-Large (-Clean)' }
+        @{ Present = @('Startup', 'Remove'); Expected = '-Remove (-Clean)' }
+        @{ Present = @('Clean', 'Yes'); Expected = '-Clean -Yes' }
+        @{ Present = @('Clean', 'WhatIf'); Expected = '-Clean -WhatIf' }
+        @{ Present = @('Clean', 'Startup'); Expected = '-Startup -Clean' }
+        @{ Present = @('Clean', 'Remove', 'Profile', 'Yes'); Expected = '-Clean -Profile' }
+        @{ Present = @('Clean', 'Remove', 'Include', 'Yes'); Expected = '-Clean -Include' }
     ) {
         param($Present, $Expected)
         Get-TuneupArgumentConflict -Present $Present | Should -Be $Expected
