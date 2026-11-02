@@ -81,6 +81,16 @@ At the end, with everything undone ("Close", step 1):
 6. "undo that". Expected: `-Undo <runId>` with the `runId` of `-Status -Json` (elevated only for the run of the machine); the entries are on again.
 7. With the MDM enrollment simulated in the next section, repeat step 1. Expected: OneDrive, Teams and Outlook come without the recommended mark (`work-app`) and the skill explains that they are used for work; they can still be chosen.
 
+## Free up space
+
+1. Prepare something to delete: leave files older than 7 days in `%TEMP%` (`New-Item "$env:TEMP\tuneup-test.tmp" -Value x | ForEach-Object { $_.LastWriteTime = (Get-Date).AddDays(-10) }`, in a PowerShell without elevation) and open Edge and browse a little so it has a cache.
+2. Finish the assisted mode (after the startup question). Expected: the skill asks "Do we see how much disk space can be freed?" and, with a yes, runs `-Clean -Json` without UAC; it shows a table by category with the size of each rule, the ones of the machine marked as needing administrator (one that could not be read without elevation says that it could not be measured, never 0 or absent), apart the ones that cannot be deleted now with their reason (`reason`: the Edge cache with `app-running` while Edge is open), and apart what is only measured (`reportOnly`: hibernation, Downloads, the Recycle Bin) with its `hint` as text. It says that deleting cannot be undone and marks nothing by default.
+3. Ask "free up space" in a new conversation. Expected: the same list, without going through the assisted mode.
+4. Ask "delete everything". Expected: it names each rule that can be deleted and asks for a yes to that named list; it adds no rule that is only measured and none with a reason other than `needs-admin`.
+5. Ask "turn off hibernation" or "empty the Recycle Bin". Expected: it shows the `hint` as text for you to do it; it does not run it, does not put that rule in `-Remove`, and deletes nothing by itself.
+6. Close Edge and choose `clean.temp-user`, `clean.edge-cache` and `clean.temp-windows`. Expected: a plan with `-Clean -Remove '<ids>' -WhatIf -Json` (the one of the machine comes `skipped` as `needs-admin`, with its size from the list), a warning that it cannot be undone, and it waits for the yes; with the yes, the ones of the user are deleted without UAC with `-Clean -Remove '<ids>' -Yes -Json` and the one of the machine with one UAC prompt (`-ResultId`, read with `-ReadResult <id> -Json`); it reports what each rule freed (`partial` with `keptFiles` if files were open) and the free space before and after, with no `runId`. `tuneup-test.tmp` is gone.
+7. Ask "undo the cleanup". Expected: it explains that deleting cannot be undone and does not run `-Undo`.
+
 ## Managed PC
 
 1. Fake an MDM enrollment:

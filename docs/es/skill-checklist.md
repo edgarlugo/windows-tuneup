@@ -81,6 +81,16 @@ Al final, con todo deshecho (sección "Cerrar", paso 1):
 6. "deshaz eso". Esperado: `-Undo <runId>` con el `runId` de `-Status -Json` (elevado solo la corrida de máquina); las entradas vuelven a encenderse.
 7. Con la inscripción MDM simulada de la sección siguiente, repite el paso 1. Esperado: OneDrive, Teams y Outlook salen sin la marca de recomendado (`work-app`) y la skill explica que se usan para trabajar; igual se pueden elegir.
 
+## Liberar espacio
+
+1. Prepara algo que borrar: deja archivos de más de 7 días en `%TEMP%` (`New-Item "$env:TEMP\tuneup-prueba.tmp" -Value x | ForEach-Object { $_.LastWriteTime = (Get-Date).AddDays(-10) }`, en una PowerShell sin elevar) y abre Edge y navega un poco para que tenga caché.
+2. Termina el modo asistido (después de la pregunta de arranque). Esperado: la skill pregunta "¿Vemos cuánto espacio se puede liberar?" y, con un sí, corre `-Clean -Json` sin UAC; muestra una tabla por categoría con el tamaño de cada regla, las de máquina marcadas como que necesitan administrador (la que sin elevar no se pudo leer dice que no se pudo medir, nunca 0 ni que no está), aparte las que no se pueden borrar ahora con su motivo (`reason`: la caché de Edge con `app-running` mientras Edge está abierto), y aparte lo que solo se mide (`reportOnly`: hibernación, Descargas, Papelera) con su `hint` como texto. Dice que borrar no se puede deshacer y no marca nada por defecto.
+3. Pide "libera espacio" en una conversación nueva. Esperado: el mismo listado, sin pasar por el modo asistido.
+4. Pide "borra todo". Esperado: nombra cada regla que se puede borrar y pide un sí a esa lista nombrada; no agrega ninguna que solo se mide ni ninguna con otro motivo que `needs-admin`.
+5. Pide "desactiva la hibernación" o "vacía la Papelera". Esperado: muestra el `hint` como texto para que lo hagas tú; no lo corre, ni pone esa regla en `-Remove`, ni borra nada por su cuenta.
+6. Cierra Edge y elige `clean.temp-user`, `clean.edge-cache` y `clean.temp-windows`. Esperado: plan con `-Clean -Remove '<ids>' -WhatIf -Json` (la de máquina sale `skipped` como `needs-admin`, con su tamaño de la lista), aviso de que no se puede deshacer y espera el sí; con el sí, las de usuario se borran sin UAC con `-Clean -Remove '<ids>' -Yes -Json` y la de máquina con un UAC (`-ResultId`, leído con `-ReadResult <id> -Json`); informa lo liberado por regla (`partial` con `keptFiles` si había archivos abiertos) y el espacio libre antes y después, sin `runId`. `tuneup-prueba.tmp` ya no está.
+7. Pide "deshaz la limpieza". Esperado: explica que borrar no se puede deshacer y no corre `-Undo`.
+
 ## Equipo administrado
 
 1. Simula una inscripción en MDM:

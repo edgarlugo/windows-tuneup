@@ -21,7 +21,7 @@ Describe 'README' {
 Describe 'README and -Startup' {
     It 'shows -Startup in the usage, the exit codes and the skill, which turns off only the entries the user names' {
         $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
-        foreach ($term in '.\tuneup.ps1 -Startup ', ".\tuneup.ps1 -Startup -Disable '", '| `-Startup` |', '`-Measure`, `-Startup`)',
+        foreach ($term in '.\tuneup.ps1 -Startup ', ".\tuneup.ps1 -Startup -Disable '", '| `-Startup` |', '`-Measure`, `-Startup`, `-Clean`)',
             'cada entrada que nombres', 'each entry you name') {
             $text.Contains($term) | Should -BeTrue -Because $term
         }
@@ -35,7 +35,8 @@ Describe 'README and -Clean' {
         $text = [System.IO.File]::ReadAllText((Join-Path $Repo 'README.md'), (New-Object System.Text.UTF8Encoding -ArgumentList $false))
         foreach ($term in '.\tuneup.ps1 -Clean ', ".\tuneup.ps1 -Clean -Remove '", '| `-Clean [-Remove <ids>] [-Large]` |', '| `-Clean` |', '| `clean` |',
             '`-Startup`, `-Clean` y `-ReadResult`', '`-Startup`, `-Clean` and `-ReadResult`', 'No se puede deshacer', 'It cannot be undone',
-            'catalog/clean/rules.json', 'nunca cookies', 'never cookies') {
+            'catalog/clean/rules.json', 'nunca cookies', 'never cookies', 'Y ofrece liberar espacio (`-Clean`)', 'And it offers to free up space (`-Clean`)',
+            'borrar no se puede deshacer', 'deleting cannot be undone') {
             $text.Contains($term) | Should -BeTrue -Because $term
         }
     }
@@ -105,7 +106,8 @@ Describe 'Skill checklist' {
             foreach ($term in '/plugin marketplace add edgarlugo/windows-tuneup', 'windows-tuneup@windows-tuneup', 'install.ps1', 'SHA256SUMS', '-Suggest -Json',
                 '-ResultId', '-Undo <runId>', 'UAC', 'MS DM Server', 'blacklist.md', 'gaming.memory-integrity-off', '-Health -Json', '-ReadResult <id> -Json',
                 'result-incomplete', 'result-untrusted', 'result-missing', 'icacls', 'Get-Acl', "-Status -Reapply -Include '<ids>'", '-Status -Reapply -WhatIf -Json', 'run_in_background', 'needs-admin',
-                'high-risk-not-requested', '-Startup -Json', "-Startup -Disable '<ids>' -WhatIf -Json", 'work-app', 'winget uninstall') {
+                'high-risk-not-requested', '-Startup -Json', "-Startup -Disable '<ids>' -WhatIf -Json", 'work-app', 'winget uninstall',
+                '-Clean -Json', "-Clean -Remove '<ids>' -WhatIf -Json", "-Clean -Remove '<ids>' -Yes -Json", 'reportOnly', 'hint', 'app-running', 'keptFiles') {
                 $text.Contains($term) | Should -BeTrue -Because "$lang $term"
             }
         }
