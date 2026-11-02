@@ -825,3 +825,42 @@ El modo asistido suma un paso después de informar lo aplicado: "¿Revisamos lo 
 ### 15.10 Pruebas
 
 Pester con cada detector simulado por fuente (claves de registro de prueba bajo `HKCU:\Software\windows-tuneup-test`, carpetas en `$TestDrive`, `Get-ScheduledTask`, `Get-CimInstance`, `Get-AppxPackage`, `Get-AuthenticodeSignature` y `Get-Process` simulados), las reglas con casos de cada motivo, el ida y vuelta completo (`-Startup -Disable -Yes`, `-Status`, apagada otra vez con otra fecha sin deriva, encendida con deriva, `-Status -Reapply`, `-Undo` con los bytes exactos) sobre una clave de prueba, la opción 6 del menú con respuestas guionadas, el equipo de trabajo, `JsonContract.Tests.ps1` con el documento `startup` y `Plugin.Tests.ps1` con los pasos nuevos de la skill. Manual en la VM (`docs/{es,en}/vm-checklist.md`): apagar una entrada de cada fuente, comprobar en el Administrador de tareas y en Configuración > Aplicaciones > Inicio, reiniciar, `-Status` (también después de volver a apagar desde el Administrador de tareas), el menú, las apps de acompañamiento, un equipo de trabajo simulado y `-Undo`.
+
+## 16. Liberar espacio (`-Clean`, 2026-11-01)
+
+Diseño aprobado por el usuario el 2026-11-01. Donde contradice secciones anteriores, manda esta. Toma **solo ideas** de BleachBit (GPL-3.0), como de privacy.sexy (sección 2): qué cachés se regeneran solas, no tocar lo que un programa abierto usa y no seguir enlaces. Ni su código ni sus definiciones (CleanerML) entran al repositorio: las reglas se escribieron para esta herramienta, cada una con su fuente.
+
+### 16.1 Qué hace y por qué es un comando aparte
+
+Borrar no se puede deshacer, y el primer principio del proyecto (sección 1) es que todo sea reversible. Por eso la limpieza **nunca** está en un perfil ni en una corrida: es un comando aparte, de solo lectura salvo que `-Remove` nombre una regla, que `-Status` y `-Undo` no ven y que no escribe nada en la carpeta de estado. Lo medible se cumple con el espacio libre antes y después y lo liberado por regla.
+
+| Comando | Qué hace |
+|---|---|
+| `-Clean [-Large] [-Json]` | Lista, solo lectura y sin administrador (documento `clean`); `-Large` agrega las carpetas más grandes (hasta 3 minutos) |
+| `-Clean -Remove '<ids>' [-WhatIf\|-Yes] [-Json]` | Borra ahora lo que permiten las reglas nombradas; `-WhatIf` dice qué borraría; sin `-Yes` pregunta (con `-Json` exige `-Yes`) |
+| Menú > 7, "Liberar espacio" | Pregunta si buscar las carpetas grandes, muestra la lista, se eligen por número las reglas que se pueden borrar ahora (nada viene marcado) y sigue la confirmación de `-Remove` |
+
+`-Clean` se excluye con los demás comandos y con las opciones de aplicar; `-Remove` y `-Large` exigen `-Clean`, y `-Remove` trae de vuelta `-Yes` y `-WhatIf` (como `-Disable` con `-Startup`).
+
+### 16.2 Reglas (`catalog/clean/rules.json`)
+
+Datos de la copia instalada, como las reglas de `-Startup` (`-CatalogPath` no las cambia). Reglas inválidas detienen el comando antes de medir. Cada regla: `id` (`clean.<palabras>`), `category` (`temp`, `browser`, `installers`, `dev`, `report`), `kind`, `scope`, `paths`, `title`, `why`, `sources` y, según el tipo, `filter`, `recurse`, `topFolders`, `exclude`, `minAgeDays`, `apps`, `services` y `hint`.
+
+- **Rutas:** empiezan con una variable que se lee de Windows (`GetFolderPath`), nunca del entorno: `%LOCALAPPDATA%`, `%APPDATA%`, `%USERPROFILE%` para `user`; `%PROGRAMDATA%`, `%SYSTEMROOT%`, `%SYSTEMDRIVE%` para `machine`. Un segmento puede ser `*` (cualquier carpeta de ese nivel, para los perfiles de los navegadores), nunca el último. Sin segmentos vacíos ni `..`. La validación rechaza para siempre los registros de CBS y DISM (lista negra), `Recovery`, `WinSxS`, `System32`, `SysWOW64`, `Installer`, y Documentos, Escritorio, Imágenes y OneDrive.
+- **Tipos:** `files` (archivos que coinciden con `filter`, más viejos que `minAgeDays`), `lghub-depots` (las versiones de G HUB que no nombran `current.json` ni `next.json`; si no se pueden leer, nada), `delivery-optimization` (la borra Windows con `Delete-DeliveryOptimizationCache -Force`), y los que solo se miden: `report` (un archivo o carpeta, con `hint`: cómo liberarlo a mano, que la herramienta nunca ejecuta) y `recycle-bin` (la carpeta de la cuenta en `$Recycle.Bin`; nunca se vacía).
+- **Edad:** temporales a los 7 días, como el Liberador de espacio; descargas de Windows Update a los 10 y solo con `wuauserv` detenido (nunca se detiene); versiones de G HUB con un día, por si hay una descarga en curso.
+- **Navegadores:** solo `Cache`, `Code Cache` y `GPUCache` (o `cache2` de Firefox), nunca cookies, contraseñas, historial ni sesiones; y solo con el navegador cerrado.
+
+### 16.3 Cómo borra
+
+1. Las reglas se miden otra vez para `-Remove`; cada una se revisa de nuevo justo antes de borrar (un programa abierto desde la lista la deja fuera, `app-running`).
+2. Un punto de reanálisis (unión, vínculo simbólico) no se sigue ni se borra en ningún nivel, tampoco al resolver `*`. Cada carpeta se vuelve a revisar justo antes de borrar sus archivos.
+3. Un archivo de solo lectura, abierto o denegado queda y se cuenta (`keptFiles`); la regla queda `partial` si se borró algo, `skipped` (`in-use`) si no.
+4. Se quita una subcarpeta que el borrado dejó vacía y que no cambió después de la edad de la regla; nunca la carpeta de la regla.
+5. Negativas antes de borrar nada: un id que no es regla (`err.cleanUnknown`), una regla que solo se mide (`err.cleanReportOnly`), una de máquina sin administrador (`err.cleanNeedsAdmin`, `needs-admin`; con `-WhatIf` se informa como `skipped`), una de usuario elevado con otra cuenta (`err.cleanSessionUser`, `session-user`).
+
+**Riesgo aceptado:** elevado, se limpian también carpetas que los programas de la cuenta pueden cambiar (`%TEMP%`). La revisión de cada carpeta justo antes de borrar achica la ventana, pero no la cierra: un programa que cambie una carpeta por una unión en ese instante podría desviar un borrado. Está en las limitaciones del README; quien quiera evitarlo limpia lo del usuario sin elevar.
+
+### 16.4 Pruebas
+
+`tests/Clean.Tests.ps1`: las reglas del repositorio validan y nunca nombran cookies, historial ni los registros de CBS y DISM; cada problema de validación; `*` y uniones al resolver; edad, filtro, `recurse`, `topFolders`, `exclude`, archivos abiertos y de solo lectura, uniones dentro de la carpeta, carpetas vaciadas; G HUB con y sin `current.json` legible; el comando con cada negativa, `-WhatIf`, `-Yes`, programa abierto, la pregunta y la opción 7 del menú. Todo en `$TestDrive`, con las variables de las rutas apuntadas ahí (`CleanVariableOverride`). `JsonContract.Tests.ps1` con el documento `clean`.

@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "about": "Rules of tuneup.ps1 -Clean (design, section 16). Each rule is a place that only holds copies Windows or a program makes again by itself (caches, temporary files, downloaded installers, crash reports), or, with kind report, a big item that is only measured and never deleted, with how to free it by hand. Paths start with one of the variables of the design (%LOCALAPPDATA%, %APPDATA%, %USERPROFILE% for scope user; %PROGRAMDATA%, %SYSTEMROOT%, %SYSTEMDRIVE% for scope machine), resolved from Windows and not from the environment; a segment may be * (any folder of that level, never a reparse point). filter is a file name pattern (default all files), recurse false reads only the folder itself, topFolders true deletes only what is inside its subfolders (the files of the folder itself stay), exclude names first-level items that stay, minAgeDays keeps what changed more recently, apps are processes that must be closed first and services are services that must be stopped. Written for this tool from what Windows and each program document; no code or definitions of other cleaners.",
+  "rules": [
+    {
+      "id": "clean.temp-user",
+      "category": "temp",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Temp"],
+      "minAgeDays": 7,
+      "title": { "es": "Archivos temporales de tu usuario", "en": "Temporary files of your user" },
+      "why": { "es": "Los programas dejan aquí archivos que ya no usan. Solo se borra lo que no cambió en 7 días, como el Liberador de espacio de Windows; lo que está abierto queda.", "en": "Programs leave files here that they no longer use. Only what did not change in 7 days is deleted, as Windows Disk Cleanup does; what is open stays." },
+      "sources": ["https://learn.microsoft.com/windows-server/administration/windows-commands/cleanmgr"]
+    },
+    {
+      "id": "clean.temp-windows",
+      "category": "temp",
+      "kind": "files",
+      "scope": "machine",
+      "paths": ["%SYSTEMROOT%\\Temp"],
+      "minAgeDays": 7,
+      "title": { "es": "Archivos temporales de Windows", "en": "Temporary files of Windows" },
+      "why": { "es": "Lo que dejan los instaladores y los servicios. Solo lo que no cambió en 7 días.", "en": "What installers and services leave behind. Only what did not change in 7 days." },
+      "sources": ["https://learn.microsoft.com/windows-server/administration/windows-commands/cleanmgr"]
+    },
+    {
+      "id": "clean.thumbnails",
+      "category": "temp",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Microsoft\\Windows\\Explorer"],
+      "filter": "thumbcache_*.db",
+      "recurse": false,
+      "title": { "es": "Miniaturas del Explorador", "en": "Thumbnails of File Explorer" },
+      "why": { "es": "Copias pequeñas de imágenes y videos; el Explorador las vuelve a crear al abrir cada carpeta. Las que el Explorador tiene abiertas quedan.", "en": "Small copies of pictures and videos; File Explorer makes them again when each folder opens. The ones it has open stay." },
+      "sources": ["https://learn.microsoft.com/windows-server/administration/windows-commands/cleanmgr"]
+    },
+    {
+      "id": "clean.crash-reports",
+      "category": "temp",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\CrashDumps", "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportArchive", "%LOCALAPPDATA%\\Microsoft\\Windows\\WER\\ReportQueue"],
+      "title": { "es": "Volcados y reportes de fallos de tus programas", "en": "Crash dumps and reports of your programs" },
+      "why": { "es": "Copias de la memoria de programas que se cerraron por un error, y reportes ya enviados o en cola. Solo sirven para diagnosticar ese fallo.", "en": "Copies of the memory of programs that closed with an error, and reports sent or queued. They only serve to diagnose that failure." },
+      "sources": ["https://learn.microsoft.com/windows/win32/wer/collecting-user-mode-dumps"]
+    },
+    {
+      "id": "clean.crash-reports-windows",
+      "category": "temp",
+      "kind": "files",
+      "scope": "machine",
+      "paths": ["%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportArchive", "%PROGRAMDATA%\\Microsoft\\Windows\\WER\\ReportQueue", "%SYSTEMROOT%\\Minidump", "%SYSTEMROOT%\\LiveKernelReports"],
+      "title": { "es": "Volcados y reportes de fallos de Windows", "en": "Crash dumps and reports of Windows" },
+      "why": { "es": "Reportes de errores de Windows y volcados de pantallas azules. Si estás diagnosticando un fallo, guárdalos antes.", "en": "Error reports of Windows and dumps of blue screens. If you are diagnosing a failure, keep them first." },
+      "sources": ["https://learn.microsoft.com/troubleshoot/windows-client/performance/memory-dump-file-options"]
+    },
+    {
+      "id": "clean.edge-cache",
+      "category": "browser",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Cache", "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\Code Cache", "%LOCALAPPDATA%\\Microsoft\\Edge\\User Data\\*\\GPUCache"],
+      "apps": ["msedge"],
+      "title": { "es": "Caché de Microsoft Edge", "en": "Cache of Microsoft Edge" },
+      "why": { "es": "Copias de páginas ya visitadas. Solo la caché: nunca cookies, contraseñas, historial ni sesiones. Las páginas cargan un poco más lento la primera vez.", "en": "Copies of pages already visited. Only the cache: never cookies, passwords, history or sessions. Pages load a little slower the first time." },
+      "sources": ["https://support.microsoft.com/microsoft-edge/view-and-delete-browser-history-in-microsoft-edge-00cf7943-a9e1-975a-a33d-ac10ce454ca4"]
+    },
+    {
+      "id": "clean.chrome-cache",
+      "category": "browser",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Cache", "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\Code Cache", "%LOCALAPPDATA%\\Google\\Chrome\\User Data\\*\\GPUCache"],
+      "apps": ["chrome"],
+      "title": { "es": "Caché de Google Chrome", "en": "Cache of Google Chrome" },
+      "why": { "es": "Copias de páginas ya visitadas. Solo la caché: nunca cookies, contraseñas, historial ni sesiones.", "en": "Copies of pages already visited. Only the cache: never cookies, passwords, history or sessions." },
+      "sources": ["https://support.google.com/chrome/answer/2392709"]
+    },
+    {
+      "id": "clean.brave-cache",
+      "category": "browser",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Cache", "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\Code Cache", "%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data\\*\\GPUCache"],
+      "apps": ["brave"],
+      "title": { "es": "Caché de Brave", "en": "Cache of Brave" },
+      "why": { "es": "Copias de páginas ya visitadas. Solo la caché: nunca cookies, contraseñas, historial ni sesiones.", "en": "Copies of pages already visited. Only the cache: never cookies, passwords, history or sessions." },
+      "sources": ["https://support.brave.com/hc/articles/360048833872"]
+    },
+    {
+      "id": "clean.firefox-cache",
+      "category": "browser",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Mozilla\\Firefox\\Profiles\\*\\cache2"],
+      "apps": ["firefox"],
+      "title": { "es": "Caché de Firefox", "en": "Cache of Firefox" },
+      "why": { "es": "Copias de páginas ya visitadas, en la carpeta local del perfil. Solo la caché: nunca cookies, contraseñas, historial ni sesiones.", "en": "Copies of pages already visited, in the local folder of the profile. Only the cache: never cookies, passwords, history or sessions." },
+      "sources": ["https://support.mozilla.org/kb/how-clear-firefox-cache"]
+    },
+    {
+      "id": "clean.nvidia-installers",
+      "category": "installers",
+      "kind": "files",
+      "scope": "machine",
+      "paths": ["%PROGRAMDATA%\\NVIDIA Corporation\\NVIDIA app\\UpdateFramework\\ota-artifacts", "%PROGRAMDATA%\\NVIDIA Corporation\\Downloader"],
+      "topFolders": true,
+      "exclude": ["config"],
+      "title": { "es": "Instaladores guardados por NVIDIA", "en": "Installers kept by NVIDIA" },
+      "why": { "es": "Paquetes de drivers y de la app de NVIDIA ya descargados. El driver instalado no se toca; si hace falta un instalador, la app lo vuelve a bajar. La configuración del descargador queda.", "en": "Packages of drivers and of the NVIDIA app already downloaded. The installed driver is not touched; if an installer is needed, the app downloads it again. The settings of the downloader stay." },
+      "sources": ["https://www.nvidia.com/en-us/software/nvidia-app/"]
+    },
+    {
+      "id": "clean.lghub-old-versions",
+      "category": "installers",
+      "kind": "lghub-depots",
+      "scope": "machine",
+      "paths": ["%PROGRAMDATA%\\LGHUB\\depots"],
+      "minAgeDays": 1,
+      "title": { "es": "Versiones viejas de Logitech G HUB", "en": "Old versions of Logitech G HUB" },
+      "why": { "es": "G HUB guarda cada versión que descarga. Quedan la que está instalada, la actualización pendiente (las que nombran current.json y next.json) y lo que cambió en el último día (una descarga en curso); el resto se borra. Si no se pueden leer las dos, no se borra nada.", "en": "G HUB keeps every version it downloads. The installed one, the pending update (the ones current.json and next.json name) and what changed in the last day (a download in progress) stay; the rest is deleted. If the two cannot be read, nothing is deleted." },
+      "sources": ["https://support.logi.com/hc/articles/360025298133"]
+    },
+    {
+      "id": "clean.delivery-optimization",
+      "category": "installers",
+      "kind": "delivery-optimization",
+      "scope": "machine",
+      "paths": ["%SYSTEMROOT%\\ServiceProfiles\\NetworkService\\AppData\\Local\\Microsoft\\Windows\\DeliveryOptimization\\Cache"],
+      "title": { "es": "Caché de Optimización de distribución", "en": "Delivery Optimization cache" },
+      "why": { "es": "Partes de actualizaciones que Windows guarda para compartir. Se borra con el comando de Windows (Delete-DeliveryOptimizationCache), no archivo por archivo.", "en": "Parts of updates that Windows keeps to share. It is deleted with the command of Windows (Delete-DeliveryOptimizationCache), not file by file." },
+      "sources": ["https://learn.microsoft.com/powershell/module/deliveryoptimization/delete-deliveryoptimizationcache"]
+    },
+    {
+      "id": "clean.windows-update-downloads",
+      "category": "installers",
+      "kind": "files",
+      "scope": "machine",
+      "paths": ["%SYSTEMROOT%\\SoftwareDistribution\\Download"],
+      "minAgeDays": 10,
+      "services": ["wuauserv"],
+      "title": { "es": "Descargas viejas de Windows Update", "en": "Old downloads of Windows Update" },
+      "why": { "es": "Actualizaciones ya instaladas que siguen descargadas. Solo lo que no cambió en 10 días, y solo con Windows Update detenido: si está trabajando, se deja para otra vez (la herramienta nunca lo detiene).", "en": "Updates already installed that are still downloaded. Only what did not change in 10 days, and only while Windows Update is stopped: if it is working, it is left for another time (the tool never stops it)." },
+      "sources": ["https://learn.microsoft.com/troubleshoot/windows-client/installing-updates-features-roles/additional-resources-for-windows-update"]
+    },
+    {
+      "id": "clean.npm-cache",
+      "category": "dev",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\npm-cache\\_cacache"],
+      "apps": ["node"],
+      "title": { "es": "Caché de npm", "en": "Cache of npm" },
+      "why": { "es": "Paquetes ya descargados por npm. Se vuelven a bajar cuando un proyecto los pide; la próxima instalación tarda más.", "en": "Packages npm already downloaded. They are downloaded again when a project asks for them; the next install takes longer." },
+      "sources": ["https://docs.npmjs.com/cli/commands/npm-cache"]
+    },
+    {
+      "id": "clean.pip-cache",
+      "category": "dev",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\pip\\Cache"],
+      "apps": ["pip", "pip3"],
+      "title": { "es": "Caché de pip", "en": "Cache of pip" },
+      "why": { "es": "Paquetes de Python ya descargados. Se vuelven a bajar cuando hacen falta.", "en": "Python packages already downloaded. They are downloaded again when needed." },
+      "sources": ["https://pip.pypa.io/en/stable/topics/caching/"]
+    },
+    {
+      "id": "clean.nuget-cache",
+      "category": "dev",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\NuGet\\v3-cache", "%LOCALAPPDATA%\\NuGet\\plugins-cache"],
+      "apps": ["dotnet", "devenv", "MSBuild"],
+      "title": { "es": "Caché HTTP de NuGet", "en": "HTTP cache of NuGet" },
+      "why": { "es": "Respuestas de los orígenes de paquetes. La carpeta global de paquetes no se toca, así que los proyectos siguen compilando sin bajar nada.", "en": "Responses of the package sources. The global packages folder is not touched, so projects keep building without downloading anything." },
+      "sources": ["https://learn.microsoft.com/nuget/consume-packages/managing-the-global-packages-and-cache-folders"]
+    },
+    {
+      "id": "clean.gradle-cache",
+      "category": "dev",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%USERPROFILE%\\.gradle\\caches"],
+      "apps": ["java", "studio64"],
+      "title": { "es": "Caché de Gradle", "en": "Cache of Gradle" },
+      "why": { "es": "Dependencias y resultados de compilación de Gradle (Android Studio). Se regeneran; la próxima compilación tarda más.", "en": "Dependencies and build outputs of Gradle (Android Studio). They are made again; the next build takes longer." },
+      "sources": ["https://docs.gradle.org/current/userguide/directory_layout.html"]
+    },
+    {
+      "id": "clean.vscode-cache",
+      "category": "dev",
+      "kind": "files",
+      "scope": "user",
+      "paths": ["%APPDATA%\\Code\\Cache", "%APPDATA%\\Code\\CachedData", "%APPDATA%\\Code\\Code Cache", "%APPDATA%\\Code\\GPUCache", "%APPDATA%\\Code\\logs"],
+      "apps": ["Code"],
+      "title": { "es": "Caché y registros de Visual Studio Code", "en": "Cache and logs of Visual Studio Code" },
+      "why": { "es": "Copias que VS Code vuelve a crear y registros viejos. La configuración, las extensiones y el trabajo abierto no se tocan.", "en": "Copies VS Code makes again and old logs. Settings, extensions and open work are not touched." },
+      "sources": ["https://code.visualstudio.com/docs/supporting/faq"]
+    },
+    {
+      "id": "clean.report-hibernation",
+      "category": "report",
+      "kind": "report",
+      "scope": "machine",
+      "paths": ["%SYSTEMDRIVE%\\hiberfil.sys"],
+      "title": { "es": "Archivo de hibernación", "en": "Hibernation file" },
+      "why": { "es": "Guarda la memoria para hibernar y para el inicio rápido. Si no hibernas, se libera apagando la hibernación, lo que también apaga el inicio rápido.", "en": "It keeps the memory to hibernate and for fast startup. If you do not hibernate, it is freed by turning hibernation off, which also turns fast startup off." },
+      "hint": { "es": "powercfg /h off (como administrador; powercfg /h on lo devuelve)", "en": "powercfg /h off (as administrator; powercfg /h on brings it back)" },
+      "sources": ["https://learn.microsoft.com/windows-hardware/design/device-experiences/powercfg-command-line-options"]
+    },
+    {
+      "id": "clean.report-windows-old",
+      "category": "report",
+      "kind": "report",
+      "scope": "machine",
+      "paths": ["%SYSTEMDRIVE%\\Windows.old"],
+      "title": { "es": "Instalación anterior de Windows", "en": "Previous Windows installation" },
+      "why": { "es": "Permite volver a la versión anterior durante unos días. Borrarla quita esa vuelta atrás.", "en": "It lets you go back to the earlier version for some days. Deleting it removes that way back." },
+      "hint": { "es": "Configuración > Sistema > Almacenamiento > Archivos temporales > Instalación anterior de Windows", "en": "Settings > System > Storage > Temporary files > Previous Windows installation" },
+      "sources": ["https://support.microsoft.com/windows/free-up-drive-space-in-windows-85529ccb-c365-490d-b548-831022bc9b32"]
+    },
+    {
+      "id": "clean.report-docker",
+      "category": "report",
+      "kind": "report",
+      "scope": "user",
+      "paths": ["%LOCALAPPDATA%\\Docker\\wsl"],
+      "title": { "es": "Disco de Docker Desktop", "en": "Disk of Docker Desktop" },
+      "why": { "es": "Imágenes, contenedores y volúmenes de Docker. Lo que no usa ningún contenedor se puede quitar desde Docker; el disco virtual no se achica solo.", "en": "Images, containers and volumes of Docker. What no container uses can be removed from Docker; the virtual disk does not shrink by itself." },
+      "hint": { "es": "docker system prune (quita imágenes y contenedores sin usar; revisa antes con docker system df)", "en": "docker system prune (removes unused images and containers; check first with docker system df)" },
+      "sources": ["https://docs.docker.com/reference/cli/docker/system/prune/"]
+    },
+    {
+      "id": "clean.report-downloads",
+      "category": "report",
+      "kind": "report",
+      "scope": "user",
+      "paths": ["%USERPROFILE%\\Downloads"],
+      "title": { "es": "Carpeta Descargas", "en": "Downloads folder" },
+      "why": { "es": "Son tus archivos: la herramienta nunca los borra. Revisa a mano los instaladores y archivos que ya no necesitas.", "en": "They are your files: the tool never deletes them. Review by hand the installers and files you no longer need." },
+      "hint": { "es": "Revísala en el Explorador, ordenada por tamaño", "en": "Review it in File Explorer, sorted by size" },
+      "sources": ["https://support.microsoft.com/windows/free-up-drive-space-in-windows-85529ccb-c365-490d-b548-831022bc9b32"]
+    },
+    {
+      "id": "clean.report-recycle-bin",
+      "category": "report",
+      "kind": "recycle-bin",
+      "scope": "user",
+      "paths": [],
+      "title": { "es": "Papelera de reciclaje", "en": "Recycle Bin" },
+      "why": { "es": "Lo que borraste sigue ocupando espacio hasta vaciarla. La herramienta nunca la vacía: lo que hay ahí todavía se puede recuperar.", "en": "What you deleted still takes space until you empty it. The tool never empties it: what is there can still be recovered." },
+      "hint": { "es": "Clic derecho en la Papelera del escritorio > Vaciar Papelera de reciclaje", "en": "Right-click the Recycle Bin on the desktop > Empty Recycle Bin" },
+      "sources": ["https://support.microsoft.com/windows/free-up-drive-space-in-windows-85529ccb-c365-490d-b548-831022bc9b32"]
+    }
+  ]
+}

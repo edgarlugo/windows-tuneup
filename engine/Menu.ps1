@@ -99,7 +99,7 @@ function Write-TuneupMenuHeader {
     Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $adminKey)
     if ($environment.IsManaged) { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.managed') }
     Write-TuneupMenuLine -Context $Context
-    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.startup', 'menu.main.exit') {
+    foreach ($key in 'menu.main.optimize', 'menu.main.status', 'menu.main.undo', 'menu.main.health', 'menu.main.measure', 'menu.main.startup', 'menu.main.clean', 'menu.main.exit') {
         Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key $key)
     }
 }
@@ -128,6 +128,7 @@ function Invoke-TuneupMenu {
                 '4' { 'Health' }
                 '5' { 'Measure' }
                 '6' { 'Startup' }
+                '7' { 'Clean' }
                 default { $null }
             }
             if ($null -eq $action -and $choice -ne '') { Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.invalid') }
@@ -294,6 +295,33 @@ function Invoke-TuneupMenuStartup {
         return
     }
     Invoke-TuneupStartupCommand -Context $Context -Disable @($picked | ForEach-Object { [string]$_.id })
+}
+
+# What takes space that is made again by itself: the list of -Clean (and, when asked, the biggest folders),
+# then the rules to delete, picked by number among the ones that can be removed now (none picked
+# beforehand), and the confirmation of -Clean -Remove, which measures them again. What needs administrator
+# is not offered from a menu that is not elevated: the list marks it and says so.
+function Invoke-TuneupMenuClean {
+    param([Parameter(Mandatory)]$Context)
+    $Context.Pause = $true
+    $large = Read-TuneupMenuConfirmation -Context $Context -Prompt (Get-TuneupText -Key 'menu.clean.large')
+    if ($Context.InputEnded) { return }
+    $warningsBefore = $Context.Warnings.Count
+    Invoke-TuneupCleanCommand -Context $Context -Large:$large
+    $document = $Context.Result
+    if ($Context.ExitCode -ne 0 -or $null -eq $document) { return }
+    while ($Context.Warnings.Count -gt $warningsBefore) { $Context.Warnings.RemoveAt($Context.Warnings.Count - 1) }
+    $choices = @($document.rules | Where-Object { $_.canRemove })
+    if (-not $choices.Count) {
+        Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.clean.none')
+        return
+    }
+    $lines = @(foreach ($rule in $choices) { '{0} - {1}' -f $rule.title, (Format-TuneupCleanSize -Bytes $rule.bytes) })
+    Write-TuneupMenuLine -Context $Context
+    Write-TuneupMenuLine -Context $Context -Text (Get-TuneupText -Key 'menu.clean.header')
+    $chosen = Select-TuneupMenuItem -Context $Context -Lines $lines -Prompt (Get-TuneupText -Key 'menu.select.prompt')
+    if ($null -eq $chosen -or -not @($chosen).Count) { return }
+    Invoke-TuneupCleanCommand -Context $Context -Remove @($chosen | ForEach-Object { [string]$choices[$_].id })
 }
 
 # The status, and when Windows reverted something, the offer to apply it again. A startup entry that is on

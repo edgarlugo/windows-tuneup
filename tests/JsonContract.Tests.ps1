@@ -94,6 +94,18 @@ Describe 'docs/json-contract.md' {
         $protectedEntry.protected = 'vpn'
         $startupDocument = Get-TuneupStartupDocument -Entry @($startupEntry, $workEntry, $protectedEntry) -IsAdmin $false -WorkPc $true
         $Documents.startup = Write-TuneupStartupReport -Document $startupDocument -Warnings @('w') -Json | ConvertFrom-Json
+        # A clean document with the biggest folders and a removal, so every field has a value.
+        $cleanRule = [pscustomobject]@{ id = 'clean.test'; category = 'report'; kind = 'report'; scope = 'user'; paths = @('%USERPROFILE%\Downloads')
+            title = @{ es = 'a'; en = 'a' }; why = @{ es = 'b'; en = 'b' }; hint = @{ es = 'c'; en = 'c' }; sources = @('https://example.com/') }
+        $cleanMeasured = [pscustomobject]@{ Tally = [pscustomobject]@{ Files = 1; Bytes = [long]10; Unreadable = 0 }; Paths = [string[]]@('C:\x'); Reason = $null }
+        $cleanBusy = [pscustomobject]@{ Apps = [string[]]@('app'); Services = [string[]]@('svc') }
+        $cleanView = ConvertTo-TuneupCleanView -Rule $cleanRule -Measured $cleanMeasured -Busy $cleanBusy -Environment (New-TestEnvironment)
+        $cleanResult = [pscustomobject]@{ id = 'clean.test'; title = 'a'; status = 'failed'; reason = 'in-use'; freedBytes = [long]1; deletedFiles = 1; keptFiles = 1
+            runningApps = [string[]]@('app'); runningServices = [string[]]@('svc'); error = 'e' }
+        $cleanLargest = [pscustomobject]@{ complete = $false; items = @([pscustomobject]@{ path = 'C:\big'; bytes = [long]5; partial = $true }) }
+        $cleanRemoval = [pscustomobject]@{ planOnly = $false; results = @($cleanResult); freedBytes = [long]1; freeBytesBefore = [long]2; freeBytesAfter = [long]3 }
+        $cleanDocument = Get-TuneupCleanDocument -View @($cleanView) -IsAdmin $true -FreeBytes 2 -Largest $cleanLargest -Removal $cleanRemoval
+        $Documents.clean = Write-TuneupCleanReport -Document $cleanDocument -Warnings @('w') -Json | ConvertFrom-Json
         # Every signal found, so every field of the document has a value.
         Mock -ModuleName Tuneup Get-TuneupInstalledProgramName { 'Steam', 'Git' }
         Mock -ModuleName Tuneup Get-TuneupUserAppxName { 'Microsoft.GamingServices' }
@@ -178,6 +190,7 @@ Describe 'docs/json-contract.md' {
         @{ Command = 'list' }
         @{ Command = 'suggest' }
         @{ Command = 'startup' }
+        @{ Command = 'clean' }
         @{ Command = 'error' }
     ) {
         param($Command)

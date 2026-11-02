@@ -403,6 +403,181 @@ function Invoke-TuneupStartupCommand {
     }
 }
 
+# -Clean (design, section 16): what takes space that Windows or a program makes again by itself, measured,
+# read only. With -Remove, the rules named by their id are deleted now, after the confirmation (or -Yes);
+# -WhatIf gives what would be deleted and deletes nothing. Deleting cannot be undone, so it is no run of the
+# tool: -Status and -Undo never see it. The rules are measured again for -Remove, never taken from an
+# earlier list. An id that is not a rule, a rule that is only measured, or one that needs what this process
+# does not have (administrator, the account at this desktop) stops everything before anything is deleted;
+# a rule whose program is open, or that has nothing to delete now, is left out and the others go on.
+function Invoke-TuneupCleanCommand {
+    param(
+        [Parameter(Mandatory)]$Context,
+        [AllowEmptyCollection()][string[]]$Remove = @(),
+        [switch]$Large,
+        [switch]$PlanOnly,
+        [switch]$Yes
+    )
+    $environment = Get-TuneupContextEnvironment -Context $Context
+    # Ids are lowercase; one written in capitals is the same id.
+    $ids = @($Remove | Where-Object { $_ } | ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+    $rules = @((Invoke-TuneupContextStep -Context $Context -Step { Import-TuneupCleanRuleSet }).rules)
+    $byId = @{}
+    foreach ($rule in $rules) { $byId[[string]$rule.id] = $rule }
+    $unknown = @($ids | Where-Object { -not $byId.ContainsKey($_) })
+    if ($unknown.Count) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.cleanUnknown' -Format ($unknown -join ', '))
+        return
+    }
+    $measuredOnly = @($ids | Where-Object { $script:CleanReportKinds -ccontains [string]$byId[$_].kind })
+    if ($measuredOnly.Count) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.cleanReportOnly' -Format ($measuredOnly -join ', '))
+        return
+    }
+    # Elevated with another administrator's password, the folders of the user are that administrator's.
+    if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false) {
+        $userIds = @($ids | Where-Object { $byId[$_].scope -eq 'user' })
+        if ($userIds.Count) {
+            Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.cleanSessionUser' -Format ($userIds -join ', ')) -Reason 'session-user'
+            return
+        }
+    }
+    # A rule of the machine needs an elevated process; what would be deleted (-WhatIf) does not.
+    $machineIds = @($ids | Where-Object { $byId[$_].scope -eq 'machine' })
+    if ($machineIds.Count -and -not $PlanOnly -and -not $environment.IsAdmin) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.cleanNeedsAdmin' -Format ($machineIds -join ', ')) -Reason $script:NeedsAdminError
+        return
+    }
+    if ($ids.Count -and $Context.Json -and -not $PlanOnly -and -not $Yes) {
+        Write-TuneupCommandError -Context $Context -Message (Get-TuneupText -Key 'err.jsonNeedsYes')
+        return
+    }
+    if (-not $ids.Count) {
+        if (-not $environment.IsAdmin) { Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'clean.unelevatedNote') } }
+        if ($environment.IsAdmin -and $environment.IsSessionUser -eq $false) { Invoke-TuneupContextStep -Context $Context -Step { Write-Warning (Get-TuneupText -Key 'clean.otherAccountNote') } }
+    }
+    $chosen = $(if ($ids.Count) { @($ids | ForEach-Object { $byId[$_] }) } else { $rules })
+    if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'clean.measuring') }
+    $views = @(foreach ($rule in $chosen) { Measure-TuneupCleanContextRule -Context $Context -Rule $rule -Environment $environment })
+    $freeBefore = Get-TuneupSystemDriveFreeByte
+    if (-not $ids.Count) {
+        $largest = $null
+        if ($Large) {
+            if (-not $Context.Json) { Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'clean.largest.running' -Format ([int]($script:CleanLargeBudgetSeconds / 60))) }
+            $largest = Get-TuneupCleanLargest
+        }
+        $document = Get-TuneupCleanDocument -View $views -IsAdmin ([bool]$environment.IsAdmin) -FreeBytes $freeBefore -Largest $largest
+        $Context.Result = $document
+        Write-TuneupCleanReport -Document $document -Warnings $Context.Warnings.ToArray() -Json:$Context.Json
+        $Context.ExitCode = 0
+        return
+    }
+    $removable = @($views | Where-Object { $_.canRemove })
+    if ($PlanOnly) {
+        $results = @(foreach ($view in $views) { New-TuneupCleanResult -View $view -State $(if ($view.canRemove) { 'planned' } else { 'skipped' }) -Reason $view.reason -FreedBytes $view.bytes -DeletedFiles $view.files })
+        $removal = [pscustomobject]@{ planOnly = $true; results = $results; freedBytes = [long](@($removable | Measure-Object -Property bytes -Sum).Sum); freeBytesBefore = $freeBefore; freeBytesAfter = $null }
+        Write-TuneupCleanOutcome -Context $Context -View $views -Removal $removal -FreeBytes $freeBefore -IsAdmin ([bool]$environment.IsAdmin)
+        $Context.ExitCode = 0
+        return
+    }
+    if (-not $Context.Json -and -not $Yes) {
+        foreach ($view in $views) {
+            $line = $(if ($view.canRemove) { Get-TuneupText -Key 'clean.planLine' -Format $view.title, (Format-TuneupCleanSize -Bytes $view.bytes), $view.files }
+                else { Get-TuneupText -Key 'clean.planSkip' -Format $view.title, (Get-TuneupText -Key "clean.reason.$($view.reason)" -Format ((@($view.runningApps) + @($view.runningServices)) -join ', ')) })
+            Write-TuneupIoLine -Io $Context.Io -Text $line
+        }
+        if (-not $removable.Count) {
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'clean.nothing')
+            $Context.ExitCode = 2
+            return
+        }
+        $total = Format-TuneupCleanSize -Bytes ([long](@($removable | Measure-Object -Property bytes -Sum).Sum))
+        if (-not (Read-TuneupConfirmation -Io $Context.Io -Prompt (Get-TuneupText -Key 'clean.confirm' -Format $removable.Count, $total))) {
+            Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'clean.cancelled')
+            $Context.ExitCode = 1
+            return
+        }
+    }
+    $results = @(foreach ($view in $views) {
+        $rule = $byId[$view.id]
+        # Measured again right before: a program opened since the list, or files that changed, count now.
+        $busy = Get-TuneupCleanBusy -Rule $rule
+        $blocked = $(if ($busy.Apps.Count) { 'app-running' } elseif ($busy.Services.Count) { 'service-running' } elseif (-not $view.canRemove) { $view.reason })
+        if ($blocked) {
+            $skipped = New-TuneupCleanResult -View $view -State 'skipped' -Reason $blocked
+            $skipped.runningApps = [string[]]@($busy.Apps)
+            $skipped.runningServices = [string[]]@($busy.Services)
+            $skipped
+            continue
+        }
+        try {
+            $done = (Invoke-TuneupCleanRule -Rule $rule -Delete).Tally
+            $state = $(if ($done.Deleted -and -not $done.Kept -and -not $done.Unreadable) { 'removed' } elseif ($done.Deleted) { 'partial' } else { 'skipped' })
+            $why = $(if ($state -eq 'skipped') { $(if ($done.Kept) { 'in-use' } else { 'nothing-to-remove' }) } elseif ($state -eq 'partial') { 'in-use' } else { $null })
+            New-TuneupCleanResult -View $view -State $state -Reason $why -FreedBytes $done.FreedBytes -DeletedFiles $done.Deleted -KeptFiles $done.Kept
+        } catch {
+            $failed = New-TuneupCleanResult -View $view -State 'failed'
+            $failed.error = $_.Exception.Message
+            $failed
+        }
+    })
+    $freeAfter = Get-TuneupSystemDriveFreeByte
+    $removal = [pscustomobject]@{ planOnly = $false; results = $results; freedBytes = [long](@($results | Measure-Object -Property freedBytes -Sum).Sum); freeBytesBefore = $freeBefore; freeBytesAfter = $freeAfter }
+    Write-TuneupCleanOutcome -Context $Context -View $views -Removal $removal -FreeBytes $freeBefore -IsAdmin ([bool]$environment.IsAdmin)
+    # Done when every rule was deleted completely, or had nothing to delete.
+    $incomplete = @($results | Where-Object { $_.status -ne 'removed' -and -not ($_.status -eq 'skipped' -and $_.reason -eq 'nothing-to-remove') })
+    $Context.ExitCode = $(if ($incomplete.Count) { 2 } else { 0 })
+}
+
+# One rule measured for the clean document; a rule that cannot be read is a warning and stays in the list.
+function Measure-TuneupCleanContextRule {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)]$Rule, [Parameter(Mandatory)]$Environment)
+    try {
+        $measured = Invoke-TuneupCleanRule -Rule $Rule
+    } catch {
+        $message = $_.Exception.Message
+        Invoke-TuneupContextStep -Context $Context -Step { Write-Warning "Could not measure $($Rule.id): $message" }
+        $measured = [pscustomobject]@{ Tally = New-TuneupCleanTally; Paths = [string[]]@(); Reason = 'unreadable' }
+    }
+    ConvertTo-TuneupCleanView -Rule $Rule -Measured $measured -Busy (Get-TuneupCleanBusy -Rule $Rule) -Environment $Environment
+}
+
+function New-TuneupCleanResult {
+    param([Parameter(Mandatory)]$View, [Parameter(Mandatory)][string]$State, [string]$Reason, [long]$FreedBytes = 0, [int]$DeletedFiles = 0, [int]$KeptFiles = 0)
+    [pscustomobject]@{
+        id              = $View.id
+        title           = $View.title
+        status          = $State
+        reason          = $(if ($Reason) { $Reason } else { $null })
+        freedBytes      = $FreedBytes
+        deletedFiles    = $DeletedFiles
+        keptFiles       = $KeptFiles
+        runningApps     = [string[]]@($View.runningApps)
+        runningServices = [string[]]@($View.runningServices)
+        error           = $null
+    }
+}
+
+function Write-TuneupCleanOutcome {
+    param([Parameter(Mandatory)]$Context, [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$View, [Parameter(Mandatory)]$Removal, [long]$FreeBytes, [bool]$IsAdmin)
+    $document = Get-TuneupCleanDocument -View $View -IsAdmin $IsAdmin -FreeBytes $FreeBytes -Removal $Removal
+    $Context.Result = $document
+    if ($Context.Json) {
+        Write-TuneupJson (Add-TuneupJsonWarning -Document $document -Warnings $Context.Warnings.ToArray())
+        return
+    }
+    if ($Removal.planOnly) {
+        foreach ($result in @($Removal.results)) {
+            $line = $(if ($result.status -eq 'planned') { Get-TuneupText -Key 'clean.planLine' -Format $result.title, (Format-TuneupCleanSize -Bytes $result.freedBytes), $result.deletedFiles }
+                else { Get-TuneupText -Key 'clean.planSkip' -Format $result.title, (Get-TuneupText -Key "clean.reason.$($result.reason)" -Format ((@($result.runningApps) + @($result.runningServices)) -join ', ')) })
+            Write-TuneupIoLine -Io $Context.Io -Text $line
+        }
+        Write-TuneupIoLine -Io $Context.Io -Text (Get-TuneupText -Key 'clean.planOnly' -Format (Format-TuneupCleanSize -Bytes $Removal.freedBytes))
+        return
+    }
+    Write-TuneupCleanRemoval -Removal $Removal
+}
+
 # True when a profile named by id or alias offers the review of what starts with Windows (offersStartup:
 # gaming). A name that is not a profile offers nothing: the plan already said so.
 function Test-TuneupStartupOffered {
@@ -738,12 +913,16 @@ function Invoke-TuneupCli {
         [switch]$Suggest,
         [switch]$Startup,
         [string[]]$Disable = @(),
+        [switch]$Clean,
+        [string[]]$Remove = @(),
+        [switch]$Large,
         [AllowEmptyString()][string]$ReadResult
     )
     $ProfileName = @(Get-TuneupCleanList ($ProfileName -split ','))
     $Include = @(Get-TuneupCleanList ($Include -split ','))
     $Exclude = @(Get-TuneupCleanList ($Exclude -split ','))
     $Disable = @(Get-TuneupCleanList ($Disable -split ','))
+    $Remove = @(Get-TuneupCleanList ($Remove -split ','))
 
     # A parameter counts as given when it was bound and carries a value (a switch only when it is on).
     $present = @()
@@ -765,6 +944,9 @@ function Invoke-TuneupCli {
     if ($PSBoundParameters.ContainsKey('Suggest') -and $Suggest) { $present += 'Suggest' }
     if ($PSBoundParameters.ContainsKey('Startup') -and $Startup) { $present += 'Startup' }
     if ($PSBoundParameters.ContainsKey('Disable') -and $Disable.Count) { $present += 'Disable' }
+    if ($PSBoundParameters.ContainsKey('Clean') -and $Clean) { $present += 'Clean' }
+    if ($PSBoundParameters.ContainsKey('Remove') -and $Remove.Count) { $present += 'Remove' }
+    if ($PSBoundParameters.ContainsKey('Large') -and $Large) { $present += 'Large' }
     if ($PSBoundParameters.ContainsKey('ReadResult')) { $present += 'ReadResult' }
     $conflict = Get-TuneupArgumentConflict -Present $present
     if ($conflict) {
@@ -822,6 +1004,7 @@ function Invoke-TuneupCli {
     }
     if ($List) { Invoke-TuneupListCommand -Context $Context; return }
     if ($Startup) { Invoke-TuneupStartupCommand -Context $Context -Disable $Disable -PlanOnly:$PlanOnly -Yes:$Yes; return }
+    if ($Clean) { Invoke-TuneupCleanCommand -Context $Context -Remove $Remove -Large:$Large -PlanOnly:$PlanOnly -Yes:$Yes; return }
     if ($Status) { Invoke-TuneupStatusCommand -Context $Context -Reapply:$Reapply -PlanOnly:$PlanOnly -Yes:$Yes -Include $Include; return }
     if ($Undo) { Invoke-TuneupUndoCommand -Context $Context -RunId $Undo -TweakId $Tweak; return }
     if ($Health) { Invoke-TuneupHealthCommand -Context $Context -Repair:$Repair; return }
