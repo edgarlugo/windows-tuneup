@@ -261,8 +261,18 @@ Describe 'A job of the window' {
         while (-not (Test-TuneupGuiJobDone -Job $job) -and $clock.Elapsed.TotalSeconds -lt 120) { Start-Sleep -Milliseconds 200 }
         $result = Complete-TuneupGuiJob -Job $job
         $result.Problem | Should -BeNullOrEmpty
-        $result.Document.command | Should -Be 'list'
-        $result.ExitCode | Should -Be 0
-        @(Get-TuneupGuiLogLine | Where-Object { $_.Text -like 'Ends: list, code 0*' }).Count | Should -Be 1
+        # The window never passes -Force, so on Windows Server (the CI runner) the engine refuses with an
+        # error document: the job still has to read it and its exit code.
+        $installation = [string](Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -Name InstallationType -ErrorAction SilentlyContinue).InstallationType
+        if ($installation -like 'Server*') {
+            $result.Document.command | Should -Be 'error'
+            $result.Document.message | Should -Match 'Windows Server'
+            $code = 1
+        } else {
+            $result.Document.command | Should -Be 'list' -Because ([string]$result.Document.message)
+            $code = 0
+        }
+        $result.ExitCode | Should -Be $code
+        @(Get-TuneupGuiLogLine | Where-Object { $_.Text -like "Ends: list, code $code*" }).Count | Should -Be 1
     }
 }
