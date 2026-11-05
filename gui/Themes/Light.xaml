@@ -1,0 +1,31 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- Tokens of the light theme (design, section 17.4). Dark.xaml has the same keys. -->
+    <SolidColorBrush x:Key="Bg" Color="#F3F3F3"/>
+    <SolidColorBrush x:Key="Surface" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="SurfaceHover" Color="#F6F6F6"/>
+    <SolidColorBrush x:Key="NavHover" Color="#EAEAEA"/>
+    <SolidColorBrush x:Key="NavSelected" Color="#E8E8E8"/>
+    <SolidColorBrush x:Key="Border" Color="#E5E5E5"/>
+    <SolidColorBrush x:Key="ControlBorder" Color="#8A8A8A"/>
+    <SolidColorBrush x:Key="Text" Color="#1B1B1B"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#5C5C5C"/>
+    <SolidColorBrush x:Key="Accent" Color="#005FB8"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#004E8C"/>
+    <SolidColorBrush x:Key="OnAccent" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Danger" Color="#C42B1C"/>
+    <SolidColorBrush x:Key="DangerHover" Color="#A4262C"/>
+    <SolidColorBrush x:Key="OnDanger" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="DisabledBg" Color="#F0F0F0"/>
+    <SolidColorBrush x:Key="DisabledText" Color="#6E6E6E"/>
+    <SolidColorBrush x:Key="SuccessFg" Color="#0E700E"/>
+    <SolidColorBrush x:Key="SuccessBg" Color="#DFF6DD"/>
+    <SolidColorBrush x:Key="CautionFg" Color="#7A4A00"/>
+    <SolidColorBrush x:Key="CautionBg" Color="#FFF4CE"/>
+    <SolidColorBrush x:Key="CriticalFg" Color="#A4262C"/>
+    <SolidColorBrush x:Key="CriticalBg" Color="#FDE7E9"/>
+    <SolidColorBrush x:Key="InfoFg" Color="#004E8C"/>
+    <SolidColorBrush x:Key="InfoBg" Color="#E6F0FA"/>
+    <SolidColorBrush x:Key="NeutralBg" Color="#F3F3F3"/>
+    <SolidColorBrush x:Key="Scrim" Color="#66000000"/>
+</ResourceDictionary>

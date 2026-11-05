@@ -34,7 +34,7 @@ Cualquier persona en internet, con o sin Claude. Esto fija tres exigencias:
 
 ### Fuera de alcance
 
-- Interfaz gráfica (WPF). Solo menú en consola y parámetros.
+- ~~Interfaz gráfica (WPF)~~: entró en la sección 17 (2026-11-04), sobre el mismo motor.
 - Windows Server, Windows 8.1 o anteriores.
 - Instalar programas de terceros (eso es tarea de `winget`, no de este repo).
 - Ajustes de un fabricante concreto (HP, Dell, Lenovo), salvo quitar sus apps de la Store.
@@ -45,7 +45,7 @@ Cualquier persona en internet, con o sin Claude. Esto fija tres exigencias:
 |---|---|---|
 | Motor | Propio completo, **híbrido** (opción C) | El catálogo declarativo cubre cerca del 90 % y se puede validar y probar automáticamente; las "acciones" en PowerShell cubren los casos especiales con el mismo contrato |
 | Idioma | Español e inglés | Documentación en ambos; los mensajes del script siguen el idioma de Windows, o `-Lang` |
-| Interfaz | Menú en consola + parámetros | Sin dependencias; los parámetros los usa la skill y la automatización |
+| Interfaz | Menú en consola + parámetros, y una ventana WPF (sección 17) | Sin dependencias; los parámetros los usa la skill y la automatización; la ventana usa los mismos comandos |
 | Nombre | `windows-tuneup` | Descriptivo, fácil de encontrar |
 | Licencia | MIT | Permite reutilizar. De privacy.sexy (AGPL-3.0) se toman **solo ideas**, nunca código |
 | PowerShell | Windows PowerShell 5.1 | El módulo Appx no funciona en PowerShell 7; con `pwsh` se relanza con `powershell.exe` |
@@ -864,3 +864,112 @@ Datos de la copia instalada, como las reglas de `-Startup` (`-CatalogPath` no la
 ### 16.4 Pruebas
 
 `tests/Clean.Tests.ps1`: las reglas del repositorio validan y nunca nombran cookies, historial ni los registros de CBS y DISM; cada problema de validación; `*` y uniones al resolver; edad, filtro, `recurse`, `topFolders`, `exclude`, archivos abiertos y de solo lectura, uniones dentro de la carpeta, carpetas vaciadas; G HUB con y sin `current.json` legible; el comando con cada negativa, `-WhatIf`, `-Yes`, programa abierto, la pregunta y la opción 7 del menú. Todo en `$TestDrive`, con las variables de las rutas apuntadas ahí (`CleanVariableOverride`). `JsonContract.Tests.ps1` con el documento `clean`.
+
+## 17. Interfaz gráfica (`gui.ps1`, 2026-11-04)
+
+Diseño aprobado por el usuario el 2026-11-04 sobre una maqueta navegable (lienzo privado "windows-tuneup GUI": la app con sus nueve secciones, la hoja de errores y estados, y el sistema de diseño), revisada con las skills de crítica, accesibilidad (WCAG 2.1 AA) y textos del plugin Design. Esta sección es la especificación de entrega. Donde contradice la sección 1 (la interfaz gráfica estaba fuera de alcance), manda esta.
+
+### 17.1 Qué es y qué no es
+
+Una ventana WPF para quien no quiere la consola, con **todo** lo que hace la línea de comandos: Optimizar (perfiles, riesgo alto, los que preguntan antes, plan, aplicar), Estado y volver a aplicar, Deshacer (corrida o ajuste), Salud (revisar y reparar), Medir (esperar, comparar), Arranque (lista y apagar), Liberar espacio (lista, carpetas grandes, borrar) y el Registro.
+
+**No duplica el motor.** Cada acción corre `tuneup.ps1 ... -Json` en un proceso aparte y la ventana dibuja el documento que vuelve (`docs/json-contract.md`). Así hereda todas las barreras (lista negra, carpeta de estado protegida, preflight, `session-user`, rechazos) sin reescribirlas, y lo que la ventana muestra es lo mismo que verían la skill o la consola. Ni la ventana ni su código tocan el registro, servicios o archivos del sistema por su cuenta; lo único que escribe es su propio registro y sus preferencias en `%LOCALAPPDATA%\windows-tuneup\gui`.
+
+### 17.2 Arquitectura
+
+| Pieza | Qué hace |
+|---|---|
+| `gui.ps1` | Punto de entrada. Se relanza en Windows PowerShell 5.1 con `-STA` si hace falta (WPF lo exige), carga `PresentationFramework` y los módulos solo de las carpetas de Windows y de `Program Files` (como `tuneup.ps1`), y abre la ventana. `-Section <nombre>` abre en esa sección (lo usa el reinicio como administrador). |
+| `gui/MainWindow.xaml` | La ventana: barra superior, navegación lateral, las nueve secciones y la barra de estado. Sin código en el XAML (nada de `x:Code` ni eventos con nombre): los eventos se conectan desde PowerShell por `x:Name`. |
+| `gui/Themes/Light.xaml`, `Dark.xaml` | Los tokens (17.4) como `SolidColorBrush` con las mismas claves en los dos. Se cargan dentro del XAML antes de crear la ventana (un diccionario cambiado después no llega a lo que WPF ya resolvió), así que cambiar el tema o el idioma vuelve a abrir la ventana en la misma sección. |
+| `gui/GuiCore.ps1` | Lógica sin interfaz, probada con Pester: arma los argumentos de cada comando, corre el proceso, lee el documento, traduce un `error` a qué pasó, por qué y qué hacer, escribe el registro, formatea tamaños y fechas. |
+| `gui/GuiWindow.ps1` | Conecta la ventana: navegación, llenar cada sección desde su documento, diálogos, avisos, tema e idioma. |
+
+**Ejecución.** Cada comando es un `System.Diagnostics.Process` de `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <tuneup.ps1 de la misma copia> ... -Json -Lang <idioma>`, sin ventana, con la salida estándar y de error leídas de forma asíncrona. Un `DispatcherTimer` de 200 ms mira si terminó: la ventana nunca se congela. Mientras corre un comando que cambia algo, el contenido queda deshabilitado (un cambio a la vez) y la navegación sigue disponible; los comandos que solo leen corren en paralelo.
+
+**Administrador.** La ventana corre como el usuario. Una acción que necesita administrador (lo dice el plan con `requiresAdmin`, o la regla, o la entrada) ofrece **Continuar como administrador**: un diálogo explica que Windows va a pedir permiso y, con un sí, la ventana corre ese mismo comando con `Start-Process -Verb RunAs` y `-ResultId <guid>`, espera a que termine y lee el resultado sin elevar con `-ReadResult <guid>`, como la skill (sección 13). Un UAC rechazado es un aviso, no un error. Aparte, la barra superior ofrece **Reiniciar como administrador** (la ventana entera, en la misma sección). Elevada con la contraseña de otro administrador, el motor rechaza lo de usuario con `session-user` y la ventana lo explica con "Abrir sin elevar"; la barra no lo detecta por su cuenta.
+
+**Lo que no se puede detener.** Aplicar, deshacer, apagar entradas y borrar no tienen botón Detener: matar el proceso a mitad dejaría el documento sin escribir (el diario sí permite deshacer). Leer, medir con espera, Salud y `-Large` sí se pueden cancelar (se termina el proceso; no cambian nada, o en Salud, solo revisan). Cerrar la ventana con algo en curso pregunta antes.
+
+**Progreso.** El motor con `-Json` no informa avance: la barra de estado muestra la acción, una barra indeterminada y el tiempo que lleva; Salud muestra la fase que el texto pide en 17.6. **Diferencia con la maqueta:** "Aplicando 12 de 40" queda para cuando el motor informe avance; no se inventa un porcentaje.
+
+### 17.3 Distribución
+
+`gui.ps1` y `gui/` van en el zip de la release (`build/package.ps1`). Se abre con `powershell -NoProfile -ExecutionPolicy Bypass -File .\gui.ps1`. Como administrador, valen las mismas reglas de carpeta que para `tuneup.ps1` (README, Requisitos): desde una copia que otros pueden cambiar, el motor avisa `untrusted-location` y la ventana lo muestra en el plan.
+
+### 17.4 Tokens
+
+| Token | Claro | Oscuro | Uso |
+|---|---|---|---|
+| `Bg` | #F3F3F3 | #202020 | Fondo de la ventana |
+| `Surface` | #FFFFFF | #2B2B2B | Tarjetas, listas, diálogos |
+| `Border` | #E5E5E5 | #3A3A3A | Bordes de tarjeta y separadores |
+| `ControlBorder` | #8A8A8A | #9A9A9A | Borde de casillas y campos (3:1 o más) |
+| `Text` | #1B1B1B | #FFFFFF | Texto |
+| `TextSecondary` | #5C5C5C | #C5C5C5 | Descripciones, metadatos |
+| `Accent` | #005FB8 | #60CDFF | Acción principal, foco de selección, enlaces |
+| `OnAccent` | #FFFFFF | #000000 | Texto sobre `Accent` |
+| `Danger` | #C42B1C | #FF99A4 | Botón de lo que no se deshace |
+| `SuccessFg` / `SuccessBg` | #0E700E / #DFF6DD | #6CCB5F / #1E3A1E | Fichas y avisos de éxito |
+| `CautionFg` / `CautionBg` | #7A4A00 / #FFF4CE | #FCE100 / #433519 | Avisos |
+| `CriticalFg` / `CriticalBg` | #A4262C / #FDE7E9 | #FF99A4 / #442726 | Errores |
+| `InfoFg` / `InfoBg` | #004E8C / #E6F0FA | #99EBFF / #1F3347 | Información, recomendado |
+
+Contraste medido en claro: texto 17,2:1, secundario 6,7:1, acento 6,3:1, fichas entre 5,5:1 y 7,4:1; en oscuro, acento 7,9:1 y secundario 8,2:1. Tipografía Segoe UI Variable (la de Windows 11; en Windows 10, Segoe UI): título de sección 28/36 seminegrita, diálogo 20/28, subtítulo 18/24, cuerpo 14/20, nota 12/16; Cascadia Mono 13 (o Consolas) para ids, rutas y el registro. Espacio en múltiplos de 4 (4, 8, 12, 16, 20, 24, 32). Radios: controles 6, tarjetas y diálogos 8, fichas 16. Controles de 36 px de alto o más, filas de lista de 44 px o más.
+
+### 17.5 Componentes
+
+| Componente | Variantes | Estados | Notas |
+|---|---|---|---|
+| Botón | principal (`Accent`), normal, peligro (`Danger`) | normal, encima, presionado, foco (contorno de 2 px `Text`), deshabilitado | Una acción principal por sección. El texto dice la acción y cuántos ("Aplicar 40 cambios", "Borrar 3 elementos"), nunca "Aceptar". Deshabilitado siempre con el motivo al lado. |
+| Elemento de navegación | normal, actual | encima, foco, actual (fondo y una marca de 3 px de `Accent` a la izquierda) | `AutomationProperties.Name` con el nombre; el actual se anuncia como seleccionado. |
+| Tarjeta | normal, discontinua (vacío) | — | `Surface`, borde `Border`, radio 8, relleno 20. |
+| Ficha | éxito, aviso, error, información, neutra | — | Siempre con texto; el color nunca va solo. |
+| Fila con casilla | normal, elegida, bloqueada | foco, deshabilitada con motivo | La fila entera es la zona de clic; la casilla es un `CheckBox` real con su texto como nombre accesible. |
+| Aviso en línea | información, aviso, error, éxito | — | Ícono + negrita (qué pasó) + texto (por qué y qué hacer) + botones. |
+| Diálogo | confirmar, peligro, permiso de Windows | — | Modal, el foco va al botón seguro, Esc cancela, Enter no confirma lo irreversible. |
+| Barra de estado | listo, en curso, terminado | — | Texto de lo que pasa, barra indeterminada y tiempo; "Ver registro". |
+
+### 17.6 Secciones
+
+| Sección | Comando | Qué muestra | Acción |
+|---|---|---|---|
+| Inicio | `-Suggest`, `-Status`, `-Clean`, `-Startup` (en paralelo, solo lectura) | Reinicio pendiente, ajustes aplicados y revertidos, espacio libre y lo que se puede liberar, lo que arranca, perfiles sugeridos con su motivo, últimas corridas | Ir a cada sección; "Revisar el plan de los sugeridos" |
+| Optimizar | `-List`, luego `-Profile ... -Include ... -Exclude ... -WhatIf`, luego `-Yes` | Perfiles (Base siempre, marca de administrador), riesgo alto aparte (se agrega solo escribiendo la palabra de confirmación), el plan por motivo (se aplica, ya aplicado, no aplica a esta edición, pregunta antes con su casilla "Incluir", no existe), preflight | "Aplicar N cambios" tras un diálogo; administrador según 17.2; resultado con aplicados, parciales, fallidos y sin efecto |
+| Estado | `-Status`; `-Status -Reapply [-Include] -WhatIf` / `-Yes` | Cada ajuste con su estado y su corrida, filtros por estado | "Volver a aplicar lo revertido" (deshabilitado con motivo si no hay) |
+| Deshacer | `-Status` para las corridas, `-Undo <id> [-Tweak <id>]` | Corridas por fecha con sus ajustes | "Deshacer la corrida" o elegir un ajuste; lo que no se puede restaurar muestra las líneas `manual` para copiar |
+| Salud | `-Health [-Repair]` | Fases (SFC, DISM revisa, DISM repara, SFC otra vez) y resultado: archivos reparados y sin reparar, almacén, recomendación | "Revisar"; "Reparar" solo si la recomendación es `run-repair` |
+| Medir | `-Measure [-IdleSeconds] [-Compare]` | Las métricas y, al comparar, la diferencia con su signo | "Medir ahora" |
+| Arranque | `-Startup`; `-Startup -Disable <ids> -WhatIf` / `-Yes` | Entradas con editor, origen, uso, recomendado o protegido y su motivo | "Apagar N elegidos"; se deshace desde Deshacer |
+| Liberar espacio | `-Clean [-Large]`; `-Clean -Remove <ids> -WhatIf` / `-Yes` | Reglas por categoría con tamaño y motivo; lo que solo se mide con su `hint`; carpetas grandes | "Borrar N elegidos (tamaño)" en rojo, tras un diálogo que dice que no se deshace; resultado con lo liberado y lo que quedó |
+| Registro | El registro de la ventana | Líneas con hora, nivel y texto; filtros | Copiar, guardar como, abrir la carpeta de registros y la de corridas |
+
+### 17.7 Errores, avisos y registro
+
+- **Un `error` del motor** se muestra como aviso en línea en la sección: título (qué pasó), el `message` del documento (ya está en el idioma de la ventana) y, según `reason`, la acción: `needs-admin` → "Continuar como administrador"; `session-user` → "Abrir sin elevar"; `result-missing`, `result-incomplete`, `result-untrusted` → explicar y "Abrir el registro". `details` va en un desplegable. Sin `reason`, solo el mensaje y "Copiar detalles".
+- **Código de salida 2** es un aviso, no un error: "No todo se completó", con lo parcial, fallido o sin efecto listado por ajuste.
+- **`warnings`** del documento van a la barra de estado (el último) y al registro (todos).
+- **Fallas de la ventana** (el proceso no arranca, la salida no es JSON, una excepción no atrapada): diálogo de error con "Copiar detalles" y "Abrir el registro"; la ventana sigue abierta (`Dispatcher.UnhandledException` marcado como manejado).
+- **Registro:** `%LOCALAPPDATA%\windows-tuneup\gui\logs\gui-<aaaaMMdd>.log`, UTF-8, una línea por evento: hora, nivel (`INFO`, `WARN`, `ERROR`) y texto. Se registra cada comando (argumentos sin rutas del perfil, código de salida, duración), cada aviso, cada error con su `reason` y cada falla con su detalle. Se guardan los 30 archivos más nuevos. La sección Registro muestra los de la sesión.
+
+### 17.8 Accesibilidad
+
+- Todo con teclado: Tab sigue el orden de lectura (barra superior, navegación, contenido, barra de estado); flechas dentro de la navegación y de las listas; Espacio marca una casilla; Esc cierra un diálogo; F5 vuelve a leer la sección.
+- Cada control tiene nombre accesible (`AutomationProperties.Name`); los íconos son decorativos. Los avisos son regiones vivas (`AutomationProperties.LiveSetting` = Polite; un error, Assertive).
+- Foco visible siempre (contorno de 2 px), y vuelve al botón que abrió un diálogo al cerrarlo.
+- Al 200 % de escala de Windows nada se corta: el contenido se desplaza y las filas se ajustan (la ventana pide 760 × 560 como mínimo).
+- Sin animaciones.
+- **Pendiente:** con contraste alto de Windows la ventana todavía usa sus propios colores; se probará en la VM y se ajustará.
+
+### 17.9 Casos límite
+
+- **Sin datos:** cada lista vacía dice qué es, por qué está vacía y cómo empezar (hoja de estados de la maqueta).
+- **Textos largos:** títulos y nombres se ajustan en dos líneas y luego cortan con "…" y la información completa en el tooltip; ids y rutas en una línea con desplazamiento.
+- **Inglés:** los textos en inglés son hasta 30 % más largos o más cortos: ningún ancho fijo depende del texto.
+- **Muchos elementos:** las listas se dibujan completas (Arranque tiene 102 entradas en el equipo de prueba y abre sin demora); filtros por pestañas para no recorrerlas enteras.
+- **Windows no soportado o catálogo con errores:** Optimizar y Estado muestran el `error` del motor; el resto de las secciones sigue.
+- **Sin `tuneup.ps1` junto a `gui.ps1`:** la ventana no abre y dice dónde lo buscó.
+
+### 17.10 Pruebas
+
+Pester sobre `gui/GuiCore.ps1` (argumentos de cada comando, lectura de documentos y de errores con cada `reason`, traducción a mensaje y acción, registro y su rotación, formato de tamaños), el XAML (es XML válido, carga en un proceso `-STA`, cada `x:Name` que usa `GuiWindow.ps1` existe, no hay `x:Code` ni eventos con nombre), los temas (las mismas claves en los dos) y los textos (`gui.*` en es y en). Manual en la VM: cada sección como usuario estándar y como administrador, un UAC rechazado, tema oscuro y contraste alto, Narrador, 200 % de escala, cerrar con algo en curso.

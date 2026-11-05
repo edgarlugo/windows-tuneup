@@ -5,6 +5,8 @@ $root = Split-Path $PSScriptRoot -Parent
 $settings = Join-Path $PSScriptRoot 'PSScriptAnalyzerSettings.psd1'
 $targets = @(
     (Join-Path $root 'tuneup.ps1'),
+    (Join-Path $root 'gui.ps1'),
+    (Join-Path $root 'gui'),
     (Join-Path $root 'install.ps1'),
     (Join-Path $root 'engine'),
     (Join-Path $root 'actions'),

@@ -121,7 +121,8 @@ Describe 'build/package.ps1' {
         foreach ($expected in 'tuneup.ps1', 'README.md', 'LICENSE', 'engine/Tuneup.psm1', 'engine/Commands.ps1', 'engine/Menu.ps1',
             'engine/handlers/Registry.ps1', 'i18n/es.json', 'i18n/en.json', 'catalog/apps.json', 'profiles/lite.json',
             'actions/onedrive.ps1', 'docs/es/profiles.md', 'docs/en/catalog.md', 'docs/json-contract.md', 'catalog/startup/rules.json',
-            'catalog/clean/rules.json', 'engine/Clean.ps1') {
+            'catalog/clean/rules.json', 'engine/Clean.ps1', 'gui.ps1', 'gui/MainWindow.xaml', 'gui/GuiCore.ps1', 'gui/GuiWindow.ps1', 'gui/Themes/Light.xaml',
+            'gui/Themes/Dark.xaml') {
             $names | Should -Contain $expected
         }
         foreach ($folder in 'tests/', 'build/', '.github/', 'docs/superpowers/', 'catalog/notes/', 'plugins/', '.claude-plugin/') {

@@ -1,0 +1,559 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="windows-tuneup" Width="1200" Height="820" MinWidth="760" MinHeight="560"
+        WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14">
+    <!-- The window of design section 17. No code here: GuiWindow.ps1 finds each element by x:Name and puts
+         the text of each x:Uid key in the language of the window. -->
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary/>
+            </ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolVis"/>
+            <FontFamily x:Key="Mono">Cascadia Mono, Consolas</FontFamily>
+
+            <Style x:Key="Focus" TargetType="Control">
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate>
+                            <Rectangle Margin="-3" RadiusX="6" RadiusY="6" Stroke="{DynamicResource Text}" StrokeThickness="2"/>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="Button">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+                <Setter Property="MinHeight" Value="36"/>
+                <Setter Property="Padding" Value="16,0"/>
+                <Setter Property="Background" Value="{DynamicResource Surface}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource ControlBorder}"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="Box" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Opacity" Value="0.88"/></Trigger>
+                                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Opacity" Value="0.75"/></Trigger>
+                                <Trigger Property="IsEnabled" Value="False">
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource DisabledBg}"/>
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Border}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
+                                    <Setter Property="Cursor" Value="Arrow"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Background" Value="{DynamicResource Accent}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                <Setter Property="Foreground" Value="{DynamicResource OnAccent}"/>
+            </Style>
+            <Style x:Key="Dangerous" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="Background" Value="{DynamicResource Danger}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Danger}"/>
+                <Setter Property="Foreground" Value="{DynamicResource OnDanger}"/>
+            </Style>
+            <Style x:Key="Small" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                <Setter Property="MinHeight" Value="28"/>
+                <Setter Property="Padding" Value="10,0"/>
+                <Setter Property="FontSize" Value="12"/>
+            </Style>
+
+            <Style x:Key="Nav" TargetType="RadioButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+                <Setter Property="GroupName" Value="Nav"/>
+                <Setter Property="MinHeight" Value="40"/>
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="Box" Background="Transparent" CornerRadius="6" Padding="12,0">
+                                <Grid>
+                                    <Rectangle x:Name="Mark" Width="3" Height="16" RadiusX="1.5" RadiusY="1.5" Fill="{DynamicResource Accent}" HorizontalAlignment="Left" Margin="-12,0,0,0" Visibility="Collapsed"/>
+                                    <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                                </Grid>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Box" Property="Background" Value="{DynamicResource NavHover}"/></Trigger>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource NavSelected}"/>
+                                    <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style x:Key="Tab" TargetType="RadioButton">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+                <Setter Property="MinHeight" Value="32"/>
+                <Setter Property="Margin" Value="0,0,8,8"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Setter Property="Cursor" Value="Hand"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="RadioButton">
+                            <Border x:Name="Box" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource ControlBorder}" BorderThickness="1" CornerRadius="16" Padding="12,0">
+                                <ContentPresenter VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsChecked" Value="True">
+                                    <Setter TargetName="Box" Property="Background" Value="{DynamicResource Text}"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource Bg}"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+            <Style TargetType="CheckBox">
+                <Setter Property="FocusVisualStyle" Value="{StaticResource Focus}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+            </Style>
+            <Style x:Key="Card" TargetType="Border">
+                <Setter Property="Background" Value="{DynamicResource Surface}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+                <Setter Property="BorderThickness" Value="1"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Padding" Value="20"/>
+                <Setter Property="Margin" Value="0,0,0,16"/>
+            </Style>
+            <Style TargetType="ScrollViewer">
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+            </Style>
+            <Style TargetType="ListBox">
+                <Setter Property="Background" Value="{DynamicResource Surface}"/>
+                <Setter Property="Foreground" Value="{DynamicResource Text}"/>
+                <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+            </Style>
+            <Style x:Key="H1" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="28"/>
+                <Setter Property="LineHeight" Value="36"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Margin" Value="0,0,0,16"/>
+                <Setter Property="TextWrapping" Value="Wrap"/>
+            </Style>
+            <Style x:Key="H2" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="18"/>
+                <Setter Property="LineHeight" Value="24"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Margin" Value="0,0,0,8"/>
+                <Setter Property="TextWrapping" Value="Wrap"/>
+            </Style>
+            <Style x:Key="Body" TargetType="TextBlock">
+                <Setter Property="TextWrapping" Value="Wrap"/>
+                <Setter Property="LineHeight" Value="20"/>
+            </Style>
+            <Style x:Key="Secondary" TargetType="TextBlock" BasedOn="{StaticResource Body}">
+                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            </Style>
+            <Style x:Key="Big" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="28"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Setter Property="Margin" Value="0,4"/>
+            </Style>
+
+            <!-- A row of a list: an optional check box, a title and a description, chips and a note. Every
+                 list item carries the same properties (GuiWindow.ps1, New-GuiRow). -->
+            <DataTemplate x:Key="RowTemplate">
+                <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="16,10" MinHeight="44">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Header}" FontWeight="SemiBold" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,6,0,8" Visibility="{Binding HasHeader, Converter={StaticResource BoolVis}}"/>
+                        <DockPanel>
+                            <CheckBox DockPanel.Dock="Left" Margin="0,2,12,0" VerticalAlignment="Top" IsChecked="{Binding Selected, Mode=OneWay}" IsEnabled="{Binding Enabled}"
+                                      Visibility="{Binding Checkable, Converter={StaticResource BoolVis}}" AutomationProperties.Name="{Binding Title}"/>
+                            <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,0">
+                                <Border CornerRadius="10" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip1Bg}" Visibility="{Binding HasChip1, Converter={StaticResource BoolVis}}">
+                                    <TextBlock Text="{Binding Chip1}" FontSize="12" Foreground="{Binding Chip1Fg}"/>
+                                </Border>
+                                <Border CornerRadius="10" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip2Bg}" Visibility="{Binding HasChip2, Converter={StaticResource BoolVis}}">
+                                    <TextBlock Text="{Binding Chip2}" FontSize="12" Foreground="{Binding Chip2Fg}"/>
+                                </Border>
+                                <TextBlock Text="{Binding Value}" FontWeight="SemiBold" MinWidth="64" TextAlignment="Right" VerticalAlignment="Center" Visibility="{Binding HasValue, Converter={StaticResource BoolVis}}"/>
+                            </WrapPanel>
+                            <StackPanel>
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="40" ToolTip="{Binding Title}"/>
+                                <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="13" TextWrapping="Wrap" Visibility="{Binding HasDescription, Converter={StaticResource BoolVis}}"/>
+                                <TextBlock Text="{Binding Note}" Foreground="{Binding NoteFg}" FontSize="12" TextWrapping="Wrap" Margin="0,2,0,0" Visibility="{Binding HasNote, Converter={StaticResource BoolVis}}"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </DataTemplate>
+            <Style x:Key="List" TargetType="ItemsControl">
+                <Setter Property="ItemTemplate" Value="{StaticResource RowTemplate}"/>
+                <Setter Property="Focusable" Value="False"/>
+                <Setter Property="KeyboardNavigation.TabNavigation" Value="Continue"/>
+            </Style>
+        </ResourceDictionary>
+    </Window.Resources>
+
+    <!-- The colors of the window go here and not on Window: WPF resolves the attributes of the root element
+         before its resources exist. -->
+    <Grid Background="{DynamicResource Bg}" TextElement.Foreground="{DynamicResource Text}">
+        <DockPanel x:Name="Shell">
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="20,8">
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Path Width="24" Height="24" Stroke="{DynamicResource Accent}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Data="M4,6 H14 M18,6 H20 M4,12 H8 M12,12 H20 M4,18 H16 M16,6 A2,2 0 1 1 15.99,6 M10,12 A2,2 0 1 1 9.99,12 M18,18 A2,2 0 1 1 17.99,18" Margin="0,0,10,0" AutomationProperties.Name=""/>
+                        <TextBlock Text="windows-tuneup" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="VersionText" FontSize="12" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Border Background="{DynamicResource NeutralBg}" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="EnvText" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                        </Border>
+                        <Border x:Name="AdminChip" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="AdminText" FontSize="12" FontWeight="SemiBold"/>
+                        </Border>
+                        <Button x:Name="RelaunchAdminButton" x:Uid="gui.header.relaunchAdmin"/>
+                    </WrapPanel>
+                </DockPanel>
+            </Border>
+
+            <Border DockPanel.Dock="Bottom" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0" Padding="20,6">
+                <DockPanel>
+                    <Button x:Name="OpenLogButton" x:Uid="gui.status.openLog" Style="{StaticResource Small}" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+                    <Button x:Name="CancelButton" x:Uid="gui.status.cancel" Style="{StaticResource Small}" DockPanel.Dock="Right" Margin="8,0,0,0" Visibility="Collapsed"/>
+                    <TextBlock x:Name="ElapsedText" DockPanel.Dock="Right" FontSize="12" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                    <ProgressBar x:Name="BusyBar" DockPanel.Dock="Right" Width="120" Height="4" IsIndeterminate="True" Visibility="Collapsed" VerticalAlignment="Center" Foreground="{DynamicResource Accent}" Background="{DynamicResource Border}" BorderThickness="0"/>
+                    <TextBlock x:Name="StatusText" FontSize="12" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
+                </DockPanel>
+            </Border>
+
+            <Border DockPanel.Dock="Left" Width="232" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,1,0">
+                <DockPanel Margin="12">
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                        <TextBlock x:Uid="gui.nav.language" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="LanguageBox" MinHeight="32" Margin="0,0,0,8" Foreground="#1B1B1B">
+                            <ComboBoxItem Tag="es" Content="Español"/>
+                            <ComboBoxItem Tag="en" Content="English"/>
+                        </ComboBox>
+                        <TextBlock x:Uid="gui.nav.theme" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
+                        <ComboBox x:Name="ThemeBox" MinHeight="32" Margin="0,0,0,8" Foreground="#1B1B1B">
+                            <ComboBoxItem Tag="system" x:Uid="gui.theme.system"/>
+                            <ComboBoxItem Tag="light" x:Uid="gui.theme.light"/>
+                            <ComboBoxItem Tag="dark" x:Uid="gui.theme.dark"/>
+                        </ComboBox>
+                        <TextBlock x:Uid="gui.nav.local" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                        <StackPanel x:Name="NavPanel" KeyboardNavigation.DirectionalNavigation="Cycle">
+                            <RadioButton x:Name="NavHome" x:Uid="gui.nav.home" Style="{StaticResource Nav}" Tag="Home"/>
+                            <RadioButton x:Name="NavOptimize" x:Uid="gui.nav.optimize" Style="{StaticResource Nav}" Tag="Optimize"/>
+                            <RadioButton x:Name="NavStatus" x:Uid="gui.nav.status" Style="{StaticResource Nav}" Tag="Status"/>
+                            <RadioButton x:Name="NavUndo" x:Uid="gui.nav.undo" Style="{StaticResource Nav}" Tag="Undo"/>
+                            <RadioButton x:Name="NavHealth" x:Uid="gui.nav.health" Style="{StaticResource Nav}" Tag="Health"/>
+                            <RadioButton x:Name="NavMeasure" x:Uid="gui.nav.measure" Style="{StaticResource Nav}" Tag="Measure"/>
+                            <RadioButton x:Name="NavStartup" x:Uid="gui.nav.startup" Style="{StaticResource Nav}" Tag="Startup"/>
+                            <RadioButton x:Name="NavClean" x:Uid="gui.nav.clean" Style="{StaticResource Nav}" Tag="Clean"/>
+                            <RadioButton x:Name="NavLog" x:Uid="gui.nav.log" Style="{StaticResource Nav}" Tag="Log"/>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <ScrollViewer x:Name="ContentScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                <StackPanel Margin="32,24,32,32" MaxWidth="1000" HorizontalAlignment="Left">
+                    <TextBlock x:Name="SectionTitle" Style="{StaticResource H1}"/>
+                    <!-- Notices of the section: errors, warnings, results (GuiWindow.ps1, Show-GuiNotice). -->
+                    <StackPanel x:Name="NoticePanel"/>
+
+                    <StackPanel x:Name="SectionHome">
+                        <UniformGrid Columns="3" Margin="-8,0,-8,0">
+                            <Border Style="{StaticResource Card}" Margin="8,0,8,16">
+                                <StackPanel>
+                                    <TextBlock x:Uid="gui.home.applied" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBlock x:Name="HomeAppliedValue" Style="{StaticResource Big}" Text="-"/>
+                                    <TextBlock x:Name="HomeAppliedNote" Style="{StaticResource Secondary}"/>
+                                    <Button x:Name="HomeStatusButton" x:Uid="gui.home.seeStatus" HorizontalAlignment="Left" Margin="0,10,0,0" Tag="Status"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}" Margin="8,0,8,16">
+                                <StackPanel>
+                                    <TextBlock x:Uid="gui.home.free" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBlock x:Name="HomeFreeValue" Style="{StaticResource Big}" Text="-"/>
+                                    <TextBlock x:Name="HomeFreeNote" Style="{StaticResource Secondary}"/>
+                                    <Button x:Name="HomeCleanButton" x:Uid="gui.home.seeClean" HorizontalAlignment="Left" Margin="0,10,0,0" Tag="Clean"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Style="{StaticResource Card}" Margin="8,0,8,16">
+                                <StackPanel>
+                                    <TextBlock x:Uid="gui.home.startup" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                                    <TextBlock x:Name="HomeStartupValue" Style="{StaticResource Big}" Text="-"/>
+                                    <TextBlock x:Name="HomeStartupNote" Style="{StaticResource Secondary}"/>
+                                    <Button x:Name="HomeStartupButton" x:Uid="gui.home.seeStartup" HorizontalAlignment="Left" Margin="0,10,0,0" Tag="Startup"/>
+                                </StackPanel>
+                            </Border>
+                        </UniformGrid>
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.home.suggestTitle" Style="{StaticResource H2}"/>
+                                <TextBlock x:Uid="gui.home.suggestNote" Style="{StaticResource Secondary}" Margin="0,0,0,12"/>
+                                <ItemsControl x:Name="HomeSuggestList" Focusable="False">
+                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Background="{DynamicResource InfoBg}" CornerRadius="16" Padding="12,6" Margin="0,0,8,8">
+                                                <TextBlock Text="{Binding Title}" Foreground="{DynamicResource InfoFg}"/>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button x:Name="HomeSuggestButton" x:Uid="gui.home.suggestButton" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Padding="0">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.home.runsTitle" Style="{StaticResource H2}" Margin="20,20,20,8"/>
+                                <ItemsControl x:Name="HomeRunsList" Style="{StaticResource List}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionOptimize" Visibility="Collapsed">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.optimize.step1" Style="{StaticResource H2}"/>
+                                <ItemsControl x:Name="OptProfilesList" Focusable="False">
+                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="2"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,8,8">
+                                                <CheckBox IsChecked="{Binding Selected, Mode=OneWay}" IsEnabled="{Binding Enabled}" VerticalContentAlignment="Top" AutomationProperties.Name="{Binding Title}">
+                                                    <StackPanel Margin="4,0,0,0">
+                                                        <TextBlock FontWeight="SemiBold" TextWrapping="Wrap"><Run Text="{Binding Title, Mode=OneWay}"/><Run Text=" "/><Run Text="{Binding Note, Mode=OneWay}" FontWeight="Normal" FontSize="12" Foreground="{DynamicResource TextSecondary}"/></TextBlock>
+                                                        <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}" FontSize="13" TextWrapping="Wrap"/>
+                                                    </StackPanel>
+                                                </CheckBox>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Expander x:Name="OptHighRiskExpander" Margin="0,8,0,0" Foreground="{DynamicResource Text}">
+                                    <StackPanel Margin="0,8,0,0">
+                                        <TextBlock x:Uid="gui.optimize.highRiskNote" Style="{StaticResource Secondary}" Margin="0,0,0,8"/>
+                                        <ItemsControl x:Name="OptHighRiskList" Style="{StaticResource List}"/>
+                                        <TextBlock x:Name="OptHighRiskConfirmLabel" Style="{StaticResource Body}" Margin="0,8,0,4"/>
+                                        <TextBox x:Name="OptHighRiskConfirm" Width="160" HorizontalAlignment="Left" MinHeight="32" VerticalContentAlignment="Center"/>
+                                    </StackPanel>
+                                </Expander>
+                                <Button x:Name="OptPlanButton" x:Uid="gui.optimize.planButton" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,16,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="OptPlanCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.optimize.step2" Style="{StaticResource H2}"/>
+                                <TextBlock x:Name="OptPlanSummary" Style="{StaticResource Secondary}" Margin="0,0,0,12"/>
+                                <ItemsControl x:Name="OptPreflightList" Focusable="False"/>
+                                <WrapPanel x:Name="OptPlanTabs" Margin="0,8,0,4"/>
+                                <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8">
+                                    <ItemsControl x:Name="OptPlanList" Style="{StaticResource List}"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                        <Border x:Name="OptApplyCard" Style="{StaticResource Card}" Visibility="Collapsed">
+                            <DockPanel>
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button x:Name="OptExportButton" x:Uid="gui.optimize.export" Margin="0,0,8,0"/>
+                                    <Button x:Name="OptApplyButton" Style="{StaticResource Primary}"/>
+                                </StackPanel>
+                                <StackPanel Margin="0,0,16,0">
+                                    <TextBlock x:Uid="gui.optimize.step3" Style="{StaticResource H2}"/>
+                                    <TextBlock x:Uid="gui.optimize.applyNote" Style="{StaticResource Secondary}"/>
+                                    <TextBlock x:Name="OptAdminNote" Style="{StaticResource Body}" Foreground="{DynamicResource CautionFg}" Margin="0,4,0,0" Visibility="Collapsed"/>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionStatus" Visibility="Collapsed">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,8">
+                                    <Button x:Name="StatusReapplyButton" x:Uid="gui.status.reapply" DockPanel.Dock="Right" VerticalAlignment="Top"/>
+                                    <WrapPanel x:Name="StatusTabs"/>
+                                </DockPanel>
+                                <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8">
+                                    <ItemsControl x:Name="StatusList" Style="{StaticResource List}"/>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionUndo" Visibility="Collapsed">
+                        <TextBlock x:Uid="gui.undo.note" Style="{StaticResource Secondary}" Margin="0,0,0,12"/>
+                        <Border Style="{StaticResource Card}" Padding="0">
+                            <ItemsControl x:Name="UndoRunsList" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="20,14">
+                                            <DockPanel>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Button Content="{Binding PickLabel}" Tag="{Binding PickTag}" Margin="0,0,8,0" AutomationProperties.Name="{Binding PickName}"/>
+                                                    <Button Content="{Binding UndoLabel}" Tag="{Binding UndoTag}" AutomationProperties.Name="{Binding UndoName}"/>
+                                                </StackPanel>
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold"/>
+                                                    <TextBlock Text="{Binding Description}" Foreground="{DynamicResource TextSecondary}"/>
+                                                </StackPanel>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                        <TextBlock x:Uid="gui.undo.adminNote" Style="{StaticResource Secondary}" FontSize="13"/>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionHealth" Visibility="Collapsed">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.health.intro" Style="{StaticResource Body}" Margin="0,0,0,12"/>
+                                <CheckBox x:Name="HealthRepairCheck" x:Uid="gui.health.repair" Margin="0,0,0,12"/>
+                                <WrapPanel>
+                                    <Button x:Name="HealthRunButton" x:Uid="gui.health.run" Style="{StaticResource Primary}" Margin="0,0,12,0"/>
+                                    <TextBlock x:Name="HealthAdminNote" x:Uid="gui.common.needsAdmin" Foreground="{DynamicResource CautionFg}" VerticalAlignment="Center"/>
+                                </WrapPanel>
+                                <ItemsControl x:Name="HealthPhaseList" Style="{StaticResource List}" Margin="0,12,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Padding="0">
+                            <StackPanel>
+                                <TextBlock x:Name="HealthResultText" Style="{StaticResource Body}" Margin="20,16"/>
+                                <ItemsControl x:Name="HealthResultList" Style="{StaticResource List}"/>
+                                <Button x:Name="HealthRepairButton" x:Uid="gui.health.repairButton" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="20,0,20,16" Visibility="Collapsed"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionMeasure" Visibility="Collapsed">
+                        <Border Style="{StaticResource Card}">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.measure.intro" Style="{StaticResource Body}" Margin="0,0,0,12"/>
+                                <WrapPanel>
+                                    <StackPanel Margin="0,0,16,8">
+                                        <TextBlock x:Uid="gui.measure.idle" Margin="0,0,0,4"/>
+                                        <ComboBox x:Name="MeasureIdleBox" MinHeight="36" MinWidth="200" Foreground="#1B1B1B">
+                                            <ComboBoxItem Tag="0" x:Uid="gui.measure.idle0"/>
+                                            <ComboBoxItem Tag="60" x:Uid="gui.measure.idle60"/>
+                                            <ComboBoxItem Tag="120" x:Uid="gui.measure.idle120"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <StackPanel Margin="0,0,16,8">
+                                        <TextBlock x:Uid="gui.measure.compare" Margin="0,0,0,4"/>
+                                        <ComboBox x:Name="MeasureCompareBox" MinHeight="36" MinWidth="200" Foreground="#1B1B1B">
+                                            <ComboBoxItem Tag="" x:Uid="gui.measure.compareNone"/>
+                                            <ComboBoxItem Tag="last" x:Uid="gui.measure.compareLast"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <Button x:Name="MeasureRunButton" x:Uid="gui.measure.run" Style="{StaticResource Primary}" VerticalAlignment="Bottom" Margin="0,0,0,8"/>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Padding="0">
+                            <StackPanel>
+                                <TextBlock x:Name="MeasureResultText" Style="{StaticResource Secondary}" Margin="20,16"/>
+                                <ItemsControl x:Name="MeasureList" Style="{StaticResource List}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionStartup" Visibility="Collapsed">
+                        <TextBlock x:Uid="gui.startup.note" Style="{StaticResource Secondary}" Margin="0,0,0,12"/>
+                        <WrapPanel x:Name="StartupTabs"/>
+                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource Surface}" Margin="0,0,0,16">
+                            <ItemsControl x:Name="StartupList" Style="{StaticResource List}" VirtualizingStackPanel.IsVirtualizing="True"/>
+                        </Border>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button x:Name="StartupPlanButton" x:Uid="gui.common.seePlan" Margin="0,0,8,0"/>
+                            <Button x:Name="StartupApplyButton" Style="{StaticResource Primary}"/>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionClean" Visibility="Collapsed">
+                        <Border Background="{DynamicResource CriticalBg}" CornerRadius="8" Padding="16,12" Margin="0,0,0,16">
+                            <TextBlock x:Uid="gui.clean.irreversible" Foreground="{DynamicResource CriticalFg}" TextWrapping="Wrap"/>
+                        </Border>
+                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource Surface}" Margin="0,0,0,16">
+                            <ItemsControl x:Name="CleanList" Style="{StaticResource List}"/>
+                        </Border>
+                        <Border Style="{StaticResource Card}" Padding="0">
+                            <StackPanel>
+                                <TextBlock x:Uid="gui.clean.reportTitle" Style="{StaticResource H2}" Margin="20,20,20,4"/>
+                                <ItemsControl x:Name="CleanReportList" Style="{StaticResource List}"/>
+                                <CheckBox x:Name="CleanLargeCheck" x:Uid="gui.clean.large" Margin="20,12,20,12"/>
+                                <ItemsControl x:Name="CleanLargeList" Style="{StaticResource List}"/>
+                            </StackPanel>
+                        </Border>
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button x:Name="CleanPreviewButton" x:Uid="gui.clean.preview" Margin="0,0,8,0"/>
+                                <Button x:Name="CleanRemoveButton" Style="{StaticResource Dangerous}"/>
+                            </StackPanel>
+                            <TextBlock x:Name="CleanSummary" Style="{StaticResource Secondary}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </StackPanel>
+
+                    <StackPanel x:Name="SectionLog" Visibility="Collapsed">
+                        <TextBlock x:Name="LogNote" Style="{StaticResource Secondary}" Margin="0,0,0,12"/>
+                        <WrapPanel Margin="0,0,0,8">
+                            <Button x:Name="LogCopyButton" x:Uid="gui.log.copy" Margin="0,0,8,8"/>
+                            <Button x:Name="LogSaveButton" x:Uid="gui.log.save" Margin="0,0,8,8"/>
+                            <Button x:Name="LogFolderButton" x:Uid="gui.log.folder" Margin="0,0,8,8"/>
+                            <Button x:Name="LogRunsButton" x:Uid="gui.log.runs" Margin="0,0,0,8"/>
+                        </WrapPanel>
+                        <WrapPanel x:Name="LogTabs" Margin="0,0,0,4"/>
+                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource Surface}">
+                            <ItemsControl x:Name="LogList" Focusable="False">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="16,8">
+                                            <DockPanel>
+                                                <TextBlock Text="{Binding Time}" FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{DynamicResource TextSecondary}" Width="72" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,2,0,0"/>
+                                                <Border CornerRadius="10" Padding="8,2" Width="64" Background="{Binding LevelBg}" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,0,12,0">
+                                                    <TextBlock Text="{Binding LevelText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding LevelFg}" HorizontalAlignment="Center"/>
+                                                </Border>
+                                                <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource Text}" TextWrapping="Wrap" FontSize="13"/>
+                                            </DockPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </DockPanel>
+
+        <!-- The dialog: over everything, the rest disabled while it is open. -->
+        <Grid x:Name="DialogLayer" Background="{DynamicResource Scrim}" Visibility="Collapsed">
+            <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Padding="24" MaxWidth="560" MinWidth="380"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" KeyboardNavigation.TabNavigation="Cycle" KeyboardNavigation.ControlTabNavigation="Cycle">
+                <StackPanel>
+                    <TextBlock x:Name="DialogTitle" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                    <TextBlock x:Name="DialogText" TextWrapping="Wrap" Margin="0,0,0,12"/>
+                    <ListBox x:Name="DialogList" MaxHeight="240" Margin="0,0,0,12" Visibility="Collapsed"/>
+                    <TextBox x:Name="DialogDetails" IsReadOnly="True" TextWrapping="Wrap" MaxHeight="200" VerticalScrollBarVisibility="Auto" FontFamily="{StaticResource Mono}" FontSize="12" Margin="0,0,0,12" Visibility="Collapsed"/>
+                    <CheckBox x:Name="DialogCheck" Margin="0,0,0,12" Visibility="Collapsed"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button x:Name="DialogSecondary" Margin="0,0,8,0"/>
+                        <Button x:Name="DialogPrimary" Style="{StaticResource Primary}"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>
