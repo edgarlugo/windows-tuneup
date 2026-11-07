@@ -86,6 +86,16 @@ function New-DocPage {
     & $add ''
     foreach ($tweak in $allTweaks | Where-Object { $_.risk -eq 'high' }) { & $add "- ``$($tweak.id)``: $($tweak.title.$Lang)" }
     & $add ''
+    & $add "## $($text.extraHeading)"
+    & $add ''
+    & $add $text.extraIntro
+    & $add ''
+    foreach ($tweak in $allTweaks | Where-Object { $_.risk -ne 'high' }) {
+        $id = [string]$tweak.id
+        if (@($profiles | Where-Object { @($_.include) -contains $id }).Count) { continue }
+        & $add "- ``$id``: $($tweak.title.$Lang)"
+    }
+    & $add ''
     & $add "## $($text.homeHeading)"
     & $add ''
     & $add $text.homeIntro

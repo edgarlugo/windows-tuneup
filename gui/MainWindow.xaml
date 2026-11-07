@@ -350,6 +350,12 @@
                                         <TextBox x:Name="OptHighRiskConfirm" Width="160" HorizontalAlignment="Left" MinHeight="32" VerticalContentAlignment="Center"/>
                                     </StackPanel>
                                 </Expander>
+                                <Expander x:Name="OptExtraExpander" Margin="0,8,0,0" Foreground="{DynamicResource Text}">
+                                    <StackPanel Margin="0,8,0,0">
+                                        <TextBlock x:Uid="gui.optimize.extraNote" Style="{StaticResource Secondary}" Margin="0,0,0,8"/>
+                                        <ItemsControl x:Name="OptExtraList" Style="{StaticResource List}"/>
+                                    </StackPanel>
+                                </Expander>
                                 <Button x:Name="OptPlanButton" x:Uid="gui.optimize.planButton" Style="{StaticResource Primary}" HorizontalAlignment="Left" Margin="0,16,0,0"/>
                             </StackPanel>
                         </Border>

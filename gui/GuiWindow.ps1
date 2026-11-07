@@ -11,7 +11,7 @@ $script:GuiElementNames = @(
     'StatusText', 'LanguageBox', 'ThemeBox', 'NavPanel', 'ContentScroll', 'SectionTitle', 'NoticePanel',
     'SectionHome', 'HomeAppliedValue', 'HomeAppliedNote', 'HomeStatusButton', 'HomeFreeValue', 'HomeFreeNote', 'HomeCleanButton', 'HomeStartupValue',
     'HomeStartupNote', 'HomeStartupButton', 'HomeSuggestList', 'HomeSuggestButton', 'HomeRunsList',
-    'SectionOptimize', 'OptProfilesList', 'OptHighRiskExpander', 'OptHighRiskList', 'OptHighRiskConfirmLabel', 'OptHighRiskConfirm', 'OptPlanButton',
+    'SectionOptimize', 'OptProfilesList', 'OptHighRiskExpander', 'OptHighRiskList', 'OptHighRiskConfirmLabel', 'OptHighRiskConfirm', 'OptExtraExpander', 'OptExtraList', 'OptPlanButton',
     'OptPlanCard', 'OptPlanSummary', 'OptPreflightList', 'OptPlanTabs', 'OptPlanList', 'OptApplyCard', 'OptExportButton', 'OptApplyButton', 'OptAdminNote',
     'SectionStatus', 'StatusReapplyButton', 'StatusTabs', 'StatusList',
     'SectionUndo', 'UndoRunsList',
@@ -471,7 +471,7 @@ function Update-GuiSectionHome {
     }
 }
 
-# Optimizar: the profiles and the high-risk tweaks come from -List; the plan from -WhatIf with what is picked.
+# Optimizar: the profiles, the high-risk tweaks and the rest outside profiles come from -List; the plan from -WhatIf with what is picked.
 function Update-GuiSectionOptimize {
     $ui = $script:Gui.Ui
     $ui.OptPlanCard.Visibility = 'Collapsed'
@@ -495,6 +495,11 @@ function Update-GuiSectionOptimize {
         $script:Gui.Ui.OptHighRiskExpander.Header = Get-TuneupGuiText -Key 'gui.optimize.highRisk' -Format $high.Count
         $script:Gui.Ui.OptHighRiskExpander.Visibility = $(if ($high.Count) { 'Visible' } else { 'Collapsed' })
         $script:Gui.Ui.OptHighRiskConfirmLabel.Text = Get-TuneupGuiText -Key 'gui.optimize.highRiskConfirm' -Format (Get-TuneupGuiText -Key 'menu.high.word')
+        # The rest that no profile applies (preferences such as dark mode): only when picked by name.
+        $extra = @($document.tweaks | Where-Object { $_.risk -ne 'high' -and -not @($_.profiles).Count } | ForEach-Object { New-GuiRow -Title ([string]$_.title) -Description ([string]$_.why) -Checkable -Data ([string]$_.id) })
+        Set-GuiItemSource -Control $script:Gui.Ui.OptExtraList -Items $extra
+        $script:Gui.Ui.OptExtraExpander.Header = Get-TuneupGuiText -Key 'gui.optimize.extra' -Format $extra.Count
+        $script:Gui.Ui.OptExtraExpander.Visibility = $(if ($extra.Count) { 'Visible' } else { 'Collapsed' })
         if ($script:Gui.PlanAfterList) { $script:Gui.PlanAfterList = $false; Update-GuiPlan }
     }
 }
@@ -506,6 +511,7 @@ function Get-GuiOptimizeRequest {
     $include = @()
     $word = Get-TuneupGuiText -Key 'menu.high.word'
     if ([string]$ui.OptHighRiskConfirm.Text.Trim() -ieq $word) { $include += @($ui.OptHighRiskList.ItemsSource | Where-Object { $_.Selected } | ForEach-Object { [string]$_.Data }) }
+    $include += @($ui.OptExtraList.ItemsSource | Where-Object { $_.Selected } | ForEach-Object { [string]$_.Data })
     $include += @($ui.OptPlanList.ItemsSource | Where-Object { $_.Selected -and $_.Data -and $_.Data.ask } | ForEach-Object { [string]$_.Data.id })
     @{ Profile = $profiles; Include = @($include | Select-Object -Unique) }
 }
@@ -527,16 +533,20 @@ function Set-GuiPlanDocument {
     $script:Gui.PlanDoc = $Document
     $items = @($Document.items)
     $ui.OptPlanSummary.Text = Get-TuneupGuiText -Key 'gui.optimize.summary' -Format $Document.summary.apply, $Document.summary.skip
-    Set-GuiItemSource -Control $ui.OptPreflightList -Items @($Document.preflight | ForEach-Object {
-            $border = New-Object System.Windows.Controls.Border
-            $border.SetResourceReference([System.Windows.Controls.Border]::BackgroundProperty, 'CautionBg')
-            $border.CornerRadius = 8; $border.Padding = '14,10'; $border.Margin = '0,0,0,8'
-            $text = New-Object System.Windows.Controls.TextBlock
-            $text.Text = [string]$_.message; $text.TextWrapping = 'Wrap'
-            $text.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'CautionFg')
-            $border.Child = $text
-            $border
-        })
+    # Added with Items.Add, not as ItemsSource: a control that went through the pipeline is a PSObject,
+    # which WPF does not take for a control and shows as the name of its type.
+    $ui.OptPreflightList.ItemsSource = $null
+    $ui.OptPreflightList.Items.Clear()
+    foreach ($check in @($Document.preflight)) {
+        $border = New-Object System.Windows.Controls.Border
+        $border.SetResourceReference([System.Windows.Controls.Border]::BackgroundProperty, 'CautionBg')
+        $border.CornerRadius = 8; $border.Padding = '14,10'; $border.Margin = '0,0,0,8'
+        $text = New-Object System.Windows.Controls.TextBlock
+        $text.Text = [string]$check.message; $text.TextWrapping = 'Wrap'
+        $text.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'CautionFg')
+        $border.Child = $text
+        [void]$ui.OptPreflightList.Items.Add($border)
+    }
     $groups = [ordered]@{ apply = @(); 'already-applied' = @(); 'needs-confirmation' = @(); other = @() }
     foreach ($item in $items) {
         $key = $(if ($item.action -eq 'apply') { 'apply' } elseif ($groups.Contains([string]$item.reason)) { [string]$item.reason } else { 'other' })
@@ -1014,7 +1024,7 @@ function Register-GuiEvent {
             'CleanList' { Update-GuiCleanButton }
         }
     }
-    foreach ($list in @($ui.OptProfilesList, $ui.OptHighRiskList, $ui.OptPlanList, $ui.StartupList, $ui.CleanList)) {
+    foreach ($list in @($ui.OptProfilesList, $ui.OptHighRiskList, $ui.OptExtraList, $ui.OptPlanList, $ui.StartupList, $ui.CleanList)) {
         $list.AddHandler([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent, $checkHandler)
     }
     $ui.UndoRunsList.AddHandler([System.Windows.Controls.Primitives.ButtonBase]::ClickEvent, [System.Windows.RoutedEventHandler] {

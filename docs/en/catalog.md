@@ -10,7 +10,7 @@ Versión en español: [../es/catalog.md](../es/catalog.md).
 |---|---|
 | Privacy and telemetry (`privacy`) | 18 |
 | Ads and suggestions (`ads`) | 28 |
-| Interface (`ui`) | 12 |
+| Interface (`ui`) | 16 |
 | Copilot, Recall and AI (`ai`) | 10 |
 | Microsoft Edge (`edge`) | 17 |
 | Services (`services`) | 10 |
@@ -20,7 +20,7 @@ Versión en español: [../es/catalog.md](../es/catalog.md).
 | Gaming (`gaming`) | 11 |
 | Development (`dev`) | 3 |
 | Apps (`apps`) | 30 |
-| **Total** | **166** |
+| **Total** | **170** |
 
 ## Profiles
 
@@ -86,6 +86,15 @@ No profile includes them. They are only applied when you ask for them by name wi
 - `ai.recall-snapshots-off`: Recall: do not save snapshots (user policy)
 - `ai.recall-unavailable`: Recall: not available on the device
 - `gaming.memory-integrity-off`: Turn off memory integrity (VBS/HVCI)
+
+## Other tweaks outside the profiles
+
+Preferences, such as dark mode, that no profile includes. They are applied when you ask for them by name with `-Include` or tick them in the window (`gui.ps1`).
+
+- `ui.dark-mode-apps`: Dark mode for apps
+- `ui.dark-mode-windows`: Dark mode for Windows (taskbar and Start)
+- `ui.explorer-this-pc`: File Explorer opens to This PC
+- `ui.confirm-delete`: Ask before moving to the Recycle Bin
 
 ## Tweaks that do not apply on Home
 
@@ -817,6 +826,54 @@ Turns off Aero Peek, which redraws windows when you hover the taskbar corner.
 - **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
 - **After applying:** sign out
 - **Sources:** <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
+
+### `ui.dark-mode-apps`
+
+**Dark mode for apps**
+
+A preference, not a speed-up: Settings, File Explorer and the apps that follow the Windows theme use dark mode.
+
+- **Type:** `registry`; **Scope:** user (no administrator); **Risk:** low; **Asks:** no
+- **In profiles:** none; **Kept by:** none
+- **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
+- **After applying:** sign out
+- **Sources:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.dark-mode-windows`
+
+**Dark mode for Windows (taskbar and Start)**
+
+A preference, not a speed-up: the taskbar, Start and notifications use dark mode.
+
+- **Type:** `registry`; **Scope:** user (no administrator); **Risk:** low; **Asks:** no
+- **In profiles:** none; **Kept by:** none
+- **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
+- **After applying:** sign out
+- **Sources:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.explorer-this-pc`
+
+**File Explorer opens to This PC**
+
+A preference: opens to the drives and folders instead of Home with the recent files.
+
+- **Type:** `registry`; **Scope:** user (no administrator); **Risk:** low; **Asks:** no
+- **In profiles:** none; **Kept by:** none
+- **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
+- **After applying:** nothing
+- **Sources:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Launch_File_Explorer_To_This_PC.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.confirm-delete`
+
+**Ask before moving to the Recycle Bin**
+
+A preference: File Explorer asks before deleting. It is a user policy, so the Recycle Bin checkbox stays locked while it is set.
+
+- **Type:** `registry`; **Scope:** user (no administrator); **Risk:** low; **Asks:** no
+- **In profiles:** none; **Kept by:** none
+- **Windows:** 10, 11, build 19041 or later; **Editions:** Home, Pro, Enterprise, Education
+- **After applying:** sign out
+- **Sources:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-windowsexplorer>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
 
 ## Copilot, Recall and AI (`catalog/ai.json`)
 

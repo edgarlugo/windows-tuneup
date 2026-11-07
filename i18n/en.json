@@ -446,6 +446,8 @@
   "gui.optimize.highRisk": "High-risk tweaks ({0} for this PC)",
   "gui.optimize.highRiskNote": "No profile applies them. Pick them one by one and type the confirmation word.",
   "gui.optimize.highRiskConfirm": "To add them, type \"{0}\" in full:",
+  "gui.optimize.extra": "Other tweaks ({0})",
+  "gui.optimize.extraNote": "No profile applies them: they are preferences, such as dark mode. Tick the ones you want and they go into the plan.",
   "gui.optimize.planButton": "See the plan",
   "gui.optimize.step2": "2. Review the plan",
   "gui.optimize.summary": "{0} changes, {1} left out",
