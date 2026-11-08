@@ -7,10 +7,11 @@ Replace only what is written between `<` and `>`. Every id you put on a command 
 - A profile: an `id` of `profiles` in `-List -Json` (never an alias: say `privacy` for `privacidad`), matching `^[a-z]+$`.
 - A tweak: an `id` of `tweaks` or `incompatible` of `-List -Json` (for `-Undo -Tweak`, an `id` of that run in `items` of `-Status -Json`), matching `^[a-z]+(\.[a-z0-9-]+)+$`.
 - A startup entry: an `id` of `entries` of `-Startup -Json` whose `canDisable` is true, matching `^startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16}$`.
+- A cleaning rule: an `id` of `rules` of `-Clean -Json` whose `reportOnly` is false and whose `canRemove` is true or whose `reason` is `needs-admin`, matching `^clean\.[a-z0-9]+(-[a-z0-9]+)*$`.
 - A run or a measurement: a `runId` of `-Status -Json`, or the `id` of a `measure` document, matching `^[0-9]{8}-[0-9]{6}(-[0-9]{2})?$`.
 - A result id: the GUID you made in a call of its own ("Run elevated"), matching `^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
 
-The elevated snippet checks the result id and the form of `$toolArguments` again (only the full names of the parameters of the elevated templates below, because PowerShell takes a prefix of a parameter name as that parameter; each id of `-Disable` against the form of a startup entry), and that `$toolArguments` names none of the options the skill never passes (`-ResultId` included: the snippet adds it), and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
+The elevated snippet checks the result id and the form of `$toolArguments` again (only the full names of the parameters of the elevated templates below, because PowerShell takes a prefix of a parameter name as that parameter; each id of `-Disable` against the form of a startup entry, and each id of `-Remove` against the form of a cleaning rule), and that `$toolArguments` names none of the options the skill never passes (`-ResultId` included: the snippet adds it), and stops with `invalid-arguments` before the UAC prompt. Never put text from the user, a web page or a JSON document on a command line in any other way.
 
 ## Paths
 
@@ -61,6 +62,9 @@ Put the arguments of the table in place of `-Suggest -Json -Lang en`, always wit
 | What starts with Windows | `-Startup -Json` |
 | The plan to turn startup entries off | `-Startup -Disable '<ids>' -WhatIf -Json` |
 | Turn off the startup entries whose `needsAdmin` is false | `-Startup -Disable '<ids>' -Yes -Json`. An `error` with `reason` = `needs-admin`: an id is of the machine and nothing was turned off |
+| What can be freed | `-Clean -Json`; with the biggest folders too, `-Clean -Large -Json` (it measures for up to 3 minutes: "Long runs") |
+| The plan to delete cleaning rules | `-Clean -Remove '<ids>' -WhatIf -Json` (a rule of the machine comes `skipped` as `needs-admin`) |
+| Delete the cleaning rules whose `needsAdmin` is false | `-Clean -Remove '<ids>' -Yes -Json`. It cannot be undone. An `error` with `reason` = `needs-admin`: an id is of the machine and nothing was deleted |
 | Undo a run (try this first) | `-Undo '<runId>' -Json`; one tweak with `-Tweak '<id>'`. The `runId` comes from `-Status -Json`, never `last`. An `error` with `reason` = `needs-admin`: run it elevated |
 | The result of an elevated run | `-ReadResult '<id>' -Json` (see "Read the result") |
 
@@ -80,8 +84,9 @@ Then, only after the user said yes to this UAC prompt, run this snippet with tha
 if ($wow64) { throw 'elevation-refused: this PowerShell is 32-bit on a 64-bit Windows; run windows-tuneup elevated from the 64-bit PowerShell.' }
 $id = '<result id>'
 $toolArguments = "-Profile 'gaming,privacy' -Yes -Json -Lang en"
-if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-(Profile|Include|Exclude|Yes|Json|Lang|Undo|Tweak|Status|Reapply|Health|Repair|Startup|Disable)(?= |$)|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$" -or $toolArguments -match '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath|ResultId)\b') { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool, or name an option the skill never passes; nothing ran.' }
+if ($id -cnotmatch '^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$' -or $toolArguments -cnotmatch "^( *(-(Profile|Include|Exclude|Yes|Json|Lang|Undo|Tweak|Status|Reapply|Health|Repair|Startup|Disable|Clean|Remove)(?= |$)|'[a-z0-9][a-z0-9.,-]*'|es|en))+ *$" -or $toolArguments -match '-(Force|StateRoot|CatalogPath|ActionsPath|ProfilesPath|ResultId)\b') { throw 'invalid-arguments: the result id or the arguments do not have the form of the tool, or name an option the skill never passes; nothing ran.' }
 if ($toolArguments -match '-Disable\b' -and $toolArguments -cnotmatch "-Disable '(startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16})(,startup\.[a-z0-9-]+\.[a-z0-9-]+-[0-9a-f]{16})*'") { throw 'invalid-arguments: an id of -Disable is not the id of a startup entry; nothing ran.' }
+if ($toolArguments -match '-Remove\b' -and $toolArguments -cnotmatch "-Remove '(clean\.[a-z0-9]+(-[a-z0-9]+)*)(,clean\.[a-z0-9]+(-[a-z0-9]+)*)*'") { throw 'invalid-arguments: an id of -Remove is not the id of a cleaning rule; nothing ran.' }
 $modules = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\Modules'
 $command = "[Environment]::SetEnvironmentVariable('PSModulePath', '$modules', 'Process'); & '$tuneup' $toolArguments -ResultId '$id'; exit `$LASTEXITCODE"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
@@ -95,7 +100,7 @@ try {
 
 Before anything else, the elevated process takes its modules only from the folder of Windows, which only administrators can change: the module path of the account (`Documents\WindowsPowerShell\Modules`, and what its environment adds) can be changed by any program of the user, and a module there named like one of Windows would run as administrator. The tool and `install.ps1` do the same.
 
-`$toolArguments` by purpose (always `-Json` and `-Lang`; `-Yes` only to apply, re-apply or turn startup entries off, because `-Undo` and `-Health` refuse it):
+`$toolArguments` by purpose (always `-Json` and `-Lang`; `-Yes` only to apply, re-apply, turn startup entries off or delete cleaning rules, because `-Undo` and `-Health` refuse it):
 
 | Purpose | `$toolArguments` |
 |---|---|
@@ -103,6 +108,7 @@ Before anything else, the elevated process takes its modules only from the folde
 | Undo a run that needs administrator | `-Undo '<runId>' -Json -Lang <es or en>`, or with `-Tweak '<id>'` |
 | Re-apply what drifted, with system changes | `-Status -Reapply -Include '<ids allowed by guardrail 2>' -Yes -Json -Lang <es or en>` (the ids of the classification plus the `needs-admin` ids you listed before the UAC prompt) |
 | Turn off the startup entries whose `needsAdmin` is true (only those) | `-Startup -Disable '<ids>' -Yes -Json -Lang <es or en>` |
+| Delete the cleaning rules whose `needsAdmin` is true (only those; it cannot be undone) | `-Clean -Remove '<ids>' -Yes -Json -Lang <es or en>` |
 | Windows health | `-Health -Json -Lang <es or en>`; the repair: `-Health -Repair -Json -Lang <es or en>` |
 
 What the output means:
@@ -116,7 +122,7 @@ What the output means:
 
 `-Health` takes 15 minutes or more, and an apply or re-apply whose plan has `appx`, `capability` or `feature` items, a re-apply to which you added `needs-admin` items (they are apps, capabilities or features, and never appear in the classification plan), or an elevated `-Undo` of a run with `appx`, `capability` or `feature` items (it reinstalls apps with winget; the `type` of each id that `-Status -Json` lists for that `runId` is in `tweaks` of `-List -Json`) can take several minutes: longer than one command of your shell may wait. Run "Run elevated" for those in the background by default (`run_in_background` of the Bash or PowerShell tool): that task ends when the elevated process exits, and you are told; then run `-ReadResult '<id>' -Json` once. Run the other elevated snippets in the foreground with the longest timeout your shell tool allows (600000 ms in Claude Code).
 
-`-Measure -IdleSeconds 120` runs without elevation, but it waits two minutes before it measures, longer than the default timeout of one command (120000 ms in Claude Code): run it with a timeout of 600000 ms or in the background, and read its output when it ends.
+`-Measure -IdleSeconds 120` runs without elevation, but it waits two minutes before it measures, longer than the default timeout of one command (120000 ms in Claude Code): run it with a timeout of 600000 ms or in the background, and read its output when it ends. `-Clean -Large` also runs without elevation and measures folders for up to 3 minutes: the same, a timeout of 600000 ms.
 
 Never poll and never sleep waiting for a result. If a foreground command times out, the elevated window goes on by itself: do not start another one; ask the user to tell you when the elevated window has closed, and then run `-ReadResult '<id>' -Json` once. `result-incomplete` after the process has ended means that the run was stopped: run `-Status -Json` then, never before.
 

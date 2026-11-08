@@ -119,7 +119,7 @@ Describe 'Skill' {
             }
         }
         foreach ($expected in 'List', 'Suggest', 'WhatIf', 'Yes', 'Json', 'ResultId', 'ReadResult', 'Undo', 'Tweak', 'Health', 'Repair', 'Measure',
-            'Compare', 'IdleSeconds', 'Status', 'Reapply', 'Include', 'Exclude', 'Lang', 'Profile', 'Startup', 'Disable') {
+            'Compare', 'IdleSeconds', 'Status', 'Reapply', 'Include', 'Exclude', 'Lang', 'Profile', 'Startup', 'Disable', 'Clean', 'Remove', 'Large') {
             $seen | Should -Contain $expected
         }
     }
@@ -248,6 +248,12 @@ Describe 'Skill' {
         @{ Phrase = '(guardrail 14)' }
         @{ Phrase = '(protected, already off, run once, ambiguous, unreadable, or a task whose name has wildcard characters)' }
         @{ Phrase = 'the entries that are on but cannot be turned off and are not protected' }
+        @{ Phrase = '15. Deleting with `-Clean -Remove` cannot be undone: say so every time you offer it and before every yes.' }
+        @{ Phrase = 'Delete a cleaning rule only when the user chose that rule' }
+        @{ Phrase = 'nothing is ever chosen by default' }
+        @{ Phrase = 'Never run a `hint`' }
+        @{ Phrase = 'never delete files by any other means than `-Clean -Remove`' }
+        @{ Phrase = '(guardrail 15)' }
     ) {
         param($Phrase)
         $Skill.Contains($Phrase) | Should -BeTrue -Because $Phrase
@@ -296,6 +302,56 @@ Describe 'Skill' {
         # A prefix of -Disable never reaches this check: the form of the arguments refuses it first.
         $form = [regex]::Match($elevated, "-or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`"").Groups['arguments'].Value
         foreach ($bad in "-Startup -Dis 'x' -Yes -Json -Lang en", "-Startup -Disabl 'x' -Yes -Json -Lang en") { $bad | Should -Not -MatchExactly $form -Because $bad }
+    }
+
+    It 'deletes only the cleaning rules the user chose, says that it cannot be undone, and never runs a hint' {
+        foreach ($term in 'Do we see how much disk space can be freed?', '## 6. Free up space', '`-Clean` (without `-Remove`)', '`-Clean -Json`', '`-Clean -Large -Json`',
+            "-Clean -Remove '<ids>' -WhatIf -Json", "-Clean -Remove '<those ids>' -Yes -Json", "-Clean -Remove '<those ids>' -Yes -Json -ResultId <guid>",
+            'grouped by `category`', '`reason` = `needs-admin`', '`reportOnly` true', 'its `hint` as text', 'say that deleting cannot be undone',
+            '`-Undo` and `-Status` never see it', 'Never elevate the ones of the user', '`session-user`', 'There is no `runId`', 'libera espacio en disco',
+            '| Free up disk space, delete temporary files or caches, the disk is full |', 'it could not be measured without administrator, never that it is empty or absent') {
+            $Skill.Contains($term) | Should -BeTrue -Because $term
+        }
+        foreach ($term in '`-Clean -Json`', '`-Clean -Large -Json`', "-Clean -Remove '<ids>' -WhatIf -Json", "-Clean -Remove '<ids>' -Yes -Json", '^clean\.[a-z0-9]+(-[a-z0-9]+)*$',
+            '`rules` of `-Clean -Json`', 'whose `reportOnly` is false', 'It cannot be undone') {
+            $Commands.Contains($term) | Should -BeTrue -Because $term
+        }
+        $Reading = Read-RepoText (Join-Path (Join-Path $SkillRoot 'reference') 'reading-json.md')
+        foreach ($term in '## `clean`', '**cannot be undone**', '`report-only`', '`needs-admin`', '`session-user`', '`not-present`', '`unreadable`', '`app-running`',
+            '`service-running`', '`nothing-to-remove`', '`in-use`', '`keptFiles`', '`planOnly`', '`freeBytesAfter`', 'never run it', 'never cookies') {
+            $Reading.Contains($term) | Should -BeTrue -Because $term
+        }
+        # A rule is removed only through the tool: no line of code of the skill deletes files or empties the Recycle Bin.
+        foreach ($line in @($SkillLines | Where-Object { $_.Fenced })) {
+            $line.Text | Should -Not -Match '(?i)\b(Remove-Item|Clear-RecycleBin|del|rmdir|rd|powercfg)\b' -Because "$($line.File): $($line.Text)"
+        }
+    }
+
+    It 'checks the ids of -Remove again in the elevated command, before the UAC prompt' {
+        # Every rule of the repository fits the form the skill checks.
+        $rules = @((Read-RepoJson (Join-Path $Repo 'catalog\clean\rules.json')).rules)
+        $rules.Count | Should -BeGreaterThan 0
+        foreach ($rule in $rules) { $rule.id | Should -MatchExactly '^clean\.[a-z0-9]+(-[a-z0-9]+)*$' }
+        $elevated = @([regex]::Matches($Commands, '(?s)```powershell\r?\n(.*?)```') | ForEach-Object { $_.Groups[1].Value } |
+            Where-Object { $_.Contains('-Verb RunAs') -and $_.Contains('$toolArguments') })[0]
+        $guard = [regex]::Match($elevated, "(?m)^if \(\`$toolArguments -match '(?<named>-Remove[^']*)' -and \`$toolArguments -cnotmatch `"(?<form>[^`"]+)`"\) \{ throw 'invalid-arguments")
+        $guard.Success | Should -BeTrue
+        $elevated.IndexOf($guard.Value) | Should -BeLessThan $elevated.IndexOf('Start-Process')
+        $refused = { param([string]$Arguments) ($Arguments -match $guard.Groups['named'].Value) -and ($Arguments -cnotmatch $guard.Groups['form'].Value) }
+        foreach ($good in "-Clean -Remove 'clean.temp-windows' -Yes -Json -Lang en", "-Clean -Remove 'clean.temp-windows,clean.windows-update-downloads' -Yes -Json -Lang es",
+            "-Startup -Disable 'startup.service.vendorsvc-0f0f0f0f0f0f0f0f' -Yes -Json -Lang en") {
+            & $refused $good | Should -BeFalse -Because $good
+        }
+        foreach ($bad in "-Clean -Remove 'privacy.telemetry' -Yes -Json -Lang en", "-Clean -Remove 'clean.temp-windows,base.ads' -Yes -Json -Lang en",
+            "-Clean -Remove 'clean.' -Yes -Json -Lang en", "-Clean -Remove 'clean.temp--windows' -Yes -Json -Lang en", "-Clean -remove 'clean.temp-windows' -Yes -Json -Lang en",
+            "-Clean -Remove 'CLEAN.TEMP-WINDOWS' -Yes -Json -Lang en", "-Clean -Remove '' -Yes -Json -Lang en", "-Clean -Remove -Yes -Json -Lang en") {
+            & $refused $bad | Should -BeTrue -Because $bad
+        }
+        # A prefix of -Remove, or -Large (never elevated), never reaches this check: the form of the arguments refuses it first.
+        $form = [regex]::Match($elevated, "-or \`$toolArguments -cnotmatch `"(?<arguments>[^`"]+)`"").Groups['arguments'].Value
+        foreach ($bad in "-Clean -Rem 'clean.temp-windows' -Yes -Json -Lang en", "-Clean -Remov 'clean.temp-windows' -Yes -Json -Lang en", '-Clean -Large -Json -Lang en') {
+            $bad | Should -Not -MatchExactly $form -Because $bad
+        }
     }
 
     It 'links only to files that exist' {
@@ -359,7 +415,8 @@ Describe 'Skill' {
         $passes = { param([string]$Arguments) ($Arguments -cmatch $guard.Groups['arguments'].Value) -and -not ($Arguments -match $guard.Groups['forbidden'].Value) }
         foreach ($good in "-Profile 'gaming,privacy' -Yes -Json -Lang en", "-Undo '20261002-120000-01' -Tweak 'privacy.telemetry' -Json -Lang es",
             "-Status -Reapply -Include 'lite.xbox-app,base.ads' -Yes -Json -Lang en", '-Health -Repair -Json -Lang es',
-            "-Startup -Disable 'startup.run-machine.vendor-tray-1a2b3c4d5e6f7081,startup.service.vendorsvc-0f0f0f0f0f0f0f0f' -Yes -Json -Lang en") {
+            "-Startup -Disable 'startup.run-machine.vendor-tray-1a2b3c4d5e6f7081,startup.service.vendorsvc-0f0f0f0f0f0f0f0f' -Yes -Json -Lang en",
+            "-Clean -Remove 'clean.temp-windows,clean.windows-update-downloads' -Yes -Json -Lang es") {
             & $passes $good | Should -BeTrue -Because $good
         }
         foreach ($bad in "-Profile 'gaming'; Start-Process calc", "-Profile 'gaming' -Yes -Json -Lang en; calc", "-Profile 'port$([char]0x00E1)til' -Json -Lang es",
