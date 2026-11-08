@@ -161,6 +161,61 @@
       "rebootRequired": false,
       "signOutRequired": true,
       "sources": ["https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json"]
+    },
+    {
+      "id": "ui.dark-mode-apps",
+      "title": { "es": "Modo oscuro para las apps", "en": "Dark mode for apps" },
+      "why": { "es": "Preferencia, no rendimiento: Configuración, el Explorador y las apps que siguen el tema de Windows usan el modo oscuro.", "en": "A preference, not a speed-up: Settings, File Explorer and the apps that follow the Windows theme use dark mode." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "name": "AppsUseLightTheme", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "signOutRequired": true,
+      "sources": ["https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg", "https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
+    },
+    {
+      "id": "ui.dark-mode-windows",
+      "title": { "es": "Modo oscuro para Windows (barra de tareas e Inicio)", "en": "Dark mode for Windows (taskbar and Start)" },
+      "why": { "es": "Preferencia, no rendimiento: la barra de tareas, Inicio y las notificaciones usan el modo oscuro.", "en": "A preference, not a speed-up: the taskbar, Start and notifications use dark mode." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", "name": "SystemUsesLightTheme", "kind": "DWord", "value": 0 },
+      "rebootRequired": false,
+      "signOutRequired": true,
+      "sources": ["https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg", "https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
+    },
+    {
+      "id": "ui.explorer-this-pc",
+      "title": { "es": "El Explorador abre en Este equipo", "en": "File Explorer opens to This PC" },
+      "why": { "es": "Preferencia: abre en las unidades y carpetas en lugar de Inicio con los archivos recientes.", "en": "A preference: opens to the drives and folders instead of Home with the recent files." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Advanced", "name": "LaunchTo", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "sources": ["https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Launch_File_Explorer_To_This_PC.reg", "https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
+    },
+    {
+      "id": "ui.confirm-delete",
+      "title": { "es": "Preguntar antes de mandar a la Papelera", "en": "Ask before moving to the Recycle Bin" },
+      "why": { "es": "Preferencia: el Explorador pide confirmación al eliminar. Es una directiva de usuario, así que la casilla de la Papelera queda fija mientras esté.", "en": "A preference: File Explorer asks before deleting. It is a user policy, so the Recycle Bin checkbox stays locked while it is set." },
+      "risk": "low",
+      "ask": false,
+      "os": { "families": ["10", "11"], "minBuild": 19041, "editions": ["Home", "Pro", "Enterprise", "Education"] },
+      "type": "registry",
+      "scope": "user",
+      "set": { "path": "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer", "name": "ConfirmFileDelete", "kind": "DWord", "value": 1 },
+      "rebootRequired": false,
+      "signOutRequired": true,
+      "sources": ["https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-windowsexplorer", "https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1"]
     }
   ]
 }

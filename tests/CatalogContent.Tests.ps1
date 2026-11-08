@@ -98,9 +98,26 @@ Describe 'ui catalog' {
             'ui.window-animations-off',
             'ui.listview-shadow-off',
             'ui.listview-alpha-select-off',
-            'ui.aero-peek-off'
+            'ui.aero-peek-off',
+            'ui.dark-mode-apps',
+            'ui.dark-mode-windows',
+            'ui.explorer-this-pc',
+            'ui.confirm-delete'
         ) -join ','
         Get-CategoryId 'ui' | Should -Be $expected
+    }
+
+    It 'keeps the preferences out of every profile and says they are preferences' {
+        $profilesDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'profiles'
+        $included = @(Get-ChildItem -LiteralPath $profilesDir -Filter '*.json' -File | ForEach-Object { ([System.IO.File]::ReadAllText($_.FullName) | ConvertFrom-Json).include })
+        $tweaks = @(Get-CategoryTweak 'ui')
+        foreach ($id in 'ui.dark-mode-apps', 'ui.dark-mode-windows', 'ui.explorer-this-pc', 'ui.confirm-delete') {
+            $included | Should -Not -Contain $id
+            $tweak = @($tweaks | Where-Object { $_.id -eq $id })[0]
+            $tweak.risk | Should -Be 'low' -Because $id
+            $tweak.scope | Should -Be 'user' -Because $id
+            [string]$tweak.why.en | Should -BeLike 'A preference*' -Because $id
+        }
     }
 }
 

@@ -10,7 +10,7 @@ English version: [../en/catalog.md](../en/catalog.md).
 |---|---|
 | Privacidad y telemetría (`privacy`) | 18 |
 | Anuncios y sugerencias (`ads`) | 28 |
-| Interfaz (`ui`) | 12 |
+| Interfaz (`ui`) | 16 |
 | Copilot, Recall e IA (`ai`) | 10 |
 | Microsoft Edge (`edge`) | 17 |
 | Servicios (`services`) | 10 |
@@ -20,7 +20,7 @@ English version: [../en/catalog.md](../en/catalog.md).
 | Juegos (`gaming`) | 11 |
 | Desarrollo (`dev`) | 3 |
 | Apps (`apps`) | 30 |
-| **Total** | **166** |
+| **Total** | **170** |
 
 ## Perfiles
 
@@ -86,6 +86,15 @@ Ningún perfil los incluye. Solo se aplican si los pides por nombre con `-Includ
 - `ai.recall-snapshots-off`: Recall: no guardar capturas (directiva de usuario)
 - `ai.recall-unavailable`: Recall: no disponible en el equipo
 - `gaming.memory-integrity-off`: Desactivar la integridad de memoria (VBS/HVCI)
+
+## Otros ajustes fuera de los perfiles
+
+Preferencias, como el modo oscuro, que ningún perfil incluye. Se aplican si los pides por nombre con `-Include` o si los marcas en la ventana (`gui.ps1`).
+
+- `ui.dark-mode-apps`: Modo oscuro para las apps
+- `ui.dark-mode-windows`: Modo oscuro para Windows (barra de tareas e Inicio)
+- `ui.explorer-this-pc`: El Explorador abre en Este equipo
+- `ui.confirm-delete`: Preguntar antes de mandar a la Papelera
 
 ## Ajustes que no se aplican en Home
 
@@ -817,6 +826,54 @@ Desactiva Aero Peek, que redibuja las ventanas al pasar el ratón por la esquina
 - **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
 - **Después de aplicar:** cerrar sesión
 - **Fuentes:** <https://github.com/ChrisTitusTech/winutil/blob/main/config/tweaks.json>
+
+### `ui.dark-mode-apps`
+
+**Modo oscuro para las apps**
+
+Preferencia, no rendimiento: Configuración, el Explorador y las apps que siguen el tema de Windows usan el modo oscuro.
+
+- **Tipo:** `registry`; **Ámbito:** usuario (sin administrador); **Riesgo:** bajo; **Pregunta:** no
+- **En perfiles:** ninguno; **Lo mantienen:** ninguno
+- **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
+- **Después de aplicar:** cerrar sesión
+- **Fuentes:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.dark-mode-windows`
+
+**Modo oscuro para Windows (barra de tareas e Inicio)**
+
+Preferencia, no rendimiento: la barra de tareas, Inicio y las notificaciones usan el modo oscuro.
+
+- **Tipo:** `registry`; **Ámbito:** usuario (sin administrador); **Riesgo:** bajo; **Pregunta:** no
+- **En perfiles:** ninguno; **Lo mantienen:** ninguno
+- **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
+- **Después de aplicar:** cerrar sesión
+- **Fuentes:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Enable_Dark_Mode.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.explorer-this-pc`
+
+**El Explorador abre en Este equipo**
+
+Preferencia: abre en las unidades y carpetas en lugar de Inicio con los archivos recientes.
+
+- **Tipo:** `registry`; **Ámbito:** usuario (sin administrador); **Riesgo:** bajo; **Pregunta:** no
+- **En perfiles:** ninguno; **Lo mantienen:** ninguno
+- **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
+- **Después de aplicar:** nada
+- **Fuentes:** <https://github.com/Raphire/Win11Debloat/blob/master/Regfiles/Launch_File_Explorer_To_This_PC.reg>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
+
+### `ui.confirm-delete`
+
+**Preguntar antes de mandar a la Papelera**
+
+Preferencia: el Explorador pide confirmación al eliminar. Es una directiva de usuario, así que la casilla de la Papelera queda fija mientras esté.
+
+- **Tipo:** `registry`; **Ámbito:** usuario (sin administrador); **Riesgo:** bajo; **Pregunta:** no
+- **En perfiles:** ninguno; **Lo mantienen:** ninguno
+- **Windows:** 10, 11, build 19041 o posterior; **Ediciones:** Home, Pro, Enterprise, Education
+- **Después de aplicar:** cerrar sesión
+- **Fuentes:** <https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-windowsexplorer>, <https://github.com/farag2/Sophia-Script-for-Windows/blob/master/src/Sophia_Script_for_Windows_11/Module/Sophia.psm1>
 
 ## Copilot, Recall e IA (`catalog/ai.json`)
 

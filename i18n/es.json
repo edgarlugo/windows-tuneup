@@ -446,6 +446,8 @@
   "gui.optimize.highRisk": "Ajustes de riesgo alto ({0} para este equipo)",
   "gui.optimize.highRiskNote": "Ningún perfil los aplica. Elígelos uno por uno y escribe la palabra de confirmación.",
   "gui.optimize.highRiskConfirm": "Para agregarlos, escribe «{0}» completo:",
+  "gui.optimize.extra": "Otros ajustes ({0})",
+  "gui.optimize.extraNote": "Ningún perfil los aplica: son preferencias, como el modo oscuro. Marca los que quieras y entran en el plan.",
   "gui.optimize.planButton": "Ver el plan",
   "gui.optimize.step2": "2. Revisa el plan",
   "gui.optimize.summary": "{0} cambios · {1} se omiten",
