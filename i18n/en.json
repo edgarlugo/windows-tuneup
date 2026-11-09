@@ -410,6 +410,7 @@
   "gui.theme.system": "Like Windows",
   "gui.theme.light": "Light",
   "gui.theme.dark": "Dark",
+  "gui.theme.highContrast": "Windows high contrast is on: the window uses its colors. Your choice comes back when you turn it off.",
   "gui.status.ready": "Ready.",
   "gui.status.running": "{0}…",
   "gui.status.elapsed": "{0}:{1}",

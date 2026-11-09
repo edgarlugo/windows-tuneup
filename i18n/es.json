@@ -410,6 +410,7 @@
   "gui.theme.system": "Como Windows",
   "gui.theme.light": "Claro",
   "gui.theme.dark": "Oscuro",
+  "gui.theme.highContrast": "Contraste alto de Windows activado: la ventana usa sus colores. Tu elección vuelve cuando lo desactives.",
   "gui.status.ready": "Listo.",
   "gui.status.running": "{0}…",
   "gui.status.elapsed": "{0}:{1}",

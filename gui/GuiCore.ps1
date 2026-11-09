@@ -354,9 +354,11 @@ function Save-TuneupGuiSetting {
     [System.IO.File]::WriteAllText($Path, ($Settings | ConvertTo-Json), $script:GuiUtf8)
 }
 
-# Light or dark: the choice of the settings, or what Windows uses for apps.
+# Light or dark: the choice of the settings, or what Windows uses for apps. With high contrast on in Windows
+# (the window passes SystemParameters.HighContrast), always highcontrast: the colors of Windows win.
 function Get-TuneupGuiTheme {
-    param([Parameter(Mandatory)][string]$Choice)
+    param([Parameter(Mandatory)][string]$Choice, [bool]$HighContrast = $false)
+    if ($HighContrast) { return 'highcontrast' }
     if ($Choice -eq 'light' -or $Choice -eq 'dark') { return $Choice }
     try {
         $value = Get-ItemPropertyValue -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name 'AppsUseLightTheme' -ErrorAction Stop

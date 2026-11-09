@@ -45,6 +45,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <carpe
 - [ ] Con NVIDIA app, AMD Software o Armoury Crate instalados (si se puede): salen recomendados como app de acompañamiento, no protegidos; el servicio de audio de Realtek y el panel táctil siguen protegidos. Con la inscripción MDM simulada de [skill-checklist.md](skill-checklist.md) (sección "Equipo administrado"), OneDrive y Teams salen sin recomendar (`work-app`) y el documento de `-Startup -Json` dice `workPc`; se borra la clave al terminar.
 - [ ] En la PowerShell de 32 bits (`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`), `tuneup.ps1 -Startup` se niega (necesita PowerShell de 64 bits), código 1, sin listar ni apagar nada.
 - [ ] `tuneup.ps1 -Undo` de cada corrida de arranque (la de máquina, elevado): todo vuelve como estaba (los valores de `StartupApproved` que no existían desaparecen, la tarea se habilita y el servicio vuelve a Automático); reiniciar y comprobar que arrancan.
+- [ ] Ventana (`gui.ps1`), sin elevar y como administrador: cada sección muestra lo mismo que su comando; aplicar `base` y deshacer esa corrida desde la ventana dejan `tuneup.ps1 -Status` como estaba; Liberar espacio borra solo lo elegido, después del diálogo.
+- [ ] Ventana sin elevar: un ajuste de sistema pide permiso con UAC; rechazarlo muestra un aviso, no un error, y no cambia nada.
+- [ ] Ventana con contraste alto (Configuración > Accesibilidad > Temas de contraste, uno oscuro y uno claro): toda la ventana toma los colores de Windows, los botones, las fichas y los avisos se distinguen, y el selector de tema queda deshabilitado con su motivo; activarlo o desactivarlo con la ventana abierta la vuelve a abrir en la misma sección.
+- [ ] Ventana con Narrador y al 200 % de escala: cada control se anuncia con su nombre y nada queda cortado; cerrarla mientras aplica pregunta antes.
 - [ ] Liviano frente a LTSC: el método de [measuring.md](measuring.md), con su reporte.
 
 ## Adjuntar a la release

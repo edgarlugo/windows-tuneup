@@ -179,6 +179,13 @@ Describe 'Settings of the window' {
         Get-TuneupGuiTheme -Choice 'light' | Should -Be 'light'
         @('light', 'dark') | Should -Contain (Get-TuneupGuiTheme -Choice 'system')
     }
+
+    It 'takes the high-contrast theme whenever Windows has high contrast on, whatever the choice' {
+        foreach ($choice in 'system', 'light', 'dark') {
+            Get-TuneupGuiTheme -Choice $choice -HighContrast $true | Should -Be 'highcontrast'
+        }
+        Get-TuneupGuiTheme -Choice 'dark' -HighContrast $false | Should -Be 'dark'
+    }
 }
 
 Describe 'gui/MainWindow.xaml' {
@@ -203,13 +210,26 @@ Describe 'gui/MainWindow.xaml' {
         }
     }
 
-    It 'has the same tokens in the light and the dark theme' {
+    It 'has the same tokens in the light, the dark and the high-contrast theme' {
         $light = Get-ThemeKey 'Light'
         $light.Count | Should -BeGreaterThan 20
         Get-ThemeKey 'Dark' | Should -Be $light
+        Get-ThemeKey 'HighContrast' | Should -Be $light
         foreach ($key in @([regex]::Matches($Xaml + $WindowCode, "(?:DynamicResource |Get-GuiBrush '|SetResourceReference\([^,]+, ')([A-Za-z]+)") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)) {
             $light | Should -Contain $key -Because $key
         }
+    }
+
+    It 'takes every color of the high-contrast theme from Windows' {
+        $brushes = @(([xml][System.IO.File]::ReadAllText((Join-Path $Repo 'gui\Themes\HighContrast.xaml'))).ResourceDictionary.SolidColorBrush)
+        foreach ($brush in $brushes | Where-Object { $_.Key -ne 'Scrim' }) {
+            $brush.Color | Should -Match '^\{DynamicResource \{x:Static SystemColors\.[A-Za-z]+ColorKey\}\}$' -Because $brush.Key
+        }
+    }
+
+    It 'has no color of its own outside the themes, so high contrast reaches every control' {
+        $Xaml | Should -Not -Match '="#[0-9A-Fa-f]{3,8}"'
+        $WindowCode | Should -Not -Match "'#[0-9A-Fa-f]{3,8}'"
     }
 
     It 'loads in a WPF window with each theme, and every element is there' {
@@ -220,10 +240,16 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 . (Join-Path $Repo 'gui\GuiCore.ps1')
 . (Join-Path $Repo 'gui\GuiWindow.ps1')
-foreach ($theme in 'light', 'dark') {
+foreach ($theme in 'light', 'dark', 'highcontrast') {
     $window = Import-GuiWindow -Theme $theme
     foreach ($name in $script:GuiElementNames) { if ($null -eq $window.FindName($name)) { throw "missing $name" } }
     [void]$window.FindResource('Accent')
+}
+# High contrast: the tokens are the colors of Windows.
+foreach ($pair in @(@('Text', 'WindowTextColor'), @('Bg', 'WindowColor'), @('Accent', 'HighlightColor'), @('OnAccent', 'HighlightTextColor'), @('DisabledText', 'GrayTextColor'))) {
+    $color = $window.FindResource($pair[0]).Color
+    $system = [System.Windows.SystemColors]::($pair[1])
+    if ($color -ne $system) { throw "$($pair[0]) is $color, not $system" }
 }
 'loaded'
 '@

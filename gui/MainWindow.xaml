@@ -42,7 +42,7 @@
                                 <Trigger Property="IsPressed" Value="True"><Setter TargetName="Box" Property="Opacity" Value="0.75"/></Trigger>
                                 <Trigger Property="IsEnabled" Value="False">
                                     <Setter TargetName="Box" Property="Background" Value="{DynamicResource DisabledBg}"/>
-                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Border}"/>
+                                    <Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource DisabledBorder}"/>
                                     <Setter Property="Foreground" Value="{DynamicResource DisabledText}"/>
                                     <Setter Property="Cursor" Value="Arrow"/>
                                 </Trigger>
@@ -87,6 +87,7 @@
                                 <Trigger Property="IsChecked" Value="True">
                                     <Setter TargetName="Box" Property="Background" Value="{DynamicResource NavSelected}"/>
                                     <Setter TargetName="Mark" Property="Visibility" Value="Visible"/>
+                                    <Setter Property="Foreground" Value="{DynamicResource NavSelectedText}"/>
                                     <Setter Property="FontWeight" Value="SemiBold"/>
                                 </Trigger>
                             </ControlTemplate.Triggers>
@@ -175,10 +176,10 @@
                             <CheckBox DockPanel.Dock="Left" Margin="0,2,12,0" VerticalAlignment="Top" IsChecked="{Binding Selected, Mode=OneWay}" IsEnabled="{Binding Enabled}"
                                       Visibility="{Binding Checkable, Converter={StaticResource BoolVis}}" AutomationProperties.Name="{Binding Title}"/>
                             <WrapPanel DockPanel.Dock="Right" VerticalAlignment="Center" Margin="12,0,0,0">
-                                <Border CornerRadius="10" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip1Bg}" Visibility="{Binding HasChip1, Converter={StaticResource BoolVis}}">
+                                <Border CornerRadius="10" BorderBrush="{DynamicResource Outline}" BorderThickness="1" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip1Bg}" Visibility="{Binding HasChip1, Converter={StaticResource BoolVis}}">
                                     <TextBlock Text="{Binding Chip1}" FontSize="12" Foreground="{Binding Chip1Fg}"/>
                                 </Border>
-                                <Border CornerRadius="10" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip2Bg}" Visibility="{Binding HasChip2, Converter={StaticResource BoolVis}}">
+                                <Border CornerRadius="10" BorderBrush="{DynamicResource Outline}" BorderThickness="1" Padding="8,2" Margin="0,0,8,0" Background="{Binding Chip2Bg}" Visibility="{Binding HasChip2, Converter={StaticResource BoolVis}}">
                                     <TextBlock Text="{Binding Chip2}" FontSize="12" Foreground="{Binding Chip2Fg}"/>
                                 </Border>
                                 <TextBlock Text="{Binding Value}" FontWeight="SemiBold" MinWidth="64" TextAlignment="Right" VerticalAlignment="Center" Visibility="{Binding HasValue, Converter={StaticResource BoolVis}}"/>
@@ -212,10 +213,10 @@
                         <TextBlock x:Name="VersionText" FontSize="12" Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     </StackPanel>
                     <WrapPanel HorizontalAlignment="Right" VerticalAlignment="Center">
-                        <Border Background="{DynamicResource NeutralBg}" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <Border Background="{DynamicResource NeutralBg}" BorderBrush="{DynamicResource Outline}" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
                             <TextBlock x:Name="EnvText" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
                         </Border>
-                        <Border x:Name="AdminChip" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
+                        <Border x:Name="AdminChip" BorderBrush="{DynamicResource Outline}" BorderThickness="1" CornerRadius="12" Padding="10,4" Margin="0,0,8,0" VerticalAlignment="Center">
                             <TextBlock x:Name="AdminText" FontSize="12" FontWeight="SemiBold"/>
                         </Border>
                         <Button x:Name="RelaunchAdminButton" x:Uid="gui.header.relaunchAdmin"/>
@@ -237,16 +238,17 @@
                 <DockPanel Margin="12">
                     <StackPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
                         <TextBlock x:Uid="gui.nav.language" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="LanguageBox" MinHeight="32" Margin="0,0,0,8" Foreground="#1B1B1B">
+                        <ComboBox x:Name="LanguageBox" MinHeight="32" Margin="0,0,0,8" Foreground="{DynamicResource ComboText}">
                             <ComboBoxItem Tag="es" Content="Español"/>
                             <ComboBoxItem Tag="en" Content="English"/>
                         </ComboBox>
                         <TextBlock x:Uid="gui.nav.theme" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,0,0,4"/>
-                        <ComboBox x:Name="ThemeBox" MinHeight="32" Margin="0,0,0,8" Foreground="#1B1B1B">
+                        <ComboBox x:Name="ThemeBox" MinHeight="32" Margin="0,0,0,8" Foreground="{DynamicResource ComboText}">
                             <ComboBoxItem Tag="system" x:Uid="gui.theme.system"/>
                             <ComboBoxItem Tag="light" x:Uid="gui.theme.light"/>
                             <ComboBoxItem Tag="dark" x:Uid="gui.theme.dark"/>
                         </ComboBox>
+                        <TextBlock x:Name="ThemeHighContrastNote" x:Uid="gui.theme.highContrast" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap" Margin="0,0,0,8" Visibility="Collapsed"/>
                         <TextBlock x:Uid="gui.nav.local" FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"/>
                     </StackPanel>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
@@ -306,7 +308,7 @@
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate>
-                                            <Border Background="{DynamicResource InfoBg}" CornerRadius="16" Padding="12,6" Margin="0,0,8,8">
+                                            <Border Background="{DynamicResource InfoBg}" BorderBrush="{DynamicResource Outline}" BorderThickness="1" CornerRadius="16" Padding="12,6" Margin="0,0,8,8">
                                                 <TextBlock Text="{Binding Title}" Foreground="{DynamicResource InfoFg}"/>
                                             </Border>
                                         </DataTemplate>
@@ -452,7 +454,7 @@
                                 <WrapPanel>
                                     <StackPanel Margin="0,0,16,8">
                                         <TextBlock x:Uid="gui.measure.idle" Margin="0,0,0,4"/>
-                                        <ComboBox x:Name="MeasureIdleBox" MinHeight="36" MinWidth="200" Foreground="#1B1B1B">
+                                        <ComboBox x:Name="MeasureIdleBox" MinHeight="36" MinWidth="200" Foreground="{DynamicResource ComboText}">
                                             <ComboBoxItem Tag="0" x:Uid="gui.measure.idle0"/>
                                             <ComboBoxItem Tag="60" x:Uid="gui.measure.idle60"/>
                                             <ComboBoxItem Tag="120" x:Uid="gui.measure.idle120"/>
@@ -460,7 +462,7 @@
                                     </StackPanel>
                                     <StackPanel Margin="0,0,16,8">
                                         <TextBlock x:Uid="gui.measure.compare" Margin="0,0,0,4"/>
-                                        <ComboBox x:Name="MeasureCompareBox" MinHeight="36" MinWidth="200" Foreground="#1B1B1B">
+                                        <ComboBox x:Name="MeasureCompareBox" MinHeight="36" MinWidth="200" Foreground="{DynamicResource ComboText}">
                                             <ComboBoxItem Tag="" x:Uid="gui.measure.compareNone"/>
                                             <ComboBoxItem Tag="last" x:Uid="gui.measure.compareLast"/>
                                         </ComboBox>
@@ -490,7 +492,7 @@
                     </StackPanel>
 
                     <StackPanel x:Name="SectionClean" Visibility="Collapsed">
-                        <Border Background="{DynamicResource CriticalBg}" CornerRadius="8" Padding="16,12" Margin="0,0,0,16">
+                        <Border Background="{DynamicResource CriticalBg}" BorderBrush="{DynamicResource Outline}" BorderThickness="1" CornerRadius="8" Padding="16,12" Margin="0,0,0,16">
                             <TextBlock x:Uid="gui.clean.irreversible" Foreground="{DynamicResource CriticalFg}" TextWrapping="Wrap"/>
                         </Border>
                         <Border BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="8" Background="{DynamicResource Surface}" Margin="0,0,0,16">
@@ -529,7 +531,7 @@
                                         <Border BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="16,8">
                                             <DockPanel>
                                                 <TextBlock Text="{Binding Time}" FontFamily="{StaticResource Mono}" FontSize="12" Foreground="{DynamicResource TextSecondary}" Width="72" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,2,0,0"/>
-                                                <Border CornerRadius="10" Padding="8,2" Width="64" Background="{Binding LevelBg}" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,0,12,0">
+                                                <Border CornerRadius="10" BorderBrush="{DynamicResource Outline}" BorderThickness="1" Padding="8,2" Width="64" Background="{Binding LevelBg}" DockPanel.Dock="Left" VerticalAlignment="Top" Margin="0,0,12,0">
                                                     <TextBlock Text="{Binding LevelText}" FontSize="12" FontWeight="SemiBold" Foreground="{Binding LevelFg}" HorizontalAlignment="Center"/>
                                                 </Border>
                                                 <TextBox Text="{Binding Text, Mode=OneWay}" IsReadOnly="True" BorderThickness="0" Background="Transparent" Foreground="{DynamicResource Text}" TextWrapping="Wrap" FontSize="13"/>
