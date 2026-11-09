@@ -1,7 +1,7 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="windows-tuneup" Width="1200" Height="820" MinWidth="760" MinHeight="560"
-        WindowStartupLocation="CenterScreen" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        WindowStartupLocation="Manual" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
         FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="14">
     <!-- The window of design section 17. No code here: GuiWindow.ps1 finds each element by x:Name and puts
          the text of each x:Uid key in the language of the window. -->

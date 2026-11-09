@@ -334,9 +334,49 @@ function Invoke-GuiTick {
     # section, once nothing is changing and no dialog is open.
     if ($null -eq $script:Gui.Changing -and $null -eq $script:Gui.Reopen -and $script:Gui.Ui.DialogLayer.Visibility -ne 'Visible' -and
         [System.Windows.SystemParameters]::HighContrast -ne ($script:Gui.Theme -eq 'highcontrast')) {
-        $script:Gui.Reopen = [pscustomobject]@{ Lang = (Get-TuneupGuiLang); Section = $script:Gui.Section }
+        $script:Gui.Reopen = New-GuiReopen -Lang (Get-TuneupGuiLang)
         $script:Gui.Window.Close()
     }
+}
+
+# What the next window opens with: the language, the section, and the place, size and maximized state of
+# this one, so a change of language or theme does not move or resize it.
+function New-GuiReopen {
+    param([Parameter(Mandatory)][string]$Lang)
+    $window = $script:Gui.Window
+    $bounds = $window.RestoreBounds
+    $placement = $(if ($bounds.IsEmpty) { $null } else {
+            [pscustomobject]@{ Left = $bounds.Left; Top = $bounds.Top; Width = $bounds.Width; Height = $bounds.Height; Maximized = ($window.WindowState -eq 'Maximized') }
+        })
+    [pscustomobject]@{ Lang = $Lang; Section = $script:Gui.Section; Placement = $placement }
+}
+
+# Fits the window to the work area of its screen before it shows (Get-TuneupGuiWindowPlacement): the screen
+# of the window it replaces, or the one with the mouse pointer. Windows gives that area in pixels; the
+# window measures in device-independent pixels, so it goes through the scale of the window.
+function Set-GuiWindowPlacement {
+    param([Parameter(Mandatory)]$Window, $Previous)
+    Add-Type -AssemblyName System.Windows.Forms
+    $source = [System.Windows.Interop.HwndSource]::FromHwnd((New-Object System.Windows.Interop.WindowInteropHelper -ArgumentList $Window).EnsureHandle())
+    $toDevice = $source.CompositionTarget.TransformToDevice
+    $fromDevice = $source.CompositionTarget.TransformFromDevice
+    $point = $(if ($null -ne $Previous) {
+            $center = $toDevice.Transform((New-Object System.Windows.Point -ArgumentList ($Previous.Left + $Previous.Width / 2), ($Previous.Top + $Previous.Height / 2)))
+            New-Object System.Drawing.Point -ArgumentList ([int]$center.X), ([int]$center.Y)
+        } else { [System.Windows.Forms.Cursor]::Position })
+    $work = [System.Windows.Forms.Screen]::FromPoint($point).WorkingArea
+    $topLeft = $fromDevice.Transform((New-Object System.Windows.Point -ArgumentList $work.Left, $work.Top))
+    $bottomRight = $fromDevice.Transform((New-Object System.Windows.Point -ArgumentList $work.Right, $work.Bottom))
+    $area = @{ AreaLeft = $topLeft.X; AreaTop = $topLeft.Y; AreaWidth = $bottomRight.X - $topLeft.X; AreaHeight = $bottomRight.Y - $topLeft.Y }
+    if ($null -ne $Previous) { $area += @{ Left = $Previous.Left; Top = $Previous.Top; Width = $Previous.Width; Height = $Previous.Height } }
+    $fit = Get-TuneupGuiWindowPlacement @area
+    $Window.MinWidth = $fit.MinWidth
+    $Window.MinHeight = $fit.MinHeight
+    $Window.Width = $fit.Width
+    $Window.Height = $fit.Height
+    $Window.Left = $fit.Left
+    $Window.Top = $fit.Top
+    if ($null -ne $Previous -and $Previous.Maximized) { $Window.WindowState = 'Maximized' }
 }
 
 # An error document as a notice, with what the window can do about its reason. -Retry runs the same action
@@ -1099,14 +1139,14 @@ function Register-GuiEvent {
             $script:Gui.Settings.lang = $lang
             Save-TuneupGuiSetting -Settings $script:Gui.Settings
             # A new window in the other language, in the same section.
-            $script:Gui.Reopen = [pscustomobject]@{ Lang = $lang; Section = $script:Gui.Section }
+            $script:Gui.Reopen = New-GuiReopen -Lang $lang
             $script:Gui.Window.Close()
         })
     $ui.ThemeBox.Add_SelectionChanged({
             if ($script:Gui.Initializing) { return }
             $script:Gui.Settings.theme = [string]$script:Gui.Ui.ThemeBox.SelectedItem.Tag
             Save-TuneupGuiSetting -Settings $script:Gui.Settings
-            $script:Gui.Reopen = [pscustomobject]@{ Lang = (Get-TuneupGuiLang); Section = $script:Gui.Section }
+            $script:Gui.Reopen = New-GuiReopen -Lang (Get-TuneupGuiLang)
             $script:Gui.Window.Close()
         })
 
@@ -1131,8 +1171,9 @@ function Register-GuiEvent {
 }
 
 # Opens the window and waits until it closes. Gives what to open next: a language change reopens it.
+# -Placement is the place and size of the window it replaces (New-GuiReopen).
 function Show-TuneupGui {
-    param([string]$Section = 'Home', [Parameter(Mandatory)]$Settings)
+    param([string]$Section = 'Home', [Parameter(Mandatory)]$Settings, $Placement)
     $theme = Get-TuneupGuiTheme -Choice $Settings.theme -HighContrast ([System.Windows.SystemParameters]::HighContrast)
     $window = Import-GuiWindow -Theme $theme
     $ui = @{}
@@ -1172,6 +1213,8 @@ function Show-TuneupGui {
     $timer.Add_Tick({ Invoke-GuiTick })
     $timer.Start()
     $script:Gui.Initializing = $false
+    $script:GuiPlacement = $Placement
+    $window.Add_SourceInitialized({ Set-GuiWindowPlacement -Window $script:Gui.Window -Previous $script:GuiPlacement })
     $window.Add_ContentRendered({ Show-GuiSection -Name $script:Gui.Section })
     [void]$window.ShowDialog()
     $timer.Stop()
