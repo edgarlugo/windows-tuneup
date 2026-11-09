@@ -8,7 +8,7 @@ $script:GuiSections = @('Home', 'Optimize', 'Status', 'Undo', 'Health', 'Measure
 # The elements GuiWindow.ps1 uses, by x:Name; a test checks that MainWindow.xaml has each one.
 $script:GuiElementNames = @(
     'Shell', 'VersionText', 'EnvText', 'AdminChip', 'AdminText', 'RelaunchAdminButton', 'OpenLogButton', 'CancelButton', 'ElapsedText', 'BusyBar',
-    'StatusText', 'LanguageBox', 'ThemeBox', 'NavPanel', 'ContentScroll', 'SectionTitle', 'NoticePanel',
+    'StatusText', 'LanguageBox', 'ThemeBox', 'ThemeHighContrastNote', 'NavPanel', 'ContentScroll', 'SectionTitle', 'NoticePanel',
     'SectionHome', 'HomeAppliedValue', 'HomeAppliedNote', 'HomeStatusButton', 'HomeFreeValue', 'HomeFreeNote', 'HomeCleanButton', 'HomeStartupValue',
     'HomeStartupNote', 'HomeStartupButton', 'HomeSuggestList', 'HomeSuggestButton', 'HomeRunsList',
     'SectionOptimize', 'OptProfilesList', 'OptHighRiskExpander', 'OptHighRiskList', 'OptHighRiskConfirmLabel', 'OptHighRiskConfirm', 'OptExtraExpander', 'OptExtraList', 'OptPlanButton',
@@ -54,7 +54,7 @@ function Get-GuiBrush {
 # again, like a change of language.
 function Import-GuiWindow {
     param([Parameter(Mandatory)][string]$Theme)
-    $name = $(if ($Theme -eq 'dark') { 'Dark' } else { 'Light' })
+    $name = switch ($Theme) { 'dark' { 'Dark' } 'highcontrast' { 'HighContrast' } default { 'Light' } }
     $tokens = New-Object System.Xml.XmlDocument
     $tokens.XmlResolver = $null
     $tokens.Load((Join-Path $script:GuiRoot "gui\Themes\$name.xaml"))
@@ -135,6 +135,8 @@ function Show-GuiNotice {
     $keys = @{ Error = @('CriticalBg', 'CriticalFg'); Warning = @('CautionBg', 'CautionFg'); Info = @('InfoBg', 'InfoFg'); Success = @('SuccessBg', 'SuccessFg') }[$Kind]
     $border = New-Object System.Windows.Controls.Border
     $border.SetResourceReference([System.Windows.Controls.Border]::BackgroundProperty, $keys[0])
+    $border.SetResourceReference([System.Windows.Controls.Border]::BorderBrushProperty, 'Outline')
+    $border.BorderThickness = 1
     $border.CornerRadius = 8
     $border.Padding = '16,12'
     $border.Margin = '0,0,0,16'
@@ -328,6 +330,13 @@ function Invoke-GuiTick {
         }
     }
     Update-GuiBusy
+    # High contrast turned on or off in Windows: the window opens again with the other colors, in the same
+    # section, once nothing is changing and no dialog is open.
+    if ($null -eq $script:Gui.Changing -and $null -eq $script:Gui.Reopen -and $script:Gui.Ui.DialogLayer.Visibility -ne 'Visible' -and
+        [System.Windows.SystemParameters]::HighContrast -ne ($script:Gui.Theme -eq 'highcontrast')) {
+        $script:Gui.Reopen = [pscustomobject]@{ Lang = (Get-TuneupGuiLang); Section = $script:Gui.Section }
+        $script:Gui.Window.Close()
+    }
 }
 
 # An error document as a notice, with what the window can do about its reason. -Retry runs the same action
@@ -540,7 +549,8 @@ function Set-GuiPlanDocument {
     foreach ($check in @($Document.preflight)) {
         $border = New-Object System.Windows.Controls.Border
         $border.SetResourceReference([System.Windows.Controls.Border]::BackgroundProperty, 'CautionBg')
-        $border.CornerRadius = 8; $border.Padding = '14,10'; $border.Margin = '0,0,0,8'
+        $border.SetResourceReference([System.Windows.Controls.Border]::BorderBrushProperty, 'Outline')
+        $border.BorderThickness = 1; $border.CornerRadius = 8; $border.Padding = '14,10'; $border.Margin = '0,0,0,8'
         $text = New-Object System.Windows.Controls.TextBlock
         $text.Text = [string]$check.message; $text.TextWrapping = 'Wrap'
         $text.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'CautionFg')
@@ -1123,7 +1133,7 @@ function Register-GuiEvent {
 # Opens the window and waits until it closes. Gives what to open next: a language change reopens it.
 function Show-TuneupGui {
     param([string]$Section = 'Home', [Parameter(Mandatory)]$Settings)
-    $theme = Get-TuneupGuiTheme -Choice $Settings.theme
+    $theme = Get-TuneupGuiTheme -Choice $Settings.theme -HighContrast ([System.Windows.SystemParameters]::HighContrast)
     $window = Import-GuiWindow -Theme $theme
     $ui = @{}
     foreach ($name in $script:GuiElementNames) {
@@ -1149,6 +1159,11 @@ function Show-TuneupGui {
     $ui.RelaunchAdminButton.Visibility = $(if ($script:Gui.IsAdmin) { 'Collapsed' } else { 'Visible' })
     $ui.LanguageBox.SelectedIndex = $(if ((Get-TuneupGuiLang) -eq 'es') { 0 } else { 1 })
     $ui.ThemeBox.SelectedIndex = @('system', 'light', 'dark').IndexOf([string]$Settings.theme)
+    if ($theme -eq 'highcontrast') {
+        # Windows decides the colors: the choice stays saved for when high contrast is off.
+        $ui.ThemeBox.IsEnabled = $false
+        $ui.ThemeHighContrastNote.Visibility = 'Visible'
+    }
     $ui.StatusText.Text = Get-TuneupGuiText -Key 'gui.status.ready'
     Register-GuiEvent
     Set-TuneupGuiLogListener -Listener { param($entry) if ($null -ne $entry -and $null -ne $script:Gui -and $script:Gui.Section -eq 'Log') { Update-GuiSectionLog } }

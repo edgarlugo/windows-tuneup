@@ -45,6 +45,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1 -Source <folde
 - [ ] With the NVIDIA app, AMD Software or Armoury Crate installed (if possible): they are recommended as companion apps, not protected; the Realtek audio service and the touchpad stay protected. With the MDM enrollment simulated in [skill-checklist.md](skill-checklist.md) ("Managed PC" section), OneDrive and Teams are not recommended (`work-app`) and the document of `-Startup -Json` says `workPc`; delete the key at the end.
 - [ ] In the 32-bit PowerShell (`C:\Windows\SysWOW64\WindowsPowerShell\v1.0\powershell.exe`), `tuneup.ps1 -Startup` refuses (it needs 64-bit PowerShell), exit code 1, without listing or turning anything off.
 - [ ] `tuneup.ps1 -Undo` of each startup run (the one of the machine, elevated): everything is back as it was (the `StartupApproved` values that did not exist are gone, the task is enabled and the service is Automatic again); restart and check that they start.
+- [ ] Window (`gui.ps1`), without elevation and as administrator: every section shows the same as its command; applying `base` and undoing that run from the window leave `tuneup.ps1 -Status` as it was; Free up space removes only what was chosen, after the dialog.
+- [ ] Window without elevation: a system tweak asks for permission with UAC; declining it shows a notice, not an error, and changes nothing.
+- [ ] Window with high contrast (Settings > Accessibility > Contrast themes, a dark one and a light one): the whole window takes the colors of Windows, buttons, chips and notices are told apart, and the theme selector is disabled with its reason; turning it on or off with the window open opens it again in the same section.
+- [ ] Window with Narrator and at 200% scale: every control is announced by its name and nothing is cut; closing it while applying asks first.
 - [ ] Lite versus LTSC: the method of [measuring.md](measuring.md), with its report.
 
 ## Attach to the release

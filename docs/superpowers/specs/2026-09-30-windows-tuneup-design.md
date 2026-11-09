@@ -881,7 +881,7 @@ Una ventana WPF para quien no quiere la consola, con **todo** lo que hace la lí
 |---|---|
 | `gui.ps1` | Punto de entrada. Se relanza en Windows PowerShell 5.1 con `-STA` si hace falta (WPF lo exige), carga `PresentationFramework` y los módulos solo de las carpetas de Windows y de `Program Files` (como `tuneup.ps1`), y abre la ventana. `-Section <nombre>` abre en esa sección (lo usa el reinicio como administrador). |
 | `gui/MainWindow.xaml` | La ventana: barra superior, navegación lateral, las nueve secciones y la barra de estado. Sin código en el XAML (nada de `x:Code` ni eventos con nombre): los eventos se conectan desde PowerShell por `x:Name`. |
-| `gui/Themes/Light.xaml`, `Dark.xaml` | Los tokens (17.4) como `SolidColorBrush` con las mismas claves en los dos. Se cargan dentro del XAML antes de crear la ventana (un diccionario cambiado después no llega a lo que WPF ya resolvió), así que cambiar el tema o el idioma vuelve a abrir la ventana en la misma sección. |
+| `gui/Themes/Light.xaml`, `Dark.xaml`, `HighContrast.xaml` | Los tokens (17.4) como `SolidColorBrush` con las mismas claves en los tres (el de contraste alto, 17.8). Se cargan dentro del XAML antes de crear la ventana (un diccionario cambiado después no llega a lo que WPF ya resolvió), así que cambiar el tema o el idioma vuelve a abrir la ventana en la misma sección. |
 | `gui/GuiCore.ps1` | Lógica sin interfaz, probada con Pester: arma los argumentos de cada comando, corre el proceso, lee el documento, traduce un `error` a qué pasó, por qué y qué hacer, escribe el registro, formatea tamaños y fechas. |
 | `gui/GuiWindow.ps1` | Conecta la ventana: navegación, llenar cada sección desde su documento, diálogos, avisos, tema e idioma. |
 
@@ -959,7 +959,7 @@ Contraste medido en claro: texto 17,2:1, secundario 6,7:1, acento 6,3:1, fichas 
 - Foco visible siempre (contorno de 2 px), y vuelve al botón que abrió un diálogo al cerrarlo.
 - Al 200 % de escala de Windows nada se corta: el contenido se desplaza y las filas se ajustan (la ventana pide 760 × 560 como mínimo).
 - Sin animaciones.
-- **Pendiente:** con contraste alto de Windows la ventana todavía usa sus propios colores; se probará en la VM y se ajustará.
+- **Contraste alto.** Con el contraste alto de Windows activado la ventana usa `gui/Themes/HighContrast.xaml`, sea cual sea el tema elegido: cada token es un color del esquema de Windows (`SystemColors` como recurso dinámico, así pasar de un tema de contraste alto a otro llega a la ventana abierta). Texto, bordes y separadores toman el color de texto de la ventana; la acción principal, la de peligro y la sección actual de la navegación, el color de selección con su texto; lo deshabilitado, el gris de Windows. Los fondos que solo sombrean (encima, fichas, avisos) toman el color de la ventana, y el token `Outline` les dibuja un borde (transparente en claro y oscuro). Activarlo o desactivarlo con la ventana abierta la vuelve a abrir en la misma sección, cuando nada está cambiando y no hay un diálogo abierto. El selector de tema queda deshabilitado con el motivo al lado y la elección se conserva para cuando se desactive. Fuera de los temas no hay colores fijos (una prueba lo exige). Falta probarlo en la VM con Narrador.
 
 ### 17.9 Casos límite
 
@@ -972,4 +972,4 @@ Contraste medido en claro: texto 17,2:1, secundario 6,7:1, acento 6,3:1, fichas 
 
 ### 17.10 Pruebas
 
-Pester sobre `gui/GuiCore.ps1` (argumentos de cada comando, lectura de documentos y de errores con cada `reason`, traducción a mensaje y acción, registro y su rotación, formato de tamaños), el XAML (es XML válido, carga en un proceso `-STA`, cada `x:Name` que usa `GuiWindow.ps1` existe, no hay `x:Code` ni eventos con nombre), los temas (las mismas claves en los dos) y los textos (`gui.*` en es y en). Manual en la VM: cada sección como usuario estándar y como administrador, un UAC rechazado, tema oscuro y contraste alto, Narrador, 200 % de escala, cerrar con algo en curso.
+Pester sobre `gui/GuiCore.ps1` (argumentos de cada comando, lectura de documentos y de errores con cada `reason`, traducción a mensaje y acción, registro y su rotación, formato de tamaños), el XAML (es XML válido, carga en un proceso `-STA`, cada `x:Name` que usa `GuiWindow.ps1` existe, no hay `x:Code` ni eventos con nombre), los temas (las mismas claves en los tres, el de contraste alto solo con colores de Windows y ningún color fijo fuera de los temas) y los textos (`gui.*` en es y en). Manual en la VM: cada sección como usuario estándar y como administrador, un UAC rechazado, tema oscuro y contraste alto, Narrador, 200 % de escala, cerrar con algo en curso.
