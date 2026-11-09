@@ -966,6 +966,7 @@ Contraste medido en claro: texto 17,2:1, secundario 6,7:1, acento 6,3:1, fichas 
 - **Sin datos:** cada lista vacía dice qué es, por qué está vacía y cómo empezar (hoja de estados de la maqueta).
 - **Textos largos:** títulos y nombres se ajustan en dos líneas y luego cortan con "…" y la información completa en el tooltip; ids y rutas en una línea con desplazamiento.
 - **Inglés:** los textos en inglés son hasta 30 % más largos o más cortos: ningún ancho fijo depende del texto.
+- **Pantallas bajas:** la ventana pide 1200 × 820, pero nunca abre más grande que el área de trabajo de su pantalla (sin la barra de tareas) menos un margen de 16, centrada en la pantalla del puntero (`Get-TuneupGuiWindowPlacement`, al crear la ventana, en píxeles independientes del dispositivo). Así la barra de título y sus botones, maximizar incluido, quedan siempre a la vista: en un portátil de 1280 × 800 el área tiene unos 752 de alto y la ventana abre con 720. El tamaño mínimo (760 × 560) baja si la pantalla es más chica. Al volver a abrirse por un cambio de idioma, de tema o de contraste alto, conserva el lugar, el tamaño y si estaba maximizada.
 - **Muchos elementos:** las listas se dibujan completas (Arranque tiene 102 entradas en el equipo de prueba y abre sin demora); filtros por pestañas para no recorrerlas enteras.
 - **Windows no soportado o catálogo con errores:** Optimizar y Estado muestran el `error` del motor; el resto de las secciones sigue.
 - **Sin `tuneup.ps1` junto a `gui.ps1`:** la ventana no abre y dice dónde lo buscó.

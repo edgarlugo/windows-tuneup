@@ -52,12 +52,12 @@ if (-not [System.IO.File]::Exists($engine)) {
 $exitCode = 0
 try {
     Write-TuneupGuiLog -Level INFO -Text (Get-TuneupGuiText -Key 'gui.log.open' -Format $(if (Test-TuneupGuiAdmin) { Get-TuneupGuiText -Key 'gui.header.admin' } else { Get-TuneupGuiText -Key 'gui.header.notAdmin' }))
-    $next = [pscustomobject]@{ Lang = $settings.lang; Section = $Section }
-    # A change of language closes the window and opens it again in the same section.
+    $next = [pscustomobject]@{ Lang = $settings.lang; Section = $Section; Placement = $null }
+    # A change of language closes the window and opens it again in the same section, place and size.
     while ($null -ne $next) {
         Initialize-TuneupGuiText -Lang $next.Lang
         $settings.lang = Get-TuneupGuiLang
-        $next = Show-TuneupGui -Section $next.Section -Settings $settings
+        $next = Show-TuneupGui -Section $next.Section -Settings $settings -Placement $next.Placement
     }
 } catch {
     $exitCode = 1

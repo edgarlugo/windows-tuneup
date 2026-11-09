@@ -369,6 +369,32 @@ function Get-TuneupGuiTheme {
     'light'
 }
 
+# Where the window opens, in device-independent pixels, inside the work area of its screen (without the
+# taskbar): the size it asks for (the design's 1200 x 820, or the size it had before it opened again),
+# never larger than that area less a margin, so the title bar with its buttons is always on the screen (a
+# 1280 x 800 laptop has about 750 high). The place it had stays when the whole window still fits there;
+# otherwise it is centered. The minimum size never goes past the area either.
+function Get-TuneupGuiWindowPlacement {
+    param(
+        [Parameter(Mandatory)][double]$AreaLeft, [Parameter(Mandatory)][double]$AreaTop,
+        [Parameter(Mandatory)][double]$AreaWidth, [Parameter(Mandatory)][double]$AreaHeight,
+        [double]$Width = 1200, [double]$Height = 820, [double]$Left = [double]::NaN, [double]$Top = [double]::NaN,
+        [double]$MinWidth = 760, [double]$MinHeight = 560, [double]$Margin = 16
+    )
+    $fitWidth = [Math]::Floor([Math]::Min($Width, [Math]::Max($AreaWidth - 2 * $Margin, 1)))
+    $fitHeight = [Math]::Floor([Math]::Min($Height, [Math]::Max($AreaHeight - 2 * $Margin, 1)))
+    $fits = -not ([double]::IsNaN($Left) -or [double]::IsNaN($Top)) -and $Left -ge $AreaLeft -and $Top -ge $AreaTop -and
+        ($Left + $fitWidth) -le ($AreaLeft + $AreaWidth) -and ($Top + $fitHeight) -le ($AreaTop + $AreaHeight)
+    if (-not $fits) {
+        $Left = $AreaLeft + [Math]::Floor(($AreaWidth - $fitWidth) / 2)
+        $Top = $AreaTop + [Math]::Floor(($AreaHeight - $fitHeight) / 2)
+    }
+    [pscustomobject]@{
+        Left = $Left; Top = $Top; Width = $fitWidth; Height = $fitHeight
+        MinWidth = [Math]::Min($MinWidth, $fitWidth); MinHeight = [Math]::Min($MinHeight, $fitHeight)
+    }
+}
+
 function Test-TuneupGuiAdmin {
     $principal = New-Object Security.Principal.WindowsPrincipal -ArgumentList ([Security.Principal.WindowsIdentity]::GetCurrent())
     $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
