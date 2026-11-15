@@ -188,7 +188,45 @@ Describe 'Settings of the window' {
     }
 }
 
+Describe 'Place of the window' {
+    It 'opens with the size of the design, centered, when the screen has room' {
+        $fit = Get-TuneupGuiWindowPlacement -AreaLeft 0 -AreaTop 0 -AreaWidth 1920 -AreaHeight 1032
+        "$($fit.Left),$($fit.Top),$($fit.Width),$($fit.Height)" | Should -Be '360,106,1200,820'
+        "$($fit.MinWidth),$($fit.MinHeight)" | Should -Be '760,560'
+    }
+
+    It 'fits inside a screen lower than the design, so the title bar and its buttons are visible' {
+        # A 1280 x 800 laptop: 752 high without the taskbar.
+        $fit = Get-TuneupGuiWindowPlacement -AreaLeft 0 -AreaTop 0 -AreaWidth 1280 -AreaHeight 752
+        "$($fit.Left),$($fit.Top),$($fit.Width),$($fit.Height)" | Should -Be '40,16,1200,720'
+        $fit.Top | Should -BeGreaterOrEqual 0
+        ($fit.Top + $fit.Height) | Should -BeLessOrEqual 752
+    }
+
+    It 'lowers the minimum size on a screen smaller than it' {
+        $fit = Get-TuneupGuiWindowPlacement -AreaLeft 0 -AreaTop 0 -AreaWidth 1024 -AreaHeight 560
+        "$($fit.Width),$($fit.Height),$($fit.MinWidth),$($fit.MinHeight)" | Should -Be '992,528,760,528'
+    }
+
+    It 'fits in a screen that does not start at zero, as a second monitor' {
+        $fit = Get-TuneupGuiWindowPlacement -AreaLeft -1280 -AreaTop 200 -AreaWidth 1280 -AreaHeight 752
+        "$($fit.Left),$($fit.Top)" | Should -Be '-1240,216'
+    }
+
+    It 'keeps the place and size of the window it replaces when they fit, and centers it when not' {
+        $kept = Get-TuneupGuiWindowPlacement -AreaLeft 0 -AreaTop 0 -AreaWidth 1920 -AreaHeight 1032 -Left 100 -Top 50 -Width 900 -Height 700
+        "$($kept.Left),$($kept.Top),$($kept.Width),$($kept.Height)" | Should -Be '100,50,900,700'
+        $moved = Get-TuneupGuiWindowPlacement -AreaLeft 0 -AreaTop 0 -AreaWidth 1280 -AreaHeight 752 -Left 1000 -Top 50 -Width 900 -Height 700
+        "$($moved.Left),$($moved.Top),$($moved.Width),$($moved.Height)" | Should -Be '190,26,900,700'
+    }
+}
+
 Describe 'gui/MainWindow.xaml' {
+    It 'leaves the place of the window to the code, which fits it to the screen' {
+        $Xaml | Should -Match 'WindowStartupLocation="Manual"'
+        $WindowCode | Should -Match 'Add_SourceInitialized\(\{ Set-GuiWindowPlacement'
+    }
+
     It 'is XML with no code inside and no handlers by name' {
         { [xml]$Xaml } | Should -Not -Throw
         $Xaml | Should -Not -Match 'x:Code'
@@ -251,6 +289,22 @@ foreach ($pair in @(@('Text', 'WindowTextColor'), @('Bg', 'WindowColor'), @('Acc
     $system = [System.Windows.SystemColors]::($pair[1])
     if ($color -ne $system) { throw "$($pair[0]) is $color, not $system" }
 }
+# The place: inside the screens, and the place, size and maximized state of the window it replaces.
+$window = Import-GuiWindow -Theme 'light'
+[void](New-Object System.Windows.Interop.WindowInteropHelper -ArgumentList $window).EnsureHandle()
+Set-GuiWindowPlacement -Window $window -Previous $null
+if ($window.Top -lt [System.Windows.SystemParameters]::VirtualScreenTop -or
+    ($window.Top + $window.Height) -gt ([System.Windows.SystemParameters]::VirtualScreenTop + [System.Windows.SystemParameters]::VirtualScreenHeight)) {
+    throw "the window ($($window.Top), $($window.Height) high) does not fit the screens"
+}
+$area = [System.Windows.SystemParameters]::WorkArea
+$previous = [pscustomobject]@{ Left = $area.Left + 20; Top = $area.Top + 20; Width = [Math]::Floor($area.Width / 2); Height = [Math]::Floor($area.Height / 2); Maximized = $true }
+$window = Import-GuiWindow -Theme 'light'
+[void](New-Object System.Windows.Interop.WindowInteropHelper -ArgumentList $window).EnsureHandle()
+Set-GuiWindowPlacement -Window $window -Previous $previous
+$got = "$($window.Left),$($window.Top),$($window.Width),$($window.Height),$($window.WindowState)"
+$want = "$($previous.Left),$($previous.Top),$($previous.Width),$($previous.Height),Maximized"
+if ($got -ne $want) { throw "reopened at $got, not $want" }
 'loaded'
 '@
         [System.IO.File]::WriteAllText($script, $code)
